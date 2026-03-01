@@ -23,5 +23,7 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/queue", queueRoutes);
+app.use("/auth", authRoutes);
+app.use("/queue", queueRoutes);
 
 module.exports = app;
