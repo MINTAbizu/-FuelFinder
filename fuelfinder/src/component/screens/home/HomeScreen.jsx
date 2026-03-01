@@ -76,9 +76,36 @@ const IMPORTANT_NOTICES = [
 const fetchStations = async () => {
   await new Promise((res) => setTimeout(res, 500));
   return [
-    { id: 1, name: "Total Station", latitude: 8.9806, longitude: 38.7578, fuel_status: "available", queue_length: 5, image: "https://example.com/total.jpg" },
-    { id: 2, name: "Oil Libya", latitude: 8.998, longitude: 38.788, fuel_status: "available", queue_length: 12, image: "https://example.com/libya.jpg" },
-    { id: 3, name: "NP Station", latitude: 8.985, longitude: 38.765, fuel_status: "limited", queue_length: 20, image: "https://example.com/np.jpg" },
+    {
+      id: 1,
+      stationId: "65f0c8a1b02d6a5e9f410001",
+      name: "Total Station",
+      latitude: 8.9806,
+      longitude: 38.7578,
+      fuel_status: "available",
+      queue_length: 5,
+      image: "https://example.com/total.jpg",
+    },
+    {
+      id: 2,
+      stationId: "65f0c8a1b02d6a5e9f410002",
+      name: "Oil Libya",
+      latitude: 8.998,
+      longitude: 38.788,
+      fuel_status: "available",
+      queue_length: 12,
+      image: "https://example.com/libya.jpg",
+    },
+    {
+      id: 3,
+      stationId: "65f0c8a1b02d6a5e9f410003",
+      name: "NP Station",
+      latitude: 8.985,
+      longitude: 38.765,
+      fuel_status: "limited",
+      queue_length: 20,
+      image: "https://example.com/np.jpg",
+    },
   ];
 };
 

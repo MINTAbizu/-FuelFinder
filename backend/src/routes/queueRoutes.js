@@ -8,6 +8,7 @@ router.post("/reserve", auth, queueController.reserveQueueSlot);
 router.post("/payments/telebirr/auth-token", auth, queueController.exchangeTelebirrAuthToken);
 router.post("/payments/telebirr/initiate", auth, queueController.startTelebirrCheckout);
 router.post("/payments/telebirr/webhook", queueController.handleTelebirrWebhook);
+router.get("/reservation/:reservationId", auth, queueController.getMyReservationStatus);
 router.post("/confirm-payment", auth, queueController.confirmReservationPayment);
 router.post("/join", auth, queueController.joinQueue);
 router.get("/me/:stationId", auth, queueController.getMyTicket);

@@ -332,7 +332,14 @@ exports.startTelebirrCheckout = async (req, res) => {
       gatewayResponse: checkout.gatewayResponse
     });
   } catch (error) {
-    return res.status(500).json({ message: "Failed to start Telebirr checkout." });
+    console.error("[Telebirr:startTelebirrCheckout]", {
+      message: error?.message,
+      stack: error?.stack
+    });
+    return res.status(500).json({
+      message: "Failed to start Telebirr checkout.",
+      ...(process.env.NODE_ENV !== "production" ? { detail: error?.message || "unknown error" } : {})
+    });
   }
 };
 
@@ -346,6 +353,10 @@ exports.exchangeTelebirrAuthToken = async (req, res) => {
     const result = await requestAuthToken(appToken);
     return res.json(result);
   } catch (error) {
+    console.error("[Telebirr:exchangeAuthToken]", {
+      message: error?.message,
+      stack: error?.stack
+    });
     return res.status(500).json({ message: "Failed to exchange Telebirr auth token." });
   }
 };
@@ -395,7 +406,51 @@ exports.handleTelebirrWebhook = async (req, res) => {
 
     return res.json({ ok: true, message: "Webhook received." });
   } catch (error) {
+    console.error("[Telebirr:webhook]", {
+      message: error?.message,
+      stack: error?.stack
+    });
     return res.status(500).json({ message: "Failed to process Telebirr webhook." });
+  }
+};
+
+exports.getMyReservationStatus = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { reservationId } = req.params;
+
+    if (!isObjectId(userId) || !isObjectId(reservationId)) {
+      return res.status(400).json({ message: "Invalid userId or reservationId." });
+    }
+
+    const ticket = await QueueTicket.findOne({
+      _id: reservationId,
+      userId
+    });
+    if (!ticket) {
+      return res.status(404).json({ message: "Reservation not found." });
+    }
+
+    await expireStaleTickets(ticket.stationId);
+    const freshTicket = await QueueTicket.findById(ticket._id);
+    if (!freshTicket) {
+      return res.status(404).json({ message: "Reservation not found." });
+    }
+
+    return res.json({
+      reservationId: freshTicket._id,
+      stationId: freshTicket.stationId,
+      status: freshTicket.status,
+      position: freshTicket.position,
+      paymentProvider: freshTicket.paymentProvider,
+      paymentSessionId: freshTicket.paymentSessionId,
+      paymentReference: freshTicket.paymentReference,
+      depositStatus: freshTicket.depositStatus,
+      paymentExpiresAt: freshTicket.paymentExpiresAt,
+      depositPaidAt: freshTicket.depositPaidAt
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to load reservation status." });
   }
 };
 

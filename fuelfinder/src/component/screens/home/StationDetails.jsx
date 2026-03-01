@@ -1,5 +1,6 @@
-import React, { useMemo } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { getMyQueueTicket, getReservationStatus, leaveQueue, reserveQueueSlot, startTelebirrCheckout } from "../../services/queueService";
 
 const statusMap = {
   available: "Full",
@@ -18,9 +19,42 @@ const fallbackReviews = [
 ];
 
 const getWaitEstimate = (queueLength) => Math.max(2, Number(queueLength || 0) * 3);
+const REQUESTED_BANDS = ["10-20", "20-40", "40+"];
+const FUEL_TYPES = ["gasoline", "diesel", "other"];
+
+function isObjectId(value) {
+  return /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
+}
+
+function logReservationError(scope, error) {
+  const status = error?.response?.status;
+  const data = error?.response?.data;
+  const message = error?.message;
+  console.error(`[Reservation:${scope}]`, {
+    status,
+    message,
+    data,
+  });
+}
 
 export default function StationDetails({ route }) {
   const { station } = route.params || {};
+  const [requestedBand, setRequestedBand] = useState("10-20");
+  const [fuelType, setFuelType] = useState("gasoline");
+  const [reservationId, setReservationId] = useState("");
+  const [prepayId, setPrepayId] = useState("");
+  const [rawRequest, setRawRequest] = useState("");
+  const [myTicket, setMyTicket] = useState(null);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [paymentPhase, setPaymentPhase] = useState("idle");
+  const pollRef = useRef(null);
+
+  const stationId = useMemo(
+    () => String(station?.stationId || station?._id || station?.id || "").trim(),
+    [station]
+  );
+  const queueEnabled = isObjectId(stationId);
 
   const detail = useMemo(() => {
     const queue = Number(station?.queue_length || 0);
@@ -44,6 +78,147 @@ export default function StationDetails({ route }) {
     };
   }, [station]);
 
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
+  const refreshMyTicket = useCallback(async () => {
+    if (!queueEnabled) return;
+    setLoading(true);
+    try {
+      const ticket = await getMyQueueTicket(stationId);
+      setMyTicket(ticket);
+      setMessage("Active queue ticket loaded.");
+    } catch (error) {
+      logReservationError("refreshMyTicket", error);
+      setMyTicket(null);
+      setMessage(error?.response?.data?.message || "No active ticket.");
+    } finally {
+      setLoading(false);
+    }
+  }, [queueEnabled, stationId]);
+
+  const pollReservation = useCallback(
+    async (nextReservationId, immediate = false) => {
+      if (!nextReservationId) return;
+      if (pollRef.current) clearInterval(pollRef.current);
+
+      const runPoll = async () => {
+        try {
+          const status = await getReservationStatus(nextReservationId);
+          if (status.status === "waiting" || status.status === "called") {
+            setMyTicket({
+              ticketId: String(status.reservationId),
+              status: status.status,
+              position: status.position,
+              etaMinutes: Number(status.position || 0) * 3,
+            });
+            setPaymentPhase("verified");
+            setMessage("Payment verified. Your queue ticket is now active.");
+            if (pollRef.current) clearInterval(pollRef.current);
+            return;
+          }
+          if (status.status === "expired") {
+            setPaymentPhase("expired");
+            setMessage("Reservation expired before payment confirmation.");
+            if (pollRef.current) clearInterval(pollRef.current);
+          }
+        } catch (_error) {
+          logReservationError("pollReservation", _error);
+          // Silent retry while polling.
+        }
+      };
+
+      if (immediate) await runPoll();
+
+      let attempts = 0;
+      pollRef.current = setInterval(async () => {
+        attempts += 1;
+        await runPoll();
+        if (attempts >= 30 && pollRef.current) {
+          clearInterval(pollRef.current);
+          setPaymentPhase("pending");
+          setMessage("Waiting for payment confirmation. Tap Check Payment Status.");
+        }
+      }, 4000);
+    },
+    []
+  );
+
+  const reserveAndInitiate = useCallback(async () => {
+    if (!queueEnabled) {
+      Alert.alert("Station ID Missing", "This station does not have a valid backend stationId.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+    setPaymentPhase("reserving");
+    try {
+      const reserve = await reserveQueueSlot({
+        stationId,
+        requestedBand,
+        fuelType,
+      });
+
+      const nextReservationId = String(reserve?.reservationId || "");
+      setReservationId(nextReservationId);
+      setPaymentPhase("initiating");
+
+      const initiate = await startTelebirrCheckout(nextReservationId);
+      setPrepayId(initiate?.prepayId || "");
+      setRawRequest(initiate?.rawRequest || "");
+      setPaymentPhase("pending");
+      setMessage("Payment initiated. Complete payment in Telebirr, then status will update.");
+      await pollReservation(nextReservationId, true);
+    } catch (error) {
+      logReservationError("reserveAndInitiate", error);
+      setPaymentPhase("failed");
+      setMessage(error?.response?.data?.message || "Failed to start payment.");
+    } finally {
+      setLoading(false);
+    }
+  }, [fuelType, pollReservation, queueEnabled, requestedBand, stationId]);
+
+  const checkReservationNow = useCallback(async () => {
+    if (!reservationId) {
+      Alert.alert("Missing Reservation", "Start a reservation first.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await pollReservation(reservationId, true);
+    } finally {
+      setLoading(false);
+    }
+  }, [pollReservation, reservationId]);
+
+  const leaveMyQueue = useCallback(async () => {
+    const ticketId = myTicket?.ticketId;
+    if (!ticketId) {
+      Alert.alert("No Ticket", "No active ticket found.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await leaveQueue(ticketId);
+      setMyTicket(null);
+      setReservationId("");
+      setPrepayId("");
+      setRawRequest("");
+      setPaymentPhase("idle");
+      setMessage("You left the queue.");
+      if (pollRef.current) clearInterval(pollRef.current);
+    } catch (error) {
+      logReservationError("leaveMyQueue", error);
+      setMessage(error?.response?.data?.message || "Failed to leave queue.");
+    } finally {
+      setLoading(false);
+    }
+  }, [myTicket]);
+
   const getStatusStyle = () => {
     if (detail.fuelStatus === "Full") return styles.statusFull;
     if (detail.fuelStatus === "Partial") return styles.statusPartial;
@@ -56,6 +231,7 @@ export default function StationDetails({ route }) {
         <Text style={styles.stationName}>{detail.name}</Text>
         <Text style={styles.metaText}>Address: {detail.address}</Text>
         <Text style={styles.metaText}>Contact: {detail.contact}</Text>
+        <Text style={styles.metaText}>Station ID: {stationId || "N/A"}</Text>
       </View>
 
       <View style={styles.card}>
@@ -64,6 +240,94 @@ export default function StationDetails({ route }) {
         <Text style={styles.sectionTitle}>Queue & Wait</Text>
         <Text style={styles.metaText}>Queue Length: {detail.queueLength} cars</Text>
         <Text style={styles.metaText}>Estimated Wait: {detail.waitTime} min</Text>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Queue Reservation & Payment</Text>
+        {!queueEnabled ? (
+          <Text style={styles.errorText}>
+            This station lacks a valid backend ObjectId. Update station data before queueing.
+          </Text>
+        ) : null}
+
+        <Text style={styles.metaText}>Requested Band</Text>
+        <View style={styles.optionsRow}>
+          {REQUESTED_BANDS.map((band) => (
+            <Pressable
+              key={band}
+              style={[styles.optionButton, requestedBand === band && styles.optionButtonActive]}
+              onPress={() => setRequestedBand(band)}
+            >
+              <Text style={[styles.optionText, requestedBand === band && styles.optionTextActive]}>
+                {band}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <Text style={styles.metaText}>Fuel Type</Text>
+        <View style={styles.optionsRow}>
+          {FUEL_TYPES.map((type) => (
+            <Pressable
+              key={type}
+              style={[styles.optionButton, fuelType === type && styles.optionButtonActive]}
+              onPress={() => setFuelType(type)}
+            >
+              <Text style={[styles.optionText, fuelType === type && styles.optionTextActive]}>
+                {type}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <Pressable
+          style={[styles.actionButton, styles.primaryButton, (!queueEnabled || loading) && styles.disabled]}
+          onPress={reserveAndInitiate}
+          disabled={!queueEnabled || loading}
+        >
+          <Text style={styles.primaryButtonText}>Reserve & Pay with Telebirr</Text>
+        </Pressable>
+
+        <Pressable
+          style={[styles.actionButton, styles.secondaryButton, loading && styles.disabled]}
+          onPress={checkReservationNow}
+          disabled={loading || !reservationId}
+        >
+          <Text style={styles.secondaryButtonText}>Check Payment Status</Text>
+        </Pressable>
+
+        <Pressable
+          style={[styles.actionButton, styles.infoButton, loading && styles.disabled]}
+          onPress={refreshMyTicket}
+          disabled={loading}
+        >
+          <Text style={styles.primaryButtonText}>Refresh My Ticket</Text>
+        </Pressable>
+
+        <Pressable
+          style={[styles.actionButton, styles.dangerButton, loading && styles.disabled]}
+          onPress={leaveMyQueue}
+          disabled={loading}
+        >
+          <Text style={styles.primaryButtonText}>Leave Queue</Text>
+        </Pressable>
+
+        {loading ? <ActivityIndicator size="small" color="#0F766E" style={styles.loader} /> : null}
+        <Text style={styles.metaText}>phase: {paymentPhase}</Text>
+        <Text style={styles.metaText}>reservationId: {reservationId || "-"}</Text>
+        <Text style={styles.metaText}>prepayId: {prepayId || "-"}</Text>
+        <Text style={styles.metaText}>rawRequest: {rawRequest || "-"}</Text>
+        {message ? <Text style={styles.infoText}>{message}</Text> : null}
+
+        {myTicket ? (
+          <View style={styles.ticketCard}>
+            <Text style={styles.ticketTitle}>My Active Ticket</Text>
+            <Text style={styles.metaText}>ticketId: {String(myTicket.ticketId || "-")}</Text>
+            <Text style={styles.metaText}>status: {String(myTicket.status || "-")}</Text>
+            <Text style={styles.metaText}>position: {String(myTicket.position ?? "-")}</Text>
+            <Text style={styles.metaText}>etaMinutes: {String(myTicket.etaMinutes ?? "-")}</Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.card}>
@@ -88,27 +352,6 @@ export default function StationDetails({ route }) {
           </View>
         ))}
       </View>
-
-      <Pressable
-        style={[styles.actionButton, styles.primaryButton]}
-        onPress={() => Alert.alert("Report", "Open report form for queue/fuel status.")}
-      >
-        <Text style={styles.primaryButtonText}>Report Queue / Fuel Status</Text>
-      </Pressable>
-
-      <Pressable
-        style={[styles.actionButton, styles.secondaryButton]}
-        onPress={() => Alert.alert("Alert Set", "You will be notified for status changes.")}
-      >
-        <Text style={styles.secondaryButtonText}>Set Alert</Text>
-      </Pressable>
-
-      <Pressable
-        style={[styles.actionButton, styles.premiumButton]}
-        onPress={() => Alert.alert("Premium", "Pre-book fuel slot is a premium feature.")}
-      >
-        <Text style={styles.primaryButtonText}>Pre-book Fuel Slot (Premium)</Text>
-      </Pressable>
     </ScrollView>
   );
 }
@@ -143,7 +386,7 @@ const styles = StyleSheet.create({
   listTitle: { fontSize: 13, fontWeight: "800", color: "#0F172A", marginBottom: 2 },
   listSub: { fontSize: 12, color: "#475569", fontWeight: "600" },
   actionButton: {
-    height: 46,
+    height: 44,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
@@ -151,7 +394,44 @@ const styles = StyleSheet.create({
   },
   primaryButton: { backgroundColor: "#0F766E" },
   secondaryButton: { backgroundColor: "#DBEAFE", borderWidth: 1, borderColor: "#1D4ED8" },
-  premiumButton: { backgroundColor: "#7C3AED" },
+  infoButton: { backgroundColor: "#0EA5E9" },
+  dangerButton: { backgroundColor: "#B91C1C" },
   primaryButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
   secondaryButtonText: { color: "#1D4ED8", fontSize: 13, fontWeight: "800" },
+  disabled: { opacity: 0.55 },
+  loader: { marginTop: 4, marginBottom: 4 },
+  infoText: { fontSize: 12, color: "#0F766E", fontWeight: "700", marginBottom: 6 },
+  errorText: { fontSize: 12, color: "#B91C1C", fontWeight: "700", marginBottom: 8 },
+  optionsRow: { flexDirection: "row", flexWrap: "wrap", marginBottom: 8 },
+  optionButton: {
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginRight: 8,
+    marginBottom: 8,
+    backgroundColor: "#F8FAFC",
+  },
+  optionButtonActive: {
+    borderColor: "#0F766E",
+    backgroundColor: "#D1FAE5",
+  },
+  optionText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#334155",
+  },
+  optionTextActive: {
+    color: "#065F46",
+  },
+  ticketCard: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#D1FAE5",
+    backgroundColor: "#ECFDF5",
+    borderRadius: 10,
+    padding: 8,
+  },
+  ticketTitle: { fontSize: 13, fontWeight: "900", color: "#065F46", marginBottom: 4 },
 });

@@ -56,6 +56,9 @@ Telebirr env vars:
 - `TELEBIRR_SUBJECT` (optional)
 - `TELEBIRR_WEBHOOK_SECRET` (recommended)
 
+Quick flow test (reserve -> auth-token -> initiate):
+`npm run telebirr:flow -- --baseUrl=https://fuelfinder-2.onrender.com --bearer=<ACCESS_TOKEN> --stationId=<STATION_ID> --authToken=<TELEBIRR_APP_TOKEN> --requestedBand=10-20 --fuelType=gasoline`
+
 ## Auth
 Protected endpoints use:
 - `Authorization: Bearer <accessToken>`

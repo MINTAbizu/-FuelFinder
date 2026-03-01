@@ -15,6 +15,11 @@ export async function exchangeTelebirrAuthToken(authToken) {
   return data;
 }
 
+export async function getReservationStatus(reservationId) {
+  const { data } = await api.get(`/queue/reservation/${reservationId}`);
+  return data;
+}
+
 export async function confirmQueuePayment(payload) {
   const { data } = await api.post("/queue/confirm-payment", payload);
   return data;
