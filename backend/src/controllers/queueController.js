@@ -2,8 +2,15 @@ const mongoose = require("mongoose");
 const QueueTicket = require("../models/QueueTicket");
 const { getIO } = require("../socket");
 
-const ACTIVE_STATUSES = ["waiting", "called"];
+const ACTIVE_STATUSES = ["pending_payment", "waiting", "called"];
 const AVERAGE_MINUTES_PER_CAR = 3;
+const PAYMENT_WINDOW_MINUTES = 10;
+const CALL_WINDOW_MINUTES = 5;
+const RESERVATION_BAND_DEPOSITS = {
+  "10-20": 100,
+  "20-40": 200,
+  "40+": 300
+};
 
 function stationRoom(stationId) {
   return `station:${stationId}`;
@@ -46,6 +53,114 @@ async function recalculatePositions(stationId) {
   }
 }
 
+async function expireStaleTickets(stationId) {
+  const now = new Date();
+  const filter = stationId ? { stationId } : {};
+
+  await QueueTicket.updateMany(
+    {
+      ...filter,
+      status: "pending_payment",
+      paymentExpiresAt: { $lte: now }
+    },
+    {
+      $set: {
+        status: "expired"
+      }
+    }
+  );
+
+  await QueueTicket.updateMany(
+    {
+      ...filter,
+      status: "called",
+      expiresAt: { $lte: now }
+    },
+    {
+      $set: {
+        status: "expired",
+        depositStatus: "forfeited"
+      }
+    }
+  );
+}
+
+function resolveRequestedBand(value) {
+  const band = String(value || "").trim();
+  if (Object.prototype.hasOwnProperty.call(RESERVATION_BAND_DEPOSITS, band)) return band;
+  return null;
+}
+
+function resolveFuelType(value) {
+  const fuelType = String(value || "").trim().toLowerCase();
+  if (!fuelType) return "gasoline";
+  if (["gasoline", "diesel", "other"].includes(fuelType)) return fuelType;
+  return null;
+}
+
+exports.reserveQueueSlot = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { stationId } = req.body;
+    const requestedBand = resolveRequestedBand(req.body.requestedBand);
+    const fuelType = resolveFuelType(req.body.fuelType);
+
+    if (!isObjectId(userId) || !isObjectId(stationId)) {
+      return res.status(400).json({ message: "Invalid userId or stationId." });
+    }
+    if (!requestedBand) {
+      return res.status(400).json({ message: "requestedBand must be one of: 10-20, 20-40, 40+." });
+    }
+    if (!fuelType) {
+      return res.status(400).json({ message: "fuelType must be one of: gasoline, diesel, other." });
+    }
+
+    await expireStaleTickets(stationId);
+
+    const existing = await QueueTicket.findOne({
+      userId,
+      stationId,
+      status: { $in: ACTIVE_STATUSES }
+    });
+    if (existing) {
+      return res.status(409).json({
+        message: "You already have an active reservation/ticket for this station.",
+        ticketId: existing._id,
+        status: existing.status,
+        position: existing.position
+      });
+    }
+
+    const depositAmount = RESERVATION_BAND_DEPOSITS[requestedBand];
+    const paymentExpiresAt = new Date(Date.now() + PAYMENT_WINDOW_MINUTES * 60 * 1000);
+
+    const ticket = await QueueTicket.create({
+      userId,
+      stationId,
+      status: "pending_payment",
+      position: 0,
+      fuelType,
+      requestedBand,
+      depositAmount,
+      depositStatus: depositAmount > 0 ? "pending" : "not_required",
+      paymentExpiresAt
+    });
+
+    return res.status(201).json({
+      reservationId: ticket._id,
+      stationId,
+      status: ticket.status,
+      requestedBand: ticket.requestedBand,
+      fuelType: ticket.fuelType,
+      depositAmount: ticket.depositAmount,
+      depositCurrency: ticket.depositCurrency,
+      paymentExpiresAt: ticket.paymentExpiresAt
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to reserve queue slot." });
+  }
+};
+
 exports.joinQueue = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -54,6 +169,8 @@ exports.joinQueue = async (req, res) => {
     if (!isObjectId(userId) || !isObjectId(stationId)) {
       return res.status(400).json({ message: "Invalid userId or stationId." });
     }
+
+    await expireStaleTickets(stationId);
 
     const existing = await QueueTicket.findOne({
       userId,
@@ -78,7 +195,8 @@ exports.joinQueue = async (req, res) => {
       userId,
       stationId,
       status: "waiting",
-      position
+      position,
+      depositStatus: "not_required"
     });
 
     const etaMinutes = position * AVERAGE_MINUTES_PER_CAR;
@@ -92,7 +210,65 @@ exports.joinQueue = async (req, res) => {
       etaMinutes
     });
   } catch (error) {
-    return res.status(500).json({ message: "Failed to join queue.", error: error.message });
+    return res.status(500).json({ message: "Failed to join queue." });
+  }
+};
+
+exports.confirmReservationPayment = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { reservationId, paymentReference } = req.body;
+
+    if (!isObjectId(userId) || !isObjectId(reservationId)) {
+      return res.status(400).json({ message: "Invalid userId or reservationId." });
+    }
+
+    const paymentRef = String(paymentReference || "").trim();
+    if (!paymentRef) {
+      return res.status(400).json({ message: "paymentReference is required." });
+    }
+
+    const ticket = await QueueTicket.findOne({
+      _id: reservationId,
+      userId,
+      status: "pending_payment"
+    });
+    if (!ticket) {
+      return res.status(404).json({ message: "Pending reservation not found." });
+    }
+
+    if (ticket.paymentExpiresAt && ticket.paymentExpiresAt <= new Date()) {
+      ticket.status = "expired";
+      await ticket.save();
+      return res.status(410).json({ message: "Reservation payment window expired." });
+    }
+
+    const queueCount = await QueueTicket.countDocuments({
+      stationId: ticket.stationId,
+      status: "waiting"
+    });
+
+    ticket.status = "waiting";
+    ticket.position = queueCount + 1;
+    ticket.paymentReference = paymentRef;
+    ticket.depositStatus = ticket.depositAmount > 0 ? "authorized" : "not_required";
+    ticket.depositPaidAt = new Date();
+    ticket.joinedAt = new Date();
+    await ticket.save();
+
+    const etaMinutes = ticket.position * AVERAGE_MINUTES_PER_CAR;
+    emitQueueUpdated(ticket.stationId);
+
+    return res.json({
+      ticketId: ticket._id,
+      stationId: ticket.stationId,
+      status: ticket.status,
+      position: ticket.position,
+      etaMinutes,
+      depositStatus: ticket.depositStatus
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to confirm payment." });
   }
 };
 
@@ -104,6 +280,8 @@ exports.getMyTicket = async (req, res) => {
     if (!isObjectId(userId) || !isObjectId(stationId)) {
       return res.status(400).json({ message: "Invalid userId or stationId." });
     }
+
+    await expireStaleTickets(stationId);
 
     const ticket = await QueueTicket.findOne({
       userId,
@@ -119,10 +297,16 @@ exports.getMyTicket = async (req, res) => {
       stationId: ticket.stationId,
       status: ticket.status,
       position: ticket.position,
-      etaMinutes
+      etaMinutes,
+      requestedBand: ticket.requestedBand,
+      fuelType: ticket.fuelType,
+      depositAmount: ticket.depositAmount,
+      depositCurrency: ticket.depositCurrency,
+      depositStatus: ticket.depositStatus,
+      paymentExpiresAt: ticket.paymentExpiresAt
     });
   } catch (error) {
-    return res.status(500).json({ message: "Failed to load ticket.", error: error.message });
+    return res.status(500).json({ message: "Failed to load ticket." });
   }
 };
 
@@ -143,14 +327,19 @@ exports.leaveQueue = async (req, res) => {
     if (!ticket) return res.status(404).json({ message: "Active ticket not found." });
 
     ticket.status = "cancelled";
+    if (ticket.depositStatus === "authorized") {
+      ticket.depositStatus = "refunded";
+    }
     await ticket.save();
 
-    await recalculatePositions(ticket.stationId);
+    if (ticket.position > 0) {
+      await recalculatePositions(ticket.stationId);
+    }
     emitQueueUpdated(ticket.stationId);
 
     return res.json({ message: "Left queue successfully." });
   } catch (error) {
-    return res.status(500).json({ message: "Failed to leave queue.", error: error.message });
+    return res.status(500).json({ message: "Failed to leave queue." });
   }
 };
 
@@ -160,6 +349,8 @@ exports.nextInQueue = async (req, res) => {
     if (!isObjectId(stationId)) {
       return res.status(400).json({ message: "Invalid stationId." });
     }
+
+    await expireStaleTickets(stationId);
 
     const currentCalled = await QueueTicket.findOne({
       stationId,
@@ -184,7 +375,7 @@ exports.nextInQueue = async (req, res) => {
 
     next.status = "called";
     next.calledAt = new Date();
-    next.expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    next.expiresAt = new Date(Date.now() + CALL_WINDOW_MINUTES * 60 * 1000);
     await next.save();
 
     await recalculatePositions(stationId);
@@ -208,7 +399,7 @@ exports.nextInQueue = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ message: "Failed to call next ticket.", error: error.message });
+    return res.status(500).json({ message: "Failed to call next ticket." });
   }
 };
 
@@ -218,6 +409,8 @@ exports.getStationQueue = async (req, res) => {
     if (!isObjectId(stationId)) {
       return res.status(400).json({ message: "Invalid stationId." });
     }
+
+    await expireStaleTickets(stationId);
 
     const waiting = await QueueTicket.find({
       stationId,
@@ -242,6 +435,6 @@ exports.getStationQueue = async (req, res) => {
       waiting
     });
   } catch (error) {
-    return res.status(500).json({ message: "Failed to load station queue.", error: error.message });
+    return res.status(500).json({ message: "Failed to load station queue." });
   }
 };
