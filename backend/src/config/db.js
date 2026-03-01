@@ -1,9 +1,13 @@
 const mongoose = require("mongoose");
-const MONGODB_URI = process.env.MONGO_URI || "mongodb://localhost:27017/fuelfinder";
+
 async function connectDB() {
-  const uri = MONGODB_URI ;
+  const uri =
+    process.env.MONGODB_URI ||
+    process.env.MONGO_URI ||
+    (process.env.NODE_ENV === "production" ? "" : "mongodb://localhost:27017/fuelfinder");
+
   if (!uri) {
-    throw new Error("MONGODB_URI is missing in environment variables.");
+    throw new Error("MongoDB URI is missing. Set MONGODB_URI (or MONGO_URI).");
   }
 
   await mongoose.connect(uri);
