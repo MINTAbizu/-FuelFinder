@@ -5,6 +5,8 @@ const queueController = require("../controllers/queueController");
 const router = express.Router();
 
 router.post("/reserve", auth, queueController.reserveQueueSlot);
+router.post("/payments/telebirr/initiate", auth, queueController.startTelebirrCheckout);
+router.post("/payments/telebirr/webhook", queueController.handleTelebirrWebhook);
 router.post("/confirm-payment", auth, queueController.confirmReservationPayment);
 router.post("/join", auth, queueController.joinQueue);
 router.get("/me/:stationId", auth, queueController.getMyTicket);
