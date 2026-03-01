@@ -22,10 +22,18 @@ Server runs on `http://localhost:5000` by default.
 - `POST /api/auth/logout` (Bearer token)
 - `GET /api/auth/me` (Bearer token)
 - `POST /api/queue/join`
+- `POST /api/queue/reserve`
+- `POST /api/queue/confirm-payment`
 - `GET /api/queue/me/:stationId`
 - `POST /api/queue/leave`
 - `GET /api/queue/station/:stationId`
 - `POST /api/queue/next`
+
+Queue reservation flow:
+1. `POST /api/queue/reserve` with `stationId`, `requestedBand` (`10-20|20-40|40+`), optional `fuelType`.
+2. Complete payment in client/payment gateway.
+3. `POST /api/queue/confirm-payment` with `reservationId` + `paymentReference`.
+4. Ticket becomes `waiting` and gets a queue `position`.
 
 ## Auth
 Protected endpoints use:
