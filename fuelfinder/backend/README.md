@@ -23,6 +23,7 @@ Server runs on `http://localhost:5000` by default.
 - `GET /api/auth/me` (Bearer token)
 - `POST /api/queue/join`
 - `POST /api/queue/reserve`
+- `POST /api/queue/payments/telebirr/auth-token`
 - `POST /api/queue/payments/telebirr/initiate`
 - `POST /api/queue/payments/telebirr/webhook`
 - `POST /api/queue/confirm-payment`
@@ -33,18 +34,22 @@ Server runs on `http://localhost:5000` by default.
 
 Queue reservation flow:
 1. `POST /api/queue/reserve` with `stationId`, `requestedBand` (`10-20|20-40|40+`), optional `fuelType`.
-2. `POST /api/queue/payments/telebirr/initiate` with `reservationId` to get Telebirr checkout URL.
-3. Complete payment on Telebirr.
-4. Telebirr calls `/api/queue/payments/telebirr/webhook`, reservation moves to `waiting`.
-5. Optional fallback: `POST /api/queue/confirm-payment` with `reservationId` + `paymentReference`.
+2. Optional MiniApp: `POST /api/queue/payments/telebirr/auth-token` with `authToken`.
+3. `POST /api/queue/payments/telebirr/initiate` with `reservationId` to get `prepayId` and `rawRequest`.
+4. Start in-app payment with Telebirr `js_fun_start_pay` using `rawRequest`.
+5. Telebirr calls `/api/queue/payments/telebirr/webhook`, reservation moves to `waiting`.
+6. Optional fallback: `POST /api/queue/confirm-payment` with `reservationId` + `paymentReference`.
 
 Telebirr env vars:
 - `TELEBIRR_BASE_URL`
-- `TELEBIRR_CHECKOUT_PATH` (default `/checkout`)
-- `TELEBIRR_APP_ID`
-- `TELEBIRR_MERCHANT_ID`
-- `TELEBIRR_SHORT_CODE` (optional)
-- `TELEBIRR_API_KEY`
+- `TELEBIRR_FABRIC_TOKEN_PATH` (default `/payment/v1/token`)
+- `TELEBIRR_AUTH_TOKEN_PATH` (default `/payment/v1/auth/authToken`)
+- `TELEBIRR_PRE_ORDER_PATH` (default `/payment/v1/merchant/preOrder`)
+- `TELEBIRR_FABRIC_APP_ID` (or `TELEBIRR_X_APP_KEY`)
+- `TELEBIRR_APP_SECRET`
+- `TELEBIRR_MERCHANT_APP_ID` (merchant appid)
+- `TELEBIRR_MERCHANT_CODE` (merch_code)
+- `TELEBIRR_PRIVATE_KEY` (RSA private key PEM)
 - `TELEBIRR_CALLBACK_URL` (should point to `/api/queue/payments/telebirr/webhook`)
 - `TELEBIRR_RETURN_URL` (optional)
 - `TELEBIRR_RECEIVE_NAME` (optional)

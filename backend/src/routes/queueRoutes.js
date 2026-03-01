@@ -5,6 +5,7 @@ const queueController = require("../controllers/queueController");
 const router = express.Router();
 
 router.post("/reserve", auth, queueController.reserveQueueSlot);
+router.post("/payments/telebirr/auth-token", auth, queueController.exchangeTelebirrAuthToken);
 router.post("/payments/telebirr/initiate", auth, queueController.startTelebirrCheckout);
 router.post("/payments/telebirr/webhook", queueController.handleTelebirrWebhook);
 router.post("/confirm-payment", auth, queueController.confirmReservationPayment);

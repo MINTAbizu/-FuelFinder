@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const QueueTicket = require("../models/QueueTicket");
 const { getIO } = require("../socket");
 const {
+  requestAuthToken,
   createTelebirrCheckout,
   verifyTelebirrWebhookSignature
 } = require("../services/telebirr");
@@ -318,19 +319,34 @@ exports.startTelebirrCheckout = async (req, res) => {
     });
 
     ticket.paymentProvider = "telebirr";
-    ticket.paymentSessionId = checkout.paymentSessionId;
+    ticket.paymentSessionId = checkout.prepayId || "";
     ticket.paymentReference = checkout.merchantOrderId;
     await ticket.save();
 
     return res.json({
       reservationId: ticket._id,
       paymentProvider: "telebirr",
-      checkoutUrl: checkout.checkoutUrl,
-      paymentSessionId: checkout.paymentSessionId,
-      merchantOrderId: checkout.merchantOrderId
+      merchantOrderId: checkout.merchantOrderId,
+      prepayId: checkout.prepayId,
+      rawRequest: checkout.rawRequest,
+      gatewayResponse: checkout.gatewayResponse
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to start Telebirr checkout." });
+  }
+};
+
+exports.exchangeTelebirrAuthToken = async (req, res) => {
+  try {
+    const appToken = String(req.body.authToken || "").trim();
+    if (!appToken) {
+      return res.status(400).json({ message: "authToken is required." });
+    }
+
+    const result = await requestAuthToken(appToken);
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to exchange Telebirr auth token." });
   }
 };
 

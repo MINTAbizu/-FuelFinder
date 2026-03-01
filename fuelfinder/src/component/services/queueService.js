@@ -10,6 +10,11 @@ export async function startTelebirrCheckout(reservationId) {
   return data;
 }
 
+export async function exchangeTelebirrAuthToken(authToken) {
+  const { data } = await api.post("/queue/payments/telebirr/auth-token", { authToken });
+  return data;
+}
+
 export async function confirmQueuePayment(payload) {
   const { data } = await api.post("/queue/confirm-payment", payload);
   return data;
