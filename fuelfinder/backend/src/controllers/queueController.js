@@ -1,6 +1,10 @@
 const mongoose = require("mongoose");
 const QueueTicket = require("../models/QueueTicket");
 const { getIO } = require("../socket");
+const {
+  createTelebirrCheckout,
+  verifyTelebirrWebhookSignature
+} = require("../services/telebirr");
 
 const ACTIVE_STATUSES = ["pending_payment", "waiting", "called"];
 const AVERAGE_MINUTES_PER_CAR = 3;
@@ -96,6 +100,26 @@ function resolveFuelType(value) {
   if (!fuelType) return "gasoline";
   if (["gasoline", "diesel", "other"].includes(fuelType)) return fuelType;
   return null;
+}
+
+async function activatePaidTicket(ticket, paymentReference, paymentSessionId) {
+  const queueCount = await QueueTicket.countDocuments({
+    stationId: ticket.stationId,
+    status: "waiting"
+  });
+
+  ticket.status = "waiting";
+  ticket.position = queueCount + 1;
+  ticket.paymentReference = String(paymentReference || ticket.paymentReference || "").trim();
+  ticket.paymentSessionId = String(paymentSessionId || ticket.paymentSessionId || "").trim();
+  ticket.paymentProvider = "telebirr";
+  ticket.depositStatus = ticket.depositAmount > 0 ? "authorized" : "not_required";
+  ticket.depositPaidAt = new Date();
+  ticket.joinedAt = new Date();
+  await ticket.save();
+
+  emitQueueUpdated(ticket.stationId);
+  return ticket;
 }
 
 exports.reserveQueueSlot = async (req, res) => {
@@ -243,22 +267,9 @@ exports.confirmReservationPayment = async (req, res) => {
       return res.status(410).json({ message: "Reservation payment window expired." });
     }
 
-    const queueCount = await QueueTicket.countDocuments({
-      stationId: ticket.stationId,
-      status: "waiting"
-    });
-
-    ticket.status = "waiting";
-    ticket.position = queueCount + 1;
-    ticket.paymentReference = paymentRef;
-    ticket.depositStatus = ticket.depositAmount > 0 ? "authorized" : "not_required";
-    ticket.depositPaidAt = new Date();
-    ticket.joinedAt = new Date();
-    await ticket.save();
+    await activatePaidTicket(ticket, paymentRef, ticket.paymentSessionId);
 
     const etaMinutes = ticket.position * AVERAGE_MINUTES_PER_CAR;
-    emitQueueUpdated(ticket.stationId);
-
     return res.json({
       ticketId: ticket._id,
       stationId: ticket.stationId,
@@ -269,6 +280,106 @@ exports.confirmReservationPayment = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to confirm payment." });
+  }
+};
+
+exports.startTelebirrCheckout = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { reservationId } = req.body;
+
+    if (!isObjectId(userId) || !isObjectId(reservationId)) {
+      return res.status(400).json({ message: "Invalid userId or reservationId." });
+    }
+
+    const ticket = await QueueTicket.findOne({
+      _id: reservationId,
+      userId,
+      status: "pending_payment"
+    });
+    if (!ticket) {
+      return res.status(404).json({ message: "Pending reservation not found." });
+    }
+    if (ticket.paymentExpiresAt && ticket.paymentExpiresAt <= new Date()) {
+      ticket.status = "expired";
+      await ticket.save();
+      return res.status(410).json({ message: "Reservation payment window expired." });
+    }
+
+    const checkout = await createTelebirrCheckout({
+      amount: ticket.depositAmount,
+      currency: ticket.depositCurrency,
+      description: `Queue deposit for station ${ticket.stationId}`,
+      metadata: {
+        reservationId: String(ticket._id),
+        userId: String(ticket.userId),
+        stationId: String(ticket.stationId)
+      }
+    });
+
+    ticket.paymentProvider = "telebirr";
+    ticket.paymentSessionId = checkout.paymentSessionId;
+    ticket.paymentReference = checkout.merchantOrderId;
+    await ticket.save();
+
+    return res.json({
+      reservationId: ticket._id,
+      paymentProvider: "telebirr",
+      checkoutUrl: checkout.checkoutUrl,
+      paymentSessionId: checkout.paymentSessionId,
+      merchantOrderId: checkout.merchantOrderId
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to start Telebirr checkout." });
+  }
+};
+
+exports.handleTelebirrWebhook = async (req, res) => {
+  try {
+    const signature =
+      req.headers["x-telebirr-signature"] ||
+      req.headers["x-signature"] ||
+      req.headers["x-callback-signature"];
+    const isValid = verifyTelebirrWebhookSignature(req.rawBody || "", signature);
+    if (!isValid) {
+      return res.status(401).json({ message: "Invalid Telebirr signature." });
+    }
+
+    const body = req.body || {};
+    const status = String(body.status || body.paymentStatus || "").toLowerCase();
+    const metadata = body.metadata || {};
+    const reservationId = String(body.reservationId || metadata.reservationId || "").trim();
+    const paymentReference = String(body.transactionId || body.reference || body.orderId || "").trim();
+    const paymentSessionId = String(body.paymentSessionId || body.sessionId || "").trim();
+
+    if (!isObjectId(reservationId)) {
+      return res.status(400).json({ message: "Invalid reservationId in webhook." });
+    }
+
+    const ticket = await QueueTicket.findOne({ _id: reservationId });
+    if (!ticket) return res.status(404).json({ message: "Reservation not found." });
+
+    if (ticket.status !== "pending_payment") {
+      return res.json({ ok: true, message: "Reservation already processed." });
+    }
+
+    if (status === "success" || status === "paid" || status === "completed") {
+      await activatePaidTicket(ticket, paymentReference, paymentSessionId);
+      return res.json({ ok: true, message: "Payment confirmed." });
+    }
+
+    if (status === "failed" || status === "cancelled" || status === "canceled") {
+      ticket.depositStatus = "pending";
+      if (ticket.paymentExpiresAt && ticket.paymentExpiresAt <= new Date()) {
+        ticket.status = "expired";
+      }
+      await ticket.save();
+      return res.json({ ok: true, message: "Payment not completed." });
+    }
+
+    return res.json({ ok: true, message: "Webhook received." });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to process Telebirr webhook." });
   }
 };
 
