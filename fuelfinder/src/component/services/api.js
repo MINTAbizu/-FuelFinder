@@ -2,7 +2,7 @@ import axios from "axios";
 
 // Use your machine LAN IP for physical devices, e.g. http://192.168.1.20:5000/api
 export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_BASE_URL || "http://192.168.1.50:5000/api";
+  process.env.EXPO_PUBLIC_API_BASE_URL ;
 
 const api = axios.create({
   baseURL: API_BASE_URL,
