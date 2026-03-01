@@ -11,12 +11,33 @@ const queueTicketSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["waiting", "called", "served", "cancelled", "expired"],
-      default: "waiting",
+      enum: ["pending_payment", "waiting", "called", "served", "cancelled", "expired"],
+      default: "pending_payment",
       index: true
     },
     position: { type: Number, required: true },
+    fuelType: {
+      type: String,
+      enum: ["gasoline", "diesel", "other"],
+      default: "gasoline"
+    },
+    requestedBand: {
+      type: String,
+      enum: ["10-20", "20-40", "40+"],
+      default: "10-20"
+    },
+    depositAmount: { type: Number, default: 0 },
+    depositCurrency: { type: String, default: "ETB" },
+    depositStatus: {
+      type: String,
+      enum: ["pending", "authorized", "refunded", "forfeited", "not_required"],
+      default: "pending",
+      index: true
+    },
+    paymentReference: { type: String, default: "" },
     joinedAt: { type: Date, default: Date.now, index: true },
+    paymentExpiresAt: { type: Date, index: true },
+    depositPaidAt: { type: Date },
     calledAt: { type: Date },
     servedAt: { type: Date },
     expiresAt: { type: Date }
@@ -26,5 +47,6 @@ const queueTicketSchema = new mongoose.Schema(
 
 queueTicketSchema.index({ stationId: 1, status: 1, joinedAt: 1 });
 queueTicketSchema.index({ userId: 1, status: 1 });
+queueTicketSchema.index({ stationId: 1, paymentExpiresAt: 1, status: 1 });
 
 module.exports = mongoose.model("QueueTicket", queueTicketSchema);
