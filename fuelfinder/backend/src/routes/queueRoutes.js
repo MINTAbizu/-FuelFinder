@@ -4,6 +4,8 @@ const queueController = require("../controllers/queueController");
 
 const router = express.Router();
 
+router.post("/reserve", auth, queueController.reserveQueueSlot);
+router.post("/confirm-payment", auth, queueController.confirmReservationPayment);
 router.post("/join", auth, queueController.joinQueue);
 router.get("/me/:stationId", auth, queueController.getMyTicket);
 router.post("/leave", auth, queueController.leaveQueue);
