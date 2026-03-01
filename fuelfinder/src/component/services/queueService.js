@@ -1,0 +1,26 @@
+import api from "./api";
+
+export async function reserveQueueSlot(payload) {
+  const { data } = await api.post("/queue/reserve", payload);
+  return data;
+}
+
+export async function startTelebirrCheckout(reservationId) {
+  const { data } = await api.post("/queue/payments/telebirr/initiate", { reservationId });
+  return data;
+}
+
+export async function confirmQueuePayment(payload) {
+  const { data } = await api.post("/queue/confirm-payment", payload);
+  return data;
+}
+
+export async function getMyQueueTicket(stationId) {
+  const { data } = await api.get(`/queue/me/${stationId}`);
+  return data;
+}
+
+export async function leaveQueue(ticketId) {
+  const { data } = await api.post("/queue/leave", { ticketId });
+  return data;
+}
