@@ -12,15 +12,6 @@ function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
 
-function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function isStrongPassword(password) {
-  // Min 8 chars, uppercase, lowercase, digit, special char
-  return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/.test(password || "");
-}
-
 function buildAuthPayload(user) {
   return {
     sub: String(user._id),
@@ -48,19 +39,6 @@ exports.register = async (req, res) => {
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "");
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: "name, email, and password are required." });
-    }
-    if (!isValidEmail(email)) {
-      return res.status(400).json({ message: "Invalid email format." });
-    }
-    if (!isStrongPassword(password)) {
-      return res.status(400).json({
-        message:
-          "Password must be 8+ chars and include upper, lower, number, and special character."
-      });
-    }
-
     const existing = await User.findOne({ email });
     if (existing) {
       return res.status(409).json({ message: "Email already registered." });
@@ -75,7 +53,7 @@ exports.register = async (req, res) => {
       tokens: { accessToken, refreshToken }
     });
   } catch (error) {
-    return res.status(500).json({ message: "Registration failed.", error: error.message });
+    return res.status(500).json({ message: "Registration failed." });
   }
 };
 
@@ -83,10 +61,6 @@ exports.login = async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "");
-
-    if (!email || !password) {
-      return res.status(400).json({ message: "email and password are required." });
-    }
 
     const user = await User.findOne({ email });
     if (!user) {
@@ -105,16 +79,13 @@ exports.login = async (req, res) => {
       tokens: { accessToken, refreshToken }
     });
   } catch (error) {
-    return res.status(500).json({ message: "Login failed.", error: error.message });
+    return res.status(500).json({ message: "Login failed." });
   }
 };
 
 exports.refresh = async (req, res) => {
   try {
     const refreshToken = String(req.body.refreshToken || "");
-    if (!refreshToken) {
-      return res.status(400).json({ message: "refreshToken is required." });
-    }
 
     const payload = verifyRefreshToken(refreshToken);
     const user = await User.findById(payload.sub);
@@ -144,7 +115,7 @@ exports.logout = async (req, res) => {
 
     return res.json({ message: "Logged out successfully." });
   } catch (error) {
-    return res.status(500).json({ message: "Logout failed.", error: error.message });
+    return res.status(500).json({ message: "Logout failed." });
   }
 };
 
@@ -163,6 +134,6 @@ exports.me = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ message: "Failed to load profile.", error: error.message });
+    return res.status(500).json({ message: "Failed to load profile." });
   }
 };

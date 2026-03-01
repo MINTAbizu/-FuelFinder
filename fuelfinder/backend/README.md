@@ -8,7 +8,7 @@
 ## Quick Start
 1. `cd backend`
 2. `cp .env.example .env`
-3. Set `MONGODB_URI`, `JWT_ACCESS_SECRET`, and `JWT_REFRESH_SECRET` in `.env`
+3. Set `MONGODB_URI`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, and `CLIENT_ORIGIN` in `.env`
 4. `npm install`
 5. `npm run dev`
 
