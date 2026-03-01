@@ -23,6 +23,8 @@ Server runs on `http://localhost:5000` by default.
 - `GET /api/auth/me` (Bearer token)
 - `POST /api/queue/join`
 - `POST /api/queue/reserve`
+- `POST /api/queue/payments/telebirr/initiate`
+- `POST /api/queue/payments/telebirr/webhook`
 - `POST /api/queue/confirm-payment`
 - `GET /api/queue/me/:stationId`
 - `POST /api/queue/leave`
@@ -31,9 +33,19 @@ Server runs on `http://localhost:5000` by default.
 
 Queue reservation flow:
 1. `POST /api/queue/reserve` with `stationId`, `requestedBand` (`10-20|20-40|40+`), optional `fuelType`.
-2. Complete payment in client/payment gateway.
-3. `POST /api/queue/confirm-payment` with `reservationId` + `paymentReference`.
-4. Ticket becomes `waiting` and gets a queue `position`.
+2. `POST /api/queue/payments/telebirr/initiate` with `reservationId` to get Telebirr checkout URL.
+3. Complete payment on Telebirr.
+4. Telebirr calls `/api/queue/payments/telebirr/webhook`, reservation moves to `waiting`.
+5. Optional fallback: `POST /api/queue/confirm-payment` with `reservationId` + `paymentReference`.
+
+Telebirr env vars:
+- `TELEBIRR_BASE_URL`
+- `TELEBIRR_APP_ID`
+- `TELEBIRR_MERCHANT_ID`
+- `TELEBIRR_API_KEY`
+- `TELEBIRR_CALLBACK_URL` (should point to `/api/queue/payments/telebirr/webhook`)
+- `TELEBIRR_RETURN_URL` (optional)
+- `TELEBIRR_WEBHOOK_SECRET` (recommended)
 
 ## Auth
 Protected endpoints use:
