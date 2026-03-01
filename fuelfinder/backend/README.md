@@ -40,11 +40,15 @@ Queue reservation flow:
 
 Telebirr env vars:
 - `TELEBIRR_BASE_URL`
+- `TELEBIRR_CHECKOUT_PATH` (default `/checkout`)
 - `TELEBIRR_APP_ID`
 - `TELEBIRR_MERCHANT_ID`
+- `TELEBIRR_SHORT_CODE` (optional)
 - `TELEBIRR_API_KEY`
 - `TELEBIRR_CALLBACK_URL` (should point to `/api/queue/payments/telebirr/webhook`)
 - `TELEBIRR_RETURN_URL` (optional)
+- `TELEBIRR_RECEIVE_NAME` (optional)
+- `TELEBIRR_SUBJECT` (optional)
 - `TELEBIRR_WEBHOOK_SECRET` (recommended)
 
 ## Auth
