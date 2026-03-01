@@ -35,6 +35,12 @@ const queueTicketSchema = new mongoose.Schema(
       index: true
     },
     paymentReference: { type: String, default: "" },
+    paymentProvider: {
+      type: String,
+      enum: ["", "telebirr"],
+      default: ""
+    },
+    paymentSessionId: { type: String, default: "" },
     joinedAt: { type: Date, default: Date.now, index: true },
     paymentExpiresAt: { type: Date, index: true },
     depositPaidAt: { type: Date },
