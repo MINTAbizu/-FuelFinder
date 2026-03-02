@@ -107,12 +107,12 @@ function AppTabs() {
       <Tab.Screen
         name="Map"
         options={{ title: t("map") }}
-        children={() => <PlaceholderScreen title="Map" />}
+        children={() => <PlaceholderScreen title={t("map")} />}
       />
       <Tab.Screen
         name="Alerts"
         options={{ title: t("alerts") }}
-        children={() => <PlaceholderScreen title="Alerts" />}
+        children={() => <PlaceholderScreen title={t("alerts")} />}
       />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: t("profile") }} />
     </Tab.Navigator>
