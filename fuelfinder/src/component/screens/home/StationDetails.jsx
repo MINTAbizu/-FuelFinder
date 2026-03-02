@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Location from "expo-location";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import QRCode from "react-native-qrcode-svg";
 import {
   getMyQueueTicket,
   getReservationStatus,
@@ -69,6 +71,9 @@ export default function StationDetails({ route }) {
   const [checkInOtpInput, setCheckInOtpInput] = useState("");
   const [checkInQrInput, setCheckInQrInput] = useState("");
   const [checkInStatusText, setCheckInStatusText] = useState("");
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannerBusy, setScannerBusy] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const pollRef = useRef(null);
 
   const stationId = useMemo(
@@ -358,6 +363,36 @@ export default function StationDetails({ route }) {
     }
   }, [checkInOtpInput, checkInQrInput, myTicket, reservationId]);
 
+  const openScanner = useCallback(async () => {
+    if (!cameraPermission?.granted) {
+      const result = await requestCameraPermission();
+      if (!result?.granted) {
+        Alert.alert("Camera Required", "Enable camera permission to scan check-in QR.");
+        return;
+      }
+    }
+    setScannerBusy(false);
+    setScannerOpen(true);
+  }, [cameraPermission?.granted, requestCameraPermission]);
+
+  const onQrScanned = useCallback(
+    ({ data }) => {
+      if (scannerBusy) return;
+      setScannerBusy(true);
+      const token = String(data || "").trim();
+      if (!token) {
+        setCheckInStatusText("Scanned QR is empty. Please retry.");
+        setScannerOpen(false);
+        return;
+      }
+      setCheckInQrInput(token);
+      setScannerOpen(false);
+      setCheckInStatusText("QR token scanned. Tap Verify Check-In.");
+      setTimeout(() => setScannerBusy(false), 500);
+    },
+    [scannerBusy]
+  );
+
   const getStatusStyle = () => {
     if (detail.fuelStatus === "Full") return styles.statusFull;
     if (detail.fuelStatus === "Partial") return styles.statusPartial;
@@ -507,6 +542,23 @@ export default function StationDetails({ route }) {
           <Text style={styles.readonlyText}>{checkInSession?.otpCode || "-"}</Text>
         </View>
 
+        <Text style={styles.metaText}>Check-In QR</Text>
+        <View style={styles.qrWrap}>
+          {checkInSession?.qrToken ? (
+            <QRCode value={checkInSession.qrToken} size={170} />
+          ) : (
+            <Text style={styles.metaText}>Start check-in to generate QR.</Text>
+          )}
+        </View>
+
+        <Pressable
+          style={[styles.actionButton, styles.infoButton, loading && styles.disabled]}
+          onPress={openScanner}
+          disabled={loading}
+        >
+          <Text style={styles.primaryButtonText}>Scan QR For Verify</Text>
+        </Pressable>
+
         <Text style={styles.metaText}>QR Token (copy/share or scan in staff app)</Text>
         <TextInput
           style={styles.input}
@@ -537,6 +589,21 @@ export default function StationDetails({ route }) {
 
         {checkInStatusText ? <Text style={styles.infoText}>{checkInStatusText}</Text> : null}
       </View>
+      <Modal visible={scannerOpen} animationType="slide" onRequestClose={() => setScannerOpen(false)}>
+        <View style={styles.scannerContainer}>
+          <Text style={styles.scannerTitle}>Scan Check-In QR</Text>
+          <View style={styles.scannerFrame}>
+            <CameraView
+              style={styles.scannerCamera}
+              barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+              onBarcodeScanned={onQrScanned}
+            />
+          </View>
+          <Pressable style={[styles.actionButton, styles.dangerButton]} onPress={() => setScannerOpen(false)}>
+            <Text style={styles.primaryButtonText}>Close Scanner</Text>
+          </Pressable>
+        </View>
+      </Modal>
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>User Reports / Latest Updates</Text>
@@ -648,6 +715,16 @@ const styles = StyleSheet.create({
     color: "#0F172A",
     letterSpacing: 1,
   },
+  qrWrap: {
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 12,
+    padding: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+    marginBottom: 8,
+  },
   input: {
     borderWidth: 1,
     borderColor: "#CBD5E1",
@@ -675,4 +752,27 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   ticketTitle: { fontSize: 13, fontWeight: "900", color: "#065F46", marginBottom: 4 },
+  scannerContainer: {
+    flex: 1,
+    backgroundColor: "#F8FAFC",
+    padding: 16,
+  },
+  scannerTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#0F172A",
+    marginBottom: 10,
+  },
+  scannerFrame: {
+    flex: 1,
+    borderRadius: 16,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    marginBottom: 12,
+  },
+  scannerCamera: {
+    width: "100%",
+    height: "100%",
+  },
 });

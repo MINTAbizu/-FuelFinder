@@ -741,6 +741,9 @@ exports.startCheckIn = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({ message: "Eligible ticket not found for check-in." });
     }
+    if (ticket.checkInStatus === "verified") {
+      return res.status(409).json({ message: "Ticket already verified for station check-in." });
+    }
 
     const station = await Station.findById(ticket.stationId).lean();
     if (!station?.location?.coordinates || station.location.coordinates.length < 2) {
@@ -820,6 +823,12 @@ exports.verifyCheckIn = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({ message: "Ticket not found for check-in verification." });
     }
+    if (ticket.checkInStatus === "verified") {
+      return res.status(409).json({ message: "Ticket check-in already verified." });
+    }
+    if (ticket.checkInStatus !== "arrived") {
+      return res.status(400).json({ message: "Check-in session not started. Start check-in first." });
+    }
     if (!ticket.checkInOtpExpiresAt || ticket.checkInOtpExpiresAt <= new Date()) {
       return res.status(410).json({ message: "Check-in session expired. Restart check-in." });
     }
@@ -863,6 +872,8 @@ exports.verifyCheckIn = async (req, res) => {
     ticket.checkInVerifiedAt = new Date();
     ticket.verifiedByUserId = verifierUserId;
     ticket.checkInOtpHash = "";
+    ticket.checkInOtpExpiresAt = null;
+    ticket.checkInOtpAttempts = 0;
     ticket.checkInQrNonce = "";
     await ticket.save();
 
