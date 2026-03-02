@@ -41,6 +41,24 @@ const queueTicketSchema = new mongoose.Schema(
       default: ""
     },
     paymentSessionId: { type: String, default: "" },
+    checkInStatus: {
+      type: String,
+      enum: ["pending", "arrived", "verified", "rejected"],
+      default: "pending",
+      index: true
+    },
+    checkInStartedAt: { type: Date },
+    checkInVerifiedAt: { type: Date },
+    checkInOtpHash: { type: String, default: "" },
+    checkInOtpExpiresAt: { type: Date, index: true },
+    checkInOtpAttempts: { type: Number, default: 0 },
+    checkInQrNonce: { type: String, default: "" },
+    checkInLocation: {
+      lat: { type: Number },
+      lon: { type: Number },
+      accuracy: { type: Number }
+    },
+    verifiedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     joinedAt: { type: Date, default: Date.now, index: true },
     paymentExpiresAt: { type: Date, index: true },
     depositPaidAt: { type: Date },
