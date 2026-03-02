@@ -104,6 +104,17 @@ function parseFabricDate(dateText) {
   return Date.UTC(yyyy, mm - 1, dd, HH, MM, SS);
 }
 
+function describeNetworkError(error) {
+  const cause = error?.cause || {};
+  const code = cause.code || error?.code || "UNKNOWN";
+  const errno = cause.errno || error?.errno || "";
+  const syscall = cause.syscall || "";
+  const host = cause.hostname || cause.host || "";
+  const port = cause.port || "";
+  const reason = String(cause.message || error?.message || "fetch failed");
+  return `code=${code}; errno=${errno}; syscall=${syscall}; host=${host}; port=${port}; reason=${reason}`;
+}
+
 async function applyFabricToken(forceRefresh = false) {
   const config = getTelebirrConfig();
   ensureConfigured(config);
@@ -114,9 +125,10 @@ async function applyFabricToken(forceRefresh = false) {
     return cachedFabricToken;
   }
 
-  const response = await fetch(
-    `${config.baseUrl.replace(/\/+$/, "")}/${config.fabricTokenPath.replace(/^\/+/, "")}`,
-    {
+  const url = `${config.baseUrl.replace(/\/+$/, "")}/${config.fabricTokenPath.replace(/^\/+/, "")}`;
+  let response;
+  try {
+    response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -125,8 +137,10 @@ async function applyFabricToken(forceRefresh = false) {
       body: JSON.stringify({
         appSecret: config.appSecret
       })
-    }
-  );
+    });
+  } catch (error) {
+    throw new Error(`Telebirr fabric token network failure at ${url}: ${describeNetworkError(error)}`);
+  }
 
   if (!response.ok) {
     const errText = await response.text();
@@ -146,9 +160,10 @@ async function applyFabricToken(forceRefresh = false) {
 }
 
 async function postWithFabricToken(config, fabricToken, path, body) {
-  const response = await fetch(
-    `${config.baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`,
-    {
+  const url = `${config.baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+  let response;
+  try {
+    response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -156,8 +171,10 @@ async function postWithFabricToken(config, fabricToken, path, body) {
         Authorization: fabricToken
       },
       body: JSON.stringify(body)
-    }
-  );
+    });
+  } catch (error) {
+    throw new Error(`Telebirr network failure at ${url}: ${describeNetworkError(error)}`);
+  }
 
   if (!response.ok) {
     const errText = await response.text();
