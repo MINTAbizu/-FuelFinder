@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
+const crypto = require("crypto");
 const QueueTicket = require("../models/QueueTicket");
+const Station = require("../models/Station");
 const { getIO } = require("../socket");
 const {
   requestAuthToken,
@@ -11,6 +13,10 @@ const ACTIVE_STATUSES = ["pending_payment", "waiting", "called"];
 const AVERAGE_MINUTES_PER_CAR = 3;
 const PAYMENT_WINDOW_MINUTES = 10;
 const CALL_WINDOW_MINUTES = 5;
+const CHECKIN_RADIUS_METERS = 250;
+const CHECKIN_MAX_ACCURACY_METERS = 120;
+const CHECKIN_OTP_TTL_SECONDS = 300;
+const CHECKIN_MAX_OTP_ATTEMPTS = 5;
 const RESERVATION_BAND_DEPOSITS = {
   "10-20": 100,
   "20-40": 200,
@@ -115,6 +121,67 @@ function resolveUnitPrice(value) {
   if (!Number.isFinite(price)) return null;
   if (price < 0 || price > 100000) return null;
   return Number(price.toFixed(2));
+}
+
+function toRadians(degrees) {
+  return (degrees * Math.PI) / 180;
+}
+
+function haversineDistanceMeters(fromLat, fromLon, toLat, toLon) {
+  const earthRadius = 6371000;
+  const dLat = toRadians(toLat - fromLat);
+  const dLon = toRadians(toLon - fromLon);
+  const lat1 = toRadians(fromLat);
+  const lat2 = toRadians(toLat);
+
+  const a =
+    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadius * c;
+}
+
+function generateOtpCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function hashOtpCode(code) {
+  return crypto.createHash("sha256").update(String(code || ""), "utf8").digest("hex");
+}
+
+function getCheckInSecret() {
+  return String(process.env.CHECKIN_TOKEN_SECRET || process.env.JWT_ACCESS_SECRET || "fuelfinder-checkin-secret");
+}
+
+function base64urlEncode(text) {
+  return Buffer.from(text, "utf8").toString("base64url");
+}
+
+function base64urlDecode(text) {
+  return Buffer.from(text, "base64url").toString("utf8");
+}
+
+function signCheckInPayload(payloadString) {
+  return crypto.createHmac("sha256", getCheckInSecret()).update(payloadString, "utf8").digest("base64url");
+}
+
+function buildCheckInQrToken(payload) {
+  const payloadString = JSON.stringify(payload);
+  const encodedPayload = base64urlEncode(payloadString);
+  const signature = signCheckInPayload(payloadString);
+  return `${encodedPayload}.${signature}`;
+}
+
+function verifyCheckInQrToken(token) {
+  const [encodedPayload, providedSignature] = String(token || "").split(".");
+  if (!encodedPayload || !providedSignature) return null;
+  const payloadString = base64urlDecode(encodedPayload);
+  const expectedSignature = signCheckInPayload(payloadString);
+  if (expectedSignature.length !== providedSignature.length) return null;
+  const valid = crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(providedSignature));
+  if (!valid) return null;
+  const payload = JSON.parse(payloadString);
+  if (!payload?.exp || Number(payload.exp) * 1000 < Date.now()) return null;
+  return payload;
 }
 
 async function activatePaidTicket(ticket, paymentReference, paymentSessionId) {
@@ -655,5 +722,157 @@ exports.getStationQueue = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load station queue." });
+  }
+};
+
+exports.startCheckIn = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { ticketId, lat, lon, accuracy } = req.body;
+    if (!isObjectId(userId) || !isObjectId(ticketId)) {
+      return res.status(400).json({ message: "Invalid userId or ticketId." });
+    }
+
+    const ticket = await QueueTicket.findOne({
+      _id: ticketId,
+      userId,
+      status: { $in: ["waiting", "called"] }
+    });
+    if (!ticket) {
+      return res.status(404).json({ message: "Eligible ticket not found for check-in." });
+    }
+
+    const station = await Station.findById(ticket.stationId).lean();
+    if (!station?.location?.coordinates || station.location.coordinates.length < 2) {
+      return res.status(400).json({ message: "Station location not configured." });
+    }
+
+    const userLat = Number(lat);
+    const userLon = Number(lon);
+    const userAccuracy = Number(accuracy || 0);
+    if (!Number.isFinite(userLat) || !Number.isFinite(userLon)) {
+      return res.status(400).json({ message: "lat and lon are required numeric values." });
+    }
+    if (Number.isFinite(userAccuracy) && userAccuracy > CHECKIN_MAX_ACCURACY_METERS) {
+      return res.status(400).json({ message: "Location accuracy is too low for check-in. Move to open sky and retry." });
+    }
+
+    const [stationLon, stationLat] = station.location.coordinates;
+    const distanceMeters = haversineDistanceMeters(userLat, userLon, Number(stationLat), Number(stationLon));
+    if (distanceMeters > CHECKIN_RADIUS_METERS) {
+      ticket.checkInStatus = "rejected";
+      await ticket.save();
+      return res.status(403).json({
+        message: "You are outside station check-in radius.",
+        distanceMeters: Math.round(distanceMeters),
+        allowedRadiusMeters: CHECKIN_RADIUS_METERS
+      });
+    }
+
+    const otpCode = generateOtpCode();
+    const otpHash = hashOtpCode(otpCode);
+    const otpExpiresAt = new Date(Date.now() + CHECKIN_OTP_TTL_SECONDS * 1000);
+    const qrNonce = crypto.randomBytes(12).toString("hex");
+    const qrToken = buildCheckInQrToken({
+      ticketId: String(ticket._id),
+      stationId: String(ticket.stationId),
+      nonce: qrNonce,
+      exp: Math.floor(otpExpiresAt.getTime() / 1000)
+    });
+
+    ticket.checkInStatus = "arrived";
+    ticket.checkInStartedAt = new Date();
+    ticket.checkInOtpHash = otpHash;
+    ticket.checkInOtpExpiresAt = otpExpiresAt;
+    ticket.checkInOtpAttempts = 0;
+    ticket.checkInQrNonce = qrNonce;
+    ticket.checkInLocation = {
+      lat: userLat,
+      lon: userLon,
+      accuracy: Number.isFinite(userAccuracy) ? userAccuracy : undefined
+    };
+    await ticket.save();
+
+    return res.json({
+      ticketId: ticket._id,
+      checkInStatus: ticket.checkInStatus,
+      expiresAt: otpExpiresAt,
+      otpCode,
+      qrToken
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to start station check-in." });
+  }
+};
+
+exports.verifyCheckIn = async (req, res) => {
+  try {
+    const verifierUserId = req.user.id;
+    const { ticketId, otpCode, qrToken } = req.body;
+    if (!isObjectId(verifierUserId) || !isObjectId(ticketId)) {
+      return res.status(400).json({ message: "Invalid verifier userId or ticketId." });
+    }
+
+    const ticket = await QueueTicket.findOne({
+      _id: ticketId,
+      status: { $in: ["waiting", "called"] }
+    });
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found for check-in verification." });
+    }
+    if (!ticket.checkInOtpExpiresAt || ticket.checkInOtpExpiresAt <= new Date()) {
+      return res.status(410).json({ message: "Check-in session expired. Restart check-in." });
+    }
+    if (ticket.checkInOtpAttempts >= CHECKIN_MAX_OTP_ATTEMPTS) {
+      return res.status(429).json({ message: "Maximum OTP attempts reached. Restart check-in." });
+    }
+
+    let verified = false;
+    if (qrToken) {
+      const payload = verifyCheckInQrToken(qrToken);
+      if (
+        payload &&
+        String(payload.ticketId) === String(ticket._id) &&
+        String(payload.stationId) === String(ticket.stationId) &&
+        String(payload.nonce) === String(ticket.checkInQrNonce || "")
+      ) {
+        verified = true;
+      }
+    }
+
+    if (!verified && otpCode) {
+      const incomingHash = hashOtpCode(otpCode);
+      const savedHash = String(ticket.checkInOtpHash || "");
+      if (
+        savedHash &&
+        savedHash.length === incomingHash.length &&
+        crypto.timingSafeEqual(Buffer.from(savedHash), Buffer.from(incomingHash))
+      ) {
+        verified = true;
+      } else {
+        ticket.checkInOtpAttempts = Number(ticket.checkInOtpAttempts || 0) + 1;
+        await ticket.save();
+      }
+    }
+
+    if (!verified) {
+      return res.status(401).json({ message: "Invalid OTP/QR check-in proof." });
+    }
+
+    ticket.checkInStatus = "verified";
+    ticket.checkInVerifiedAt = new Date();
+    ticket.verifiedByUserId = verifierUserId;
+    ticket.checkInOtpHash = "";
+    ticket.checkInQrNonce = "";
+    await ticket.save();
+
+    return res.json({
+      ok: true,
+      ticketId: ticket._id,
+      checkInStatus: ticket.checkInStatus,
+      verifiedAt: ticket.checkInVerifiedAt
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to verify station check-in." });
   }
 };
