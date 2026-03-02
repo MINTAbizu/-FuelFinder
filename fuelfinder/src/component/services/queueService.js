@@ -39,3 +39,13 @@ export async function getStationQueue(stationId) {
   const { data } = await api.get(`/queue/station/${stationId}`);
   return data;
 }
+
+export async function startStationCheckIn(payload) {
+  const { data } = await api.post("/queue/check-in/start", payload);
+  return data;
+}
+
+export async function verifyStationCheckIn(payload) {
+  const { data } = await api.post("/queue/check-in/verify", payload);
+  return data;
+}

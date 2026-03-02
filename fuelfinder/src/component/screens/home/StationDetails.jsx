@@ -1,6 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { getMyQueueTicket, getReservationStatus, getStationQueue, leaveQueue, reserveQueueSlot, startTelebirrCheckout } from "../../services/queueService";
+import * as Location from "expo-location";
+import {
+  getMyQueueTicket,
+  getReservationStatus,
+  getStationQueue,
+  leaveQueue,
+  reserveQueueSlot,
+  startStationCheckIn,
+  startTelebirrCheckout,
+  verifyStationCheckIn
+} from "../../services/queueService";
 
 const statusMap = {
   available: "Full",
@@ -55,6 +65,10 @@ export default function StationDetails({ route }) {
   const [loading, setLoading] = useState(false);
   const [paymentPhase, setPaymentPhase] = useState("idle");
   const [liveQueueCount, setLiveQueueCount] = useState(null);
+  const [checkInSession, setCheckInSession] = useState(null);
+  const [checkInOtpInput, setCheckInOtpInput] = useState("");
+  const [checkInQrInput, setCheckInQrInput] = useState("");
+  const [checkInStatusText, setCheckInStatusText] = useState("");
   const pollRef = useRef(null);
 
   const stationId = useMemo(
@@ -279,6 +293,71 @@ export default function StationDetails({ route }) {
     }
   }, [myTicket]);
 
+  const startCheckInNow = useCallback(async () => {
+    const ticketId = myTicket?.ticketId || reservationId;
+    if (!ticketId) {
+      Alert.alert("Missing Ticket", "You need an active queue ticket before check-in.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== "granted") {
+        Alert.alert("Location Required", "Enable location permission to start station check-in.");
+        return;
+      }
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced
+      });
+      const session = await startStationCheckIn({
+        ticketId,
+        lat: position.coords.latitude,
+        lon: position.coords.longitude,
+        accuracy: position.coords.accuracy
+      });
+      setCheckInSession(session);
+      setCheckInQrInput(session?.qrToken || "");
+      setCheckInOtpInput("");
+      setCheckInStatusText(`Check-in started. OTP expires at ${new Date(session.expiresAt).toLocaleTimeString()}.`);
+    } catch (error) {
+      logReservationError("startCheckInNow", error);
+      setCheckInStatusText(error?.response?.data?.message || "Failed to start station check-in.");
+    } finally {
+      setLoading(false);
+    }
+  }, [myTicket, reservationId]);
+
+  const verifyCheckInNow = useCallback(async () => {
+    const ticketId = myTicket?.ticketId || reservationId;
+    if (!ticketId) {
+      Alert.alert("Missing Ticket", "No ticket found for verification.");
+      return;
+    }
+
+    const otpCode = String(checkInOtpInput || "").trim();
+    const qrToken = String(checkInQrInput || "").trim();
+    if (!otpCode && !qrToken) {
+      Alert.alert("Missing Proof", "Enter OTP or QR token to verify check-in.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const verify = await verifyStationCheckIn({
+        ticketId,
+        ...(otpCode ? { otpCode } : {}),
+        ...(qrToken ? { qrToken } : {})
+      });
+      setCheckInStatusText(`Check-in verified at ${new Date(verify.verifiedAt).toLocaleTimeString()}.`);
+    } catch (error) {
+      logReservationError("verifyCheckInNow", error);
+      setCheckInStatusText(error?.response?.data?.message || "Failed to verify check-in.");
+    } finally {
+      setLoading(false);
+    }
+  }, [checkInOtpInput, checkInQrInput, myTicket, reservationId]);
+
   const getStatusStyle = () => {
     if (detail.fuelStatus === "Full") return styles.statusFull;
     if (detail.fuelStatus === "Partial") return styles.statusPartial;
@@ -410,6 +489,56 @@ export default function StationDetails({ route }) {
       </View>
 
       <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Station Check-In (QR + OTP)</Text>
+        <Text style={styles.metaText}>
+          Start check-in when you are physically at the station, then share OTP/QR proof with attendant.
+        </Text>
+
+        <Pressable
+          style={[styles.actionButton, styles.primaryButton, loading && styles.disabled]}
+          onPress={startCheckInNow}
+          disabled={loading}
+        >
+          <Text style={styles.primaryButtonText}>Start Check-In</Text>
+        </Pressable>
+
+        <Text style={styles.metaText}>OTP From Session</Text>
+        <View style={styles.readonlyBox}>
+          <Text style={styles.readonlyText}>{checkInSession?.otpCode || "-"}</Text>
+        </View>
+
+        <Text style={styles.metaText}>QR Token (copy/share or scan in staff app)</Text>
+        <TextInput
+          style={styles.input}
+          value={checkInQrInput}
+          onChangeText={setCheckInQrInput}
+          placeholder="QR token"
+          placeholderTextColor="#94A3B8"
+          multiline
+        />
+
+        <Text style={styles.metaText}>Verify With OTP</Text>
+        <TextInput
+          style={styles.input}
+          value={checkInOtpInput}
+          onChangeText={setCheckInOtpInput}
+          placeholder="Enter 6-digit OTP"
+          placeholderTextColor="#94A3B8"
+          keyboardType="number-pad"
+        />
+
+        <Pressable
+          style={[styles.actionButton, styles.secondaryButton, loading && styles.disabled]}
+          onPress={verifyCheckInNow}
+          disabled={loading}
+        >
+          <Text style={styles.secondaryButtonText}>Verify Check-In</Text>
+        </Pressable>
+
+        {checkInStatusText ? <Text style={styles.infoText}>{checkInStatusText}</Text> : null}
+      </View>
+
+      <View style={styles.card}>
         <Text style={styles.sectionTitle}>User Reports / Latest Updates</Text>
         {detail.reports.length ? detail.reports.map((report) => (
           <View key={report.id} style={styles.listItem}>
@@ -503,6 +632,21 @@ const styles = StyleSheet.create({
   },
   optionTextActive: {
     color: "#065F46",
+  },
+  readonlyBox: {
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 10,
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    marginBottom: 8,
+  },
+  readonlyText: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#0F172A",
+    letterSpacing: 1,
   },
   input: {
     borderWidth: 1,
