@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Location from "expo-location";
-import { CameraView, useCameraPermissions } from "expo-camera";
 import QRCode from "react-native-qrcode-svg";
+import { useLanguage } from "../../context/LanguageContext";
 import {
   getMyQueueTicket,
   getReservationStatus,
@@ -11,7 +11,6 @@ import {
   reserveQueueSlot,
   startStationCheckIn,
   startTelebirrCheckout,
-  verifyStationCheckIn
 } from "../../services/queueService";
 
 const statusMap = {
@@ -27,6 +26,124 @@ const DEFAULT_FUEL_PRICES = {
   gasoline: 95,
   diesel: 92,
   other: 90,
+};
+const I18N = {
+  en: {
+    stationFallback: "Fuel Station",
+    address: "Address",
+    contact: "Contact",
+    stationId: "Station ID",
+    coords: "Coordinates",
+    supportedFuels: "Supported fuels",
+    fuelStatus: "Fuel Status",
+    queueWait: "Queue & Wait",
+    queueLength: "Queue Length",
+    estWait: "Estimated Wait",
+    reservePay: "Queue Reservation & Payment",
+    requestedBand: "Requested Band",
+    fuelType: "Fuel Type",
+    liters: "How Many Liters",
+    litersPlaceholder: "Enter liters (e.g. 25)",
+    currentPrice: "Current Price",
+    estimatedTotal: "Estimated Total",
+    reservePayBtn: "Reserve & Pay with Telebirr",
+    checkPaymentBtn: "Check Payment Status",
+    refreshTicketBtn: "Refresh My Ticket",
+    leaveQueueBtn: "Leave Queue",
+    activeTicket: "My Active Ticket",
+    checkInTitle: "Station Check-In (QR + OTP)",
+    checkInDesc: "Start check-in at station, then show OTP/QR to attendant.",
+    startCheckInBtn: "Start Check-In",
+    otpFromSession: "OTP From Session",
+    checkInQr: "Check-In QR (show this to attendant)",
+    noReports: "No live reports for this station yet.",
+    noReviews: "No live reviews for this station yet.",
+    reportsTitle: "User Reports / Latest Updates",
+    reviewsTitle: "Ratings & Reviews",
+    avgRating: "Average Rating",
+    invalidLitersTitle: "Invalid Liters",
+    invalidLitersBody: "Enter a valid number of liters greater than 0.",
+    missingReservationTitle: "Missing Reservation",
+    missingReservationBody: "Start a reservation first.",
+    noTicketTitle: "No Ticket",
+    noTicketBody: "No active ticket found.",
+    stationIdMissingTitle: "Station ID Missing",
+    stationIdMissingBody: "This station does not have a valid backend stationId.",
+    checkInMissingTicketTitle: "Missing Ticket",
+    checkInMissingTicketBody: "You need an active queue ticket before check-in.",
+    locationRequiredTitle: "Location Required",
+    locationRequiredBody: "Enable location permission to start check-in.",
+    paymentInitiated: "Payment initiated. Complete payment in Telebirr, then status will update.",
+    failedStartPayment: "Failed to start payment.",
+    waitingPaymentConfirm: "Waiting for payment confirmation. Tap Check Payment Status.",
+    paymentVerified: "Payment verified. Your queue ticket is now active.",
+    reservationExpired: "Reservation expired before payment confirmation.",
+    activeTicketLoaded: "Active queue ticket loaded.",
+    noActiveTicket: "No active ticket.",
+    leftQueue: "You left the queue.",
+    failedLeaveQueue: "Failed to leave queue.",
+    startCheckInFailed: "Failed to start station check-in.",
+    startForQr: "Start check-in to generate QR and OTP.",
+    attendantNote: "Attendant verification should be done in staff app only.",
+  },
+  am: {
+    stationFallback: "ነዳጅ ማደያ",
+    address: "አድራሻ",
+    contact: "ስልክ",
+    stationId: "የማደያ መለያ",
+    coords: "ኮኦርዲኔት",
+    supportedFuels: "የሚደገፉ ነዳጆች",
+    fuelStatus: "የነዳጅ ሁኔታ",
+    queueWait: "ሰልፍ እና ቆይታ",
+    queueLength: "የሰልፍ ርዝመት",
+    estWait: "የተገመተ ቆይታ",
+    reservePay: "የሰልፍ ማስያዣ እና ክፍያ",
+    requestedBand: "የተጠየቀ መጠን",
+    fuelType: "የነዳጅ አይነት",
+    liters: "የሚፈልጉት ሊትር",
+    litersPlaceholder: "ሊትር ያስገቡ (ለምሳሌ 25)",
+    currentPrice: "አሁን ያለ ዋጋ",
+    estimatedTotal: "ጠቅላላ የተገመተ ዋጋ",
+    reservePayBtn: "ያስያዙ እና በቴሌብር ይክፈሉ",
+    checkPaymentBtn: "የክፍያ ሁኔታ ያረጋግጡ",
+    refreshTicketBtn: "የኔን ትኬት አድስ",
+    leaveQueueBtn: "ከሰልፍ ውጣ",
+    activeTicket: "የኔ ንቁ ትኬት",
+    checkInTitle: "የማደያ ቼክ-ኢን (QR + OTP)",
+    checkInDesc: "በማደያ ሲደርሱ ቼክ-ኢን ይጀምሩ እና OTP/QR ለሰራተኛ ያሳዩ።",
+    startCheckInBtn: "ቼክ-ኢን ጀምር",
+    otpFromSession: "ከሴሽን የተሰጠ OTP",
+    checkInQr: "የቼክ-ኢን QR (ለሰራተኛ አሳይ)",
+    noReports: "ለዚህ ማደያ የቀጥታ ሪፖርት የለም።",
+    noReviews: "ለዚህ ማደያ የቀጥታ አስተያየት የለም።",
+    reportsTitle: "የተጠቃሚ ሪፖርቶች / የቅርብ ማሻሻያ",
+    reviewsTitle: "ደረጃ እና አስተያየት",
+    avgRating: "አማካይ ደረጃ",
+    invalidLitersTitle: "የሊትር መጠን ስህተት",
+    invalidLitersBody: "ከ0 በላይ ትክክለኛ የሊትር መጠን ያስገቡ።",
+    missingReservationTitle: "ማስያዣ የለም",
+    missingReservationBody: "መጀመሪያ ማስያዣ ይፍጠሩ።",
+    noTicketTitle: "ትኬት የለም",
+    noTicketBody: "ንቁ ትኬት አልተገኘም።",
+    stationIdMissingTitle: "የማደያ መለያ ጎድሏል",
+    stationIdMissingBody: "ይህ ማደያ ትክክለኛ backend stationId የለውም።",
+    checkInMissingTicketTitle: "ትኬት የለም",
+    checkInMissingTicketBody: "ቼክ-ኢን ከመጀመር በፊት ንቁ ትኬት ያስፈልጋል።",
+    locationRequiredTitle: "አካባቢ ፍቃድ ያስፈልጋል",
+    locationRequiredBody: "ቼክ-ኢን ለመጀመር የአካባቢ ፍቃድ ያስፈልጋል።",
+    paymentInitiated: "ክፍያ ተጀምሯል። በቴሌብር ያጠናቅቁ።",
+    failedStartPayment: "ክፍያ መጀመር አልተቻለም።",
+    waitingPaymentConfirm: "የክፍያ ማረጋገጫ በመጠባበቅ ላይ።",
+    paymentVerified: "ክፍያ ተረጋግጧል። ትኬትዎ ንቁ ሆኗል።",
+    reservationExpired: "የማስያዣ ጊዜ አልቋል።",
+    activeTicketLoaded: "ንቁ ትኬት ተጭኗል።",
+    noActiveTicket: "ንቁ ትኬት የለም።",
+    leftQueue: "ከሰልፉ ወጥተዋል።",
+    failedLeaveQueue: "ከሰልፍ መውጣት አልተቻለም።",
+    startCheckInFailed: "የማደያ ቼክ-ኢን መጀመር አልተቻለም።",
+    startForQr: "QR እና OTP ለመፍጠር ቼክ-ኢን ይጀምሩ።",
+    attendantNote: "ማረጋገጫ በሰራተኛ መተግበሪያ ብቻ ይደረጋል።",
+  },
 };
 
 function isObjectId(value) {
@@ -55,6 +172,8 @@ function formatSupportedFuels(supportedFuels) {
 }
 
 export default function StationDetails({ route }) {
+  const { language } = useLanguage();
+  const t = I18N[language] || I18N.en;
   const { station } = route.params || {};
   const [requestedBand, setRequestedBand] = useState("10-20");
   const [fuelType, setFuelType] = useState("gasoline");
@@ -68,12 +187,7 @@ export default function StationDetails({ route }) {
   const [paymentPhase, setPaymentPhase] = useState("idle");
   const [liveQueueCount, setLiveQueueCount] = useState(null);
   const [checkInSession, setCheckInSession] = useState(null);
-  const [checkInOtpInput, setCheckInOtpInput] = useState("");
-  const [checkInQrInput, setCheckInQrInput] = useState("");
   const [checkInStatusText, setCheckInStatusText] = useState("");
-  const [scannerOpen, setScannerOpen] = useState(false);
-  const [scannerBusy, setScannerBusy] = useState(false);
-  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const pollRef = useRef(null);
 
   const stationId = useMemo(
@@ -108,8 +222,8 @@ export default function StationDetails({ route }) {
     const fuelStatus = statusMap[station?.fuel_status] || "Partial";
     return {
       name: station?.name || "Fuel Station",
-      address: station?.address || "Address not listed",
-      contact: station?.contact || "Not listed",
+      address: station?.address || t.address,
+      contact: station?.contact || t.contact,
       latitude: Number(station?.latitude),
       longitude: Number(station?.longitude),
       supportedFuels: formatSupportedFuels(station?.supportedFuels),
@@ -126,7 +240,7 @@ export default function StationDetails({ route }) {
             ).toFixed(1)
           : "4.5",
     };
-  }, [liveQueueCount, station]);
+  }, [liveQueueCount, station, t.address, t.contact]);
 
   useEffect(() => {
     return () => {
@@ -158,11 +272,11 @@ export default function StationDetails({ route }) {
     try {
       const ticket = await getMyQueueTicket(stationId);
       setMyTicket(ticket);
-      setMessage("Active queue ticket loaded.");
+      setMessage(t.activeTicketLoaded);
     } catch (error) {
       logReservationError("refreshMyTicket", error);
       setMyTicket(null);
-      setMessage(error?.response?.data?.message || "No active ticket.");
+      setMessage(error?.response?.data?.message || t.noActiveTicket);
     } finally {
       setLoading(false);
     }
@@ -187,13 +301,13 @@ export default function StationDetails({ route }) {
               estimatedAmount: status.estimatedAmount,
             });
             setPaymentPhase("verified");
-            setMessage("Payment verified. Your queue ticket is now active.");
+            setMessage(t.paymentVerified);
             if (pollRef.current) clearInterval(pollRef.current);
             return;
           }
           if (status.status === "expired") {
             setPaymentPhase("expired");
-            setMessage("Reservation expired before payment confirmation.");
+            setMessage(t.reservationExpired);
             if (pollRef.current) clearInterval(pollRef.current);
           }
         } catch (_error) {
@@ -211,7 +325,7 @@ export default function StationDetails({ route }) {
         if (attempts >= 30 && pollRef.current) {
           clearInterval(pollRef.current);
           setPaymentPhase("pending");
-          setMessage("Waiting for payment confirmation. Tap Check Payment Status.");
+          setMessage(t.waitingPaymentConfirm);
         }
       }, 4000);
     },
@@ -220,7 +334,7 @@ export default function StationDetails({ route }) {
 
   const reserveAndInitiate = useCallback(async () => {
     if (!queueEnabled) {
-      Alert.alert("Station ID Missing", "This station does not have a valid backend stationId.");
+      Alert.alert(t.stationIdMissingTitle, t.stationIdMissingBody);
       return;
     }
 
@@ -229,7 +343,7 @@ export default function StationDetails({ route }) {
     setPaymentPhase("reserving");
     try {
       if (!Number.isFinite(litersValue) || litersValue <= 0) {
-        Alert.alert("Invalid Liters", "Enter a valid number of liters greater than 0.");
+        Alert.alert(t.invalidLitersTitle, t.invalidLitersBody);
         setPaymentPhase("idle");
         setLoading(false);
         return;
@@ -250,12 +364,12 @@ export default function StationDetails({ route }) {
       setPrepayId(initiate?.prepayId || "");
       setRawRequest(initiate?.rawRequest || "");
       setPaymentPhase("pending");
-      setMessage("Payment initiated. Complete payment in Telebirr, then status will update.");
+      setMessage(t.paymentInitiated);
       await pollReservation(nextReservationId, true);
     } catch (error) {
       logReservationError("reserveAndInitiate", error);
       setPaymentPhase("failed");
-      setMessage(error?.response?.data?.message || "Failed to start payment.");
+      setMessage(error?.response?.data?.message || t.failedStartPayment);
     } finally {
       setLoading(false);
     }
@@ -263,7 +377,7 @@ export default function StationDetails({ route }) {
 
   const checkReservationNow = useCallback(async () => {
     if (!reservationId) {
-      Alert.alert("Missing Reservation", "Start a reservation first.");
+      Alert.alert(t.missingReservationTitle, t.missingReservationBody);
       return;
     }
     setLoading(true);
@@ -277,7 +391,7 @@ export default function StationDetails({ route }) {
   const leaveMyQueue = useCallback(async () => {
     const ticketId = myTicket?.ticketId;
     if (!ticketId) {
-      Alert.alert("No Ticket", "No active ticket found.");
+      Alert.alert(t.noTicketTitle, t.noTicketBody);
       return;
     }
     setLoading(true);
@@ -288,11 +402,11 @@ export default function StationDetails({ route }) {
       setPrepayId("");
       setRawRequest("");
       setPaymentPhase("idle");
-      setMessage("You left the queue.");
+      setMessage(t.leftQueue);
       if (pollRef.current) clearInterval(pollRef.current);
     } catch (error) {
       logReservationError("leaveMyQueue", error);
-      setMessage(error?.response?.data?.message || "Failed to leave queue.");
+      setMessage(error?.response?.data?.message || t.failedLeaveQueue);
     } finally {
       setLoading(false);
     }
@@ -301,7 +415,7 @@ export default function StationDetails({ route }) {
   const startCheckInNow = useCallback(async () => {
     const ticketId = myTicket?.ticketId || reservationId;
     if (!ticketId) {
-      Alert.alert("Missing Ticket", "You need an active queue ticket before check-in.");
+      Alert.alert(t.checkInMissingTicketTitle, t.checkInMissingTicketBody);
       return;
     }
 
@@ -309,7 +423,7 @@ export default function StationDetails({ route }) {
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== "granted") {
-        Alert.alert("Location Required", "Enable location permission to start station check-in.");
+        Alert.alert(t.locationRequiredTitle, t.locationRequiredBody);
         return;
       }
       const position = await Location.getCurrentPositionAsync({
@@ -322,76 +436,14 @@ export default function StationDetails({ route }) {
         accuracy: position.coords.accuracy
       });
       setCheckInSession(session);
-      setCheckInQrInput(session?.qrToken || "");
-      setCheckInOtpInput("");
-      setCheckInStatusText(`Check-in started. OTP expires at ${new Date(session.expiresAt).toLocaleTimeString()}.`);
+      setCheckInStatusText(`${t.startCheckInBtn}. OTP: ${new Date(session.expiresAt).toLocaleTimeString()}`);
     } catch (error) {
       logReservationError("startCheckInNow", error);
-      setCheckInStatusText(error?.response?.data?.message || "Failed to start station check-in.");
+      setCheckInStatusText(error?.response?.data?.message || t.startCheckInFailed);
     } finally {
       setLoading(false);
     }
   }, [myTicket, reservationId]);
-
-  const verifyCheckInNow = useCallback(async () => {
-    const ticketId = myTicket?.ticketId || reservationId;
-    if (!ticketId) {
-      Alert.alert("Missing Ticket", "No ticket found for verification.");
-      return;
-    }
-
-    const otpCode = String(checkInOtpInput || "").trim();
-    const qrToken = String(checkInQrInput || "").trim();
-    if (!otpCode && !qrToken) {
-      Alert.alert("Missing Proof", "Enter OTP or QR token to verify check-in.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const verify = await verifyStationCheckIn({
-        ticketId,
-        ...(otpCode ? { otpCode } : {}),
-        ...(qrToken ? { qrToken } : {})
-      });
-      setCheckInStatusText(`Check-in verified at ${new Date(verify.verifiedAt).toLocaleTimeString()}.`);
-    } catch (error) {
-      logReservationError("verifyCheckInNow", error);
-      setCheckInStatusText(error?.response?.data?.message || "Failed to verify check-in.");
-    } finally {
-      setLoading(false);
-    }
-  }, [checkInOtpInput, checkInQrInput, myTicket, reservationId]);
-
-  const openScanner = useCallback(async () => {
-    if (!cameraPermission?.granted) {
-      const result = await requestCameraPermission();
-      if (!result?.granted) {
-        Alert.alert("Camera Required", "Enable camera permission to scan check-in QR.");
-        return;
-      }
-    }
-    setScannerBusy(false);
-    setScannerOpen(true);
-  }, [cameraPermission?.granted, requestCameraPermission]);
-
-  const onQrScanned = useCallback(
-    ({ data }) => {
-      if (scannerBusy) return;
-      setScannerBusy(true);
-      const token = String(data || "").trim();
-      if (!token) {
-        setCheckInStatusText("Scanned QR is empty. Please retry.");
-        setScannerOpen(false);
-        return;
-      }
-      setCheckInQrInput(token);
-      setScannerOpen(false);
-      setCheckInStatusText("QR token scanned. Tap Verify Check-In.");
-      setTimeout(() => setScannerBusy(false), 500);
-    },
-    [scannerBusy]
-  );
 
   const getStatusStyle = () => {
     if (detail.fuelStatus === "Full") return styles.statusFull;
@@ -403,33 +455,33 @@ export default function StationDetails({ route }) {
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.card}>
         <Text style={styles.stationName}>{detail.name}</Text>
-        <Text style={styles.metaText}>Address: {detail.address}</Text>
-        <Text style={styles.metaText}>Contact: {detail.contact}</Text>
-        <Text style={styles.metaText}>Station ID: {stationId || "N/A"}</Text>
+        <Text style={styles.metaText}>{t.address}: {detail.address}</Text>
+        <Text style={styles.metaText}>{t.contact}: {detail.contact}</Text>
+        <Text style={styles.metaText}>{t.stationId}: {stationId || "N/A"}</Text>
         <Text style={styles.metaText}>
-          Coordinates: {Number.isFinite(detail.latitude) ? detail.latitude.toFixed(6) : "-"},{" "}
+          {t.coords}: {Number.isFinite(detail.latitude) ? detail.latitude.toFixed(6) : "-"},{" "}
           {Number.isFinite(detail.longitude) ? detail.longitude.toFixed(6) : "-"}
         </Text>
-        <Text style={styles.metaText}>Supported fuels: {detail.supportedFuels}</Text>
+        <Text style={styles.metaText}>{t.supportedFuels}: {detail.supportedFuels}</Text>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Fuel Status</Text>
+        <Text style={styles.sectionTitle}>{t.fuelStatus}</Text>
         <Text style={[styles.statusValue, getStatusStyle()]}>{detail.fuelStatus}</Text>
-        <Text style={styles.sectionTitle}>Queue & Wait</Text>
-        <Text style={styles.metaText}>Queue Length: {detail.queueLength} cars</Text>
-        <Text style={styles.metaText}>Estimated Wait: {detail.waitTime} min</Text>
+        <Text style={styles.sectionTitle}>{t.queueWait}</Text>
+        <Text style={styles.metaText}>{t.queueLength}: {detail.queueLength}</Text>
+        <Text style={styles.metaText}>{t.estWait}: {detail.waitTime}</Text>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Queue Reservation & Payment</Text>
+        <Text style={styles.sectionTitle}>{t.reservePay}</Text>
         {!queueEnabled ? (
           <Text style={styles.errorText}>
             This station lacks a valid backend ObjectId. Update station data before queueing.
           </Text>
         ) : null}
 
-        <Text style={styles.metaText}>Requested Band</Text>
+        <Text style={styles.metaText}>{t.requestedBand}</Text>
         <View style={styles.optionsRow}>
           {REQUESTED_BANDS.map((band) => (
             <Pressable
@@ -444,7 +496,7 @@ export default function StationDetails({ route }) {
           ))}
         </View>
 
-        <Text style={styles.metaText}>Fuel Type</Text>
+        <Text style={styles.metaText}>{t.fuelType}</Text>
         <View style={styles.optionsRow}>
           {FUEL_TYPES.map((type) => (
             <Pressable
@@ -458,24 +510,24 @@ export default function StationDetails({ route }) {
             </Pressable>
           ))}
         </View>
-        <Text style={styles.metaText}>How Many Liters</Text>
+        <Text style={styles.metaText}>{t.liters}</Text>
         <TextInput
           style={styles.input}
           value={requestedLiters}
           onChangeText={setRequestedLiters}
           keyboardType="numeric"
-          placeholder="Enter liters (e.g. 25)"
+          placeholder={t.litersPlaceholder}
           placeholderTextColor="#94A3B8"
         />
-        <Text style={styles.metaText}>Current Price ({fuelType}): {selectedUnitPrice.toFixed(2)} ETB/L</Text>
-        <Text style={styles.estimateText}>Estimated Total: {estimatedAmount.toFixed(2)} ETB</Text>
+        <Text style={styles.metaText}>{t.currentPrice} ({fuelType}): {selectedUnitPrice.toFixed(2)} ETB/L</Text>
+        <Text style={styles.estimateText}>{t.estimatedTotal}: {estimatedAmount.toFixed(2)} ETB</Text>
 
         <Pressable
           style={[styles.actionButton, styles.primaryButton, (!queueEnabled || loading) && styles.disabled]}
           onPress={reserveAndInitiate}
           disabled={!queueEnabled || loading}
         >
-          <Text style={styles.primaryButtonText}>Reserve & Pay with Telebirr</Text>
+          <Text style={styles.primaryButtonText}>{t.reservePayBtn}</Text>
         </Pressable>
 
         <Pressable
@@ -483,7 +535,7 @@ export default function StationDetails({ route }) {
           onPress={checkReservationNow}
           disabled={loading || !reservationId}
         >
-          <Text style={styles.secondaryButtonText}>Check Payment Status</Text>
+          <Text style={styles.secondaryButtonText}>{t.checkPaymentBtn}</Text>
         </Pressable>
 
         <Pressable
@@ -491,7 +543,7 @@ export default function StationDetails({ route }) {
           onPress={refreshMyTicket}
           disabled={loading}
         >
-          <Text style={styles.primaryButtonText}>Refresh My Ticket</Text>
+          <Text style={styles.primaryButtonText}>{t.refreshTicketBtn}</Text>
         </Pressable>
 
         <Pressable
@@ -499,7 +551,7 @@ export default function StationDetails({ route }) {
           onPress={leaveMyQueue}
           disabled={loading}
         >
-          <Text style={styles.primaryButtonText}>Leave Queue</Text>
+          <Text style={styles.primaryButtonText}>{t.leaveQueueBtn}</Text>
         </Pressable>
 
         {loading ? <ActivityIndicator size="small" color="#0F766E" style={styles.loader} /> : null}
@@ -511,7 +563,7 @@ export default function StationDetails({ route }) {
 
         {myTicket ? (
           <View style={styles.ticketCard}>
-            <Text style={styles.ticketTitle}>My Active Ticket</Text>
+            <Text style={styles.ticketTitle}>{t.activeTicket}</Text>
             <Text style={styles.metaText}>ticketId: {String(myTicket.ticketId || "-")}</Text>
             <Text style={styles.metaText}>status: {String(myTicket.status || "-")}</Text>
             <Text style={styles.metaText}>position: {String(myTicket.position ?? "-")}</Text>
@@ -524,9 +576,9 @@ export default function StationDetails({ route }) {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Station Check-In (QR + OTP)</Text>
+        <Text style={styles.sectionTitle}>{t.checkInTitle}</Text>
         <Text style={styles.metaText}>
-          Start check-in when you are physically at the station, then share OTP/QR proof with attendant.
+          {t.checkInDesc}
         </Text>
 
         <Pressable
@@ -534,90 +586,46 @@ export default function StationDetails({ route }) {
           onPress={startCheckInNow}
           disabled={loading}
         >
-          <Text style={styles.primaryButtonText}>Start Check-In</Text>
+          <Text style={styles.primaryButtonText}>{t.startCheckInBtn}</Text>
         </Pressable>
 
-        <Text style={styles.metaText}>OTP From Session</Text>
+        <Text style={styles.metaText}>{t.otpFromSession}</Text>
         <View style={styles.readonlyBox}>
           <Text style={styles.readonlyText}>{checkInSession?.otpCode || "-"}</Text>
         </View>
 
-        <Text style={styles.metaText}>Check-In QR</Text>
+        <Text style={styles.metaText}>{t.checkInQr}</Text>
         <View style={styles.qrWrap}>
           {checkInSession?.qrToken ? (
             <QRCode value={checkInSession.qrToken} size={170} />
           ) : (
-            <Text style={styles.metaText}>Start check-in to generate QR.</Text>
+            <Text style={styles.metaText}>{t.startForQr}</Text>
           )}
         </View>
 
-        <Pressable
-          style={[styles.actionButton, styles.infoButton, loading && styles.disabled]}
-          onPress={openScanner}
-          disabled={loading}
-        >
-          <Text style={styles.primaryButtonText}>Scan QR For Verify</Text>
-        </Pressable>
-
-        <Text style={styles.metaText}>QR Token (copy/share or scan in staff app)</Text>
-        <TextInput
-          style={styles.input}
-          value={checkInQrInput}
-          onChangeText={setCheckInQrInput}
-          placeholder="QR token"
-          placeholderTextColor="#94A3B8"
-          multiline
-        />
-
-        <Text style={styles.metaText}>Verify With OTP</Text>
-        <TextInput
-          style={styles.input}
-          value={checkInOtpInput}
-          onChangeText={setCheckInOtpInput}
-          placeholder="Enter 6-digit OTP"
-          placeholderTextColor="#94A3B8"
-          keyboardType="number-pad"
-        />
-
-        <Pressable
-          style={[styles.actionButton, styles.secondaryButton, loading && styles.disabled]}
-          onPress={verifyCheckInNow}
-          disabled={loading}
-        >
-          <Text style={styles.secondaryButtonText}>Verify Check-In</Text>
-        </Pressable>
+        <Text style={styles.metaText}>
+          OTP for attendant: {checkInSession?.otpCode || "-"}
+        </Text>
+        <Text style={styles.metaText}>
+          {t.attendantNote}
+        </Text>
 
         {checkInStatusText ? <Text style={styles.infoText}>{checkInStatusText}</Text> : null}
       </View>
-      <Modal visible={scannerOpen} animationType="slide" onRequestClose={() => setScannerOpen(false)}>
-        <View style={styles.scannerContainer}>
-          <Text style={styles.scannerTitle}>Scan Check-In QR</Text>
-          <View style={styles.scannerFrame}>
-            <CameraView
-              style={styles.scannerCamera}
-              barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-              onBarcodeScanned={onQrScanned}
-            />
-          </View>
-          <Pressable style={[styles.actionButton, styles.dangerButton]} onPress={() => setScannerOpen(false)}>
-            <Text style={styles.primaryButtonText}>Close Scanner</Text>
-          </Pressable>
-        </View>
-      </Modal>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>User Reports / Latest Updates</Text>
+        <Text style={styles.sectionTitle}>{t.reportsTitle}</Text>
         {detail.reports.length ? detail.reports.map((report) => (
           <View key={report.id} style={styles.listItem}>
             <Text style={styles.listTitle}>{report.text}</Text>
             <Text style={styles.listSub}>{report.time}</Text>
           </View>
-        )) : <Text style={styles.metaText}>No live reports for this station yet.</Text>}
+        )) : <Text style={styles.metaText}>{t.noReports}</Text>}
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Ratings & Reviews</Text>
-        <Text style={styles.ratingHeadline}>Average Rating: {detail.avgRating || "-"}/5</Text>
+        <Text style={styles.sectionTitle}>{t.reviewsTitle}</Text>
+        <Text style={styles.ratingHeadline}>{t.avgRating}: {detail.avgRating || "-"}/5</Text>
         {detail.reviews.length ? detail.reviews.map((review) => (
           <View key={review.id} style={styles.listItem}>
             <Text style={styles.listTitle}>
@@ -625,7 +633,7 @@ export default function StationDetails({ route }) {
             </Text>
             <Text style={styles.listSub}>{review.text}</Text>
           </View>
-        )) : <Text style={styles.metaText}>No live reviews for this station yet.</Text>}
+        )) : <Text style={styles.metaText}>{t.noReviews}</Text>}
       </View>
     </ScrollView>
   );
@@ -752,27 +760,4 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   ticketTitle: { fontSize: 13, fontWeight: "900", color: "#065F46", marginBottom: 4 },
-  scannerContainer: {
-    flex: 1,
-    backgroundColor: "#F8FAFC",
-    padding: 16,
-  },
-  scannerTitle: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#0F172A",
-    marginBottom: 10,
-  },
-  scannerFrame: {
-    flex: 1,
-    borderRadius: 16,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "#CBD5E1",
-    marginBottom: 12,
-  },
-  scannerCamera: {
-    width: "100%",
-    height: "100%",
-  },
 });

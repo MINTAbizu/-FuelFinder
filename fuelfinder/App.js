@@ -12,6 +12,7 @@ import StationDetails from "./src/component/screens/home/StationDetails";
 import LoginScreen from "./src/component/screens/auth/LoginScreen";
 import RegisterScreen from "./src/component/screens/auth/RegisterScreen";
 import { AuthProvider, useAuth } from "./src/component/context/AuthContext";
+import { LanguageProvider, useLanguage } from "./src/component/context/LanguageContext";
 
 const queryClient = new QueryClient();
 const RootStack = createNativeStackNavigator();
@@ -19,38 +20,45 @@ const HomeStack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 function LoadingScreen() {
+  const { t } = useLanguage();
   return (
     <View style={styles.loadingScreen}>
       <ActivityIndicator size="large" color="#0F766E" />
-      <Text style={styles.loadingText}>Loading session...</Text>
+      <Text style={styles.loadingText}>{t("loadingSession")}</Text>
     </View>
   );
 }
 
 function PlaceholderScreen({ title }) {
+  const { t } = useLanguage();
   return (
     <View style={styles.placeholderScreen}>
       <Text style={styles.placeholderTitle}>{title}</Text>
-      <Text style={styles.placeholderSubTitle}>Coming soon</Text>
+      <Text style={styles.placeholderSubTitle}>{t("comingSoon")}</Text>
     </View>
   );
 }
 
 function ProfileScreen() {
   const { user, signOut } = useAuth();
+  const { t, toggleLanguage, language } = useLanguage();
   return (
     <View style={styles.profileScreen}>
-      <Text style={styles.profileTitle}>Profile</Text>
-      <Text style={styles.profileText}>Name: {user?.name || "-"}</Text>
-      <Text style={styles.profileText}>Email: {user?.email || "-"}</Text>
+      <Text style={styles.profileTitle}>{t("profile")}</Text>
+      <Text style={styles.profileText}>{t("name")}: {user?.name || "-"}</Text>
+      <Text style={styles.profileText}>{t("email")}: {user?.email || "-"}</Text>
+      <Text style={styles.profileText} onPress={toggleLanguage}>
+        {language === "am" ? t("switchToEn") : t("switchToAm")}
+      </Text>
       <Text style={styles.profileLogout} onPress={signOut}>
-        Logout
+        {t("logout")}
       </Text>
     </View>
   );
 }
 
 function HomeStackNavigator() {
+  const { t } = useLanguage();
   return (
     <HomeStack.Navigator>
       <HomeStack.Screen
@@ -61,13 +69,14 @@ function HomeStackNavigator() {
       <HomeStack.Screen
         name="StationDetails"
         component={StationDetails}
-        options={{ title: "Station Details" }}
+        options={{ title: t("stationDetails") }}
       />
     </HomeStack.Navigator>
   );
 }
 
 function AppTabs() {
+  const { t } = useLanguage();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -94,16 +103,18 @@ function AppTabs() {
         },
       })}
     >
-      <Tab.Screen name="Home" component={HomeStackNavigator} />
+      <Tab.Screen name="Home" component={HomeStackNavigator} options={{ title: t("home") }} />
       <Tab.Screen
         name="Map"
+        options={{ title: t("map") }}
         children={() => <PlaceholderScreen title="Map" />}
       />
       <Tab.Screen
         name="Alerts"
+        options={{ title: t("alerts") }}
         children={() => <PlaceholderScreen title="Alerts" />}
       />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: t("profile") }} />
     </Tab.Navigator>
   );
 }
@@ -135,9 +146,11 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <AppNavigator />
-        </AuthProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <AppNavigator />
+          </AuthProvider>
+        </LanguageProvider>
       </QueryClientProvider>
     </SafeAreaProvider>
   );

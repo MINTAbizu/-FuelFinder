@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -11,10 +11,39 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../context/AuthContext";
+import { useLanguage } from "../../context/LanguageContext";
 import { API_BASE_URL } from "../../services/api";
+
+const I18N = {
+  en: {
+    title: "Welcome Back",
+    subtitle: "Login to continue with FuelFinder",
+    email: "Email",
+    password: "Password",
+    requiredError: "Enter both email and password.",
+    cannotConnect: "Cannot connect to backend",
+    login: "Login",
+    newHere: "New here?",
+    createAccount: "Create account",
+  },
+  am: {
+    title: "\u12a5\u1295\u12b3\u1295 \u12f0\u1205\u1293 \u1218\u1321",
+    subtitle: "FuelFinder \u1208\u1218\u1240\u1320\u120d \u12ed\u130d\u1261",
+    email: "\u12a2\u121c\u12ed\u120d",
+    password: "\u12ed\u1208\u134d \u1243\u120d",
+    requiredError: "\u12a2\u121c\u12ed\u120d \u12a5\u1293 \u12ed\u1208\u134d \u1243\u120d \u12eb\u1235\u1308\u1261\u1362",
+    cannotConnect: "Backend \u130b\u122d \u1218\u1308\u1293\u1298\u1275 \u12a0\u120d\u1270\u127b\u1208\u121d",
+    login: "\u130d\u1263",
+    newHere: "\u12a0\u12f2\u1235 \u1290\u1205?",
+    createAccount: "\u1218\u1208\u12eb \u134d\u1320\u122d",
+  },
+};
 
 export default function LoginScreen({ navigation }) {
   const { signIn } = useAuth();
+  const { language } = useLanguage();
+  const t = useMemo(() => I18N[language] || I18N.en, [language]);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -23,7 +52,7 @@ export default function LoginScreen({ navigation }) {
   const onLogin = async () => {
     setError("");
     if (!email.trim() || !password) {
-      setError("Enter both email and password.");
+      setError(t.requiredError);
       return;
     }
 
@@ -35,7 +64,7 @@ export default function LoginScreen({ navigation }) {
       if (backendMessage) {
         setError(backendMessage);
       } else {
-        setError(`Cannot connect to backend (${API_BASE_URL}).`);
+        setError(`${t.cannotConnect} (${API_BASE_URL}).`);
       }
     } finally {
       setLoading(false);
@@ -48,11 +77,11 @@ export default function LoginScreen({ navigation }) {
         style={styles.container}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <Text style={styles.title}>Welcome Back</Text>
-        <Text style={styles.subtitle}>Login to continue with FuelFinder</Text>
+        <Text style={styles.title}>{t.title}</Text>
+        <Text style={styles.subtitle}>{t.subtitle}</Text>
 
         <TextInput
-          placeholder="Email"
+          placeholder={t.email}
           value={email}
           onChangeText={setEmail}
           style={styles.input}
@@ -60,7 +89,7 @@ export default function LoginScreen({ navigation }) {
           keyboardType="email-address"
         />
         <TextInput
-          placeholder="Password"
+          placeholder={t.password}
           value={password}
           onChangeText={setPassword}
           style={styles.input}
@@ -73,14 +102,14 @@ export default function LoginScreen({ navigation }) {
           {loading ? (
             <ActivityIndicator color="#fff" size="small" />
           ) : (
-            <Text style={styles.primaryBtnText}>Login</Text>
+            <Text style={styles.primaryBtnText}>{t.login}</Text>
           )}
         </Pressable>
 
         <View style={styles.row}>
-          <Text style={styles.helper}>New here?</Text>
+          <Text style={styles.helper}>{t.newHere}</Text>
           <Pressable onPress={() => navigation.navigate("Register")}>
-            <Text style={styles.link}> Create account</Text>
+            <Text style={styles.link}> {t.createAccount}</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>
