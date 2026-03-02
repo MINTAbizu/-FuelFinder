@@ -1,8 +1,8 @@
 import axios from "axios";
 
 // Use your machine LAN IP for physical devices, e.g. http://192.168.1.20:5000/api
-const rawBaseUrl =  "http://192.168.43.251:5000"
-  // process.env.EXPO_PUBLIC_API_BASE_URL || "https://fuelfinder-2.onrender.com";
+const rawBaseUrl =
+  process.env.EXPO_PUBLIC_API_BASE_URL || "https://fuelfinder-2.onrender.com";
 
 export const API_BASE_URL = rawBaseUrl.replace(/\/+$/, "").endsWith("/api")
   ? rawBaseUrl.replace(/\/+$/, "")

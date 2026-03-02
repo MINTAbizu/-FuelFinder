@@ -189,6 +189,12 @@ export default function HomeScreen({ navigation }) {
       setStations(liveStations);
     } catch (error) {
       setStationsError("Failed to load nearby real fuel stations.");
+      console.error(
+        "[Stations:loadNearbyStations:debug]",
+        error?.response?.status,
+        error?.response?.data,
+        error?.message
+      );
       if (error?.response?.status !== 404) {
         console.error("[Stations:loadNearbyStations]", error?.message || error);
       }
