@@ -1,22 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { getMyQueueTicket, getReservationStatus, leaveQueue, reserveQueueSlot, startTelebirrCheckout } from "../../services/queueService";
+import { getMyQueueTicket, getReservationStatus, getStationQueue, leaveQueue, reserveQueueSlot, startTelebirrCheckout } from "../../services/queueService";
 
 const statusMap = {
   available: "Full",
   limited: "Partial",
   empty: "Empty",
 };
-
-const fallbackReports = [
-  { id: "r1", text: "Queue moving normally", time: "12 min ago" },
-  { id: "r2", text: "Diesel available", time: "34 min ago" },
-];
-
-const fallbackReviews = [
-  { id: "v1", user: "Mikael", rating: 5, text: "Fast service and clean station." },
-  { id: "v2", user: "Sara", rating: 4, text: "Good availability, line was moderate." },
-];
 
 const getWaitEstimate = (queueLength) => Math.max(2, Number(queueLength || 0) * 3);
 const REQUESTED_BANDS = ["10-20", "20-40", "40+"];
@@ -42,6 +32,16 @@ function logReservationError(scope, error) {
   });
 }
 
+function formatSupportedFuels(supportedFuels) {
+  const map = supportedFuels || {};
+  const values = [];
+  if (map.gasoline) values.push("gasoline");
+  if (map.diesel) values.push("diesel");
+  if (map.other) values.push("other");
+  if (map.unknown || !values.length) return "not specified";
+  return values.join(", ");
+}
+
 export default function StationDetails({ route }) {
   const { station } = route.params || {};
   const [requestedBand, setRequestedBand] = useState("10-20");
@@ -54,6 +54,7 @@ export default function StationDetails({ route }) {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [paymentPhase, setPaymentPhase] = useState("idle");
+  const [liveQueueCount, setLiveQueueCount] = useState(null);
   const pollRef = useRef(null);
 
   const stationId = useMemo(
@@ -82,17 +83,22 @@ export default function StationDetails({ route }) {
     : 0;
 
   const detail = useMemo(() => {
-    const queue = Number(station?.queue_length || 0);
+    const queue = Number(
+      liveQueueCount !== null && liveQueueCount !== undefined ? liveQueueCount : station?.queue_length || 0
+    );
     const fuelStatus = statusMap[station?.fuel_status] || "Partial";
     return {
       name: station?.name || "Fuel Station",
-      address: station?.address || "Addis Ababa, Ethiopia",
-      contact: station?.contact || "+251 900 000 000",
+      address: station?.address || "Address not listed",
+      contact: station?.contact || "Not listed",
+      latitude: Number(station?.latitude),
+      longitude: Number(station?.longitude),
+      supportedFuels: formatSupportedFuels(station?.supportedFuels),
       fuelStatus,
       queueLength: queue,
       waitTime: getWaitEstimate(queue),
-      reports: station?.reports?.length ? station.reports : fallbackReports,
-      reviews: station?.reviews?.length ? station.reviews : fallbackReviews,
+      reports: Array.isArray(station?.reports) ? station.reports : [],
+      reviews: Array.isArray(station?.reviews) ? station.reviews : [],
       avgRating:
         station?.reviews?.length
           ? (
@@ -101,13 +107,31 @@ export default function StationDetails({ route }) {
             ).toFixed(1)
           : "4.5",
     };
-  }, [station]);
+  }, [liveQueueCount, station]);
 
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (!queueEnabled) return undefined;
+    (async () => {
+      try {
+        const queue = await getStationQueue(stationId);
+        if (!active) return;
+        setLiveQueueCount(Number(queue?.waitingCount || 0));
+      } catch (_error) {
+        if (!active) return;
+        setLiveQueueCount(null);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [queueEnabled, stationId]);
 
   const refreshMyTicket = useCallback(async () => {
     if (!queueEnabled) return;
@@ -268,6 +292,11 @@ export default function StationDetails({ route }) {
         <Text style={styles.metaText}>Address: {detail.address}</Text>
         <Text style={styles.metaText}>Contact: {detail.contact}</Text>
         <Text style={styles.metaText}>Station ID: {stationId || "N/A"}</Text>
+        <Text style={styles.metaText}>
+          Coordinates: {Number.isFinite(detail.latitude) ? detail.latitude.toFixed(6) : "-"},{" "}
+          {Number.isFinite(detail.longitude) ? detail.longitude.toFixed(6) : "-"}
+        </Text>
+        <Text style={styles.metaText}>Supported fuels: {detail.supportedFuels}</Text>
       </View>
 
       <View style={styles.card}>
@@ -382,25 +411,25 @@ export default function StationDetails({ route }) {
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>User Reports / Latest Updates</Text>
-        {detail.reports.map((report) => (
+        {detail.reports.length ? detail.reports.map((report) => (
           <View key={report.id} style={styles.listItem}>
             <Text style={styles.listTitle}>{report.text}</Text>
             <Text style={styles.listSub}>{report.time}</Text>
           </View>
-        ))}
+        )) : <Text style={styles.metaText}>No live reports for this station yet.</Text>}
       </View>
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Ratings & Reviews</Text>
-        <Text style={styles.ratingHeadline}>Average Rating: {detail.avgRating}/5</Text>
-        {detail.reviews.map((review) => (
+        <Text style={styles.ratingHeadline}>Average Rating: {detail.avgRating || "-"}/5</Text>
+        {detail.reviews.length ? detail.reviews.map((review) => (
           <View key={review.id} style={styles.listItem}>
             <Text style={styles.listTitle}>
               {review.user} ({review.rating}/5)
             </Text>
             <Text style={styles.listSub}>{review.text}</Text>
           </View>
-        ))}
+        )) : <Text style={styles.metaText}>No live reviews for this station yet.</Text>}
       </View>
     </ScrollView>
   );

@@ -34,3 +34,8 @@ export async function leaveQueue(ticketId) {
   const { data } = await api.post("/queue/leave", { ticketId });
   return data;
 }
+
+export async function getStationQueue(stationId) {
+  const { data } = await api.get(`/queue/station/${stationId}`);
+  return data;
+}

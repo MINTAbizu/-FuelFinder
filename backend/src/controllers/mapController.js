@@ -1,8 +1,49 @@
 const { fetchNearbyFuelStations, fetchDrivingRoute } = require("../services/mapService");
+const Station = require("../models/Station");
 
 function parseNumber(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+}
+
+async function attachBackendStationIds(stations) {
+  const mapped = await Promise.all(
+    (stations || []).map(async (station) => {
+      const lat = Number(station?.latitude);
+      const lon = Number(station?.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return station;
+      const sourceId = String(station?.id || "").trim();
+      if (!sourceId) return station;
+
+      const doc = await Station.findOneAndUpdate(
+        { externalSource: "osm", externalSourceId: sourceId },
+        {
+          $set: {
+            name: String(station?.name || "Fuel Station").trim(),
+            address: String(station?.address || "Address not listed").trim(),
+            contact: String(station?.contact || "").trim(),
+            location: { type: "Point", coordinates: [lon, lat] },
+            isActive: true
+          },
+          $setOnInsert: {
+            fuelStatus: "partial"
+          }
+        },
+        {
+          new: true,
+          upsert: true,
+          setDefaultsOnInsert: true
+        }
+      );
+
+      return {
+        ...station,
+        stationId: String(doc?._id || "")
+      };
+    })
+  );
+
+  return mapped;
 }
 
 exports.getNearbyFuelStations = async (req, res) => {
@@ -15,7 +56,8 @@ exports.getNearbyFuelStations = async (req, res) => {
     }
 
     const stations = await fetchNearbyFuelStations(lat, lon, radius);
-    return res.json({ stations });
+    const withBackendIds = await attachBackendStationIds(stations);
+    return res.json({ stations: withBackendIds });
   } catch (_error) {
     return res.status(500).json({ message: "Failed to load nearby fuel stations." });
   }
@@ -37,4 +79,3 @@ exports.getDrivingRoute = async (req, res) => {
     return res.status(500).json({ message: "Failed to load driving route." });
   }
 };
-
