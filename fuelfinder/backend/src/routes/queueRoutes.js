@@ -13,6 +13,8 @@ router.post("/confirm-payment", auth, queueController.confirmReservationPayment)
 router.post("/join", auth, queueController.joinQueue);
 router.get("/me/:stationId", auth, queueController.getMyTicket);
 router.post("/leave", auth, queueController.leaveQueue);
+router.post("/check-in/start", auth, queueController.startCheckIn);
+router.post("/check-in/verify", auth, queueController.verifyCheckIn);
 router.get("/station/:stationId", queueController.getStationQueue);
 router.post("/next", queueController.nextInQueue); // protect with staff/admin auth later
 
