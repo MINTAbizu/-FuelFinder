@@ -11,10 +11,10 @@ import {
   Pressable,
   ScrollView,
 } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import MapView, { Marker, Polyline } from "react-native-maps";
 import * as Location from "expo-location";
-import { useQuery } from "@tanstack/react-query";
 import { SafeAreaView } from "react-native-safe-area-context";
+import api from "../../services/api";
 
 const COLORS = {
   bg: "#F4F7FB",
@@ -50,6 +50,12 @@ const SORT_OPTIONS = [
   { label: "Shortest Queue", value: "queue" },
   { label: "A-Z", value: "name" },
 ];
+const FUEL_PREF_OPTIONS = [
+  { label: "Any Fuel", value: "any" },
+  { label: "Gasoline", value: "gasoline" },
+  { label: "Diesel", value: "diesel" },
+  { label: "Other", value: "other" },
+];
 
 const IMPORTANT_NOTICES = [
   {
@@ -72,42 +78,16 @@ const IMPORTANT_NOTICES = [
   },
 ];
 
-// Mock API
-const fetchStations = async () => {
-  await new Promise((res) => setTimeout(res, 500));
-  return [
-    {
-      id: 1,
-      stationId: "65f0c8a1b02d6a5e9f410001",
-      name: "Total Station",
-      latitude: 8.9806,
-      longitude: 38.7578,
-      fuel_status: "available",
-      queue_length: 5,
-      image: "https://example.com/total.jpg",
-    },
-    {
-      id: 2,
-      stationId: "65f0c8a1b02d6a5e9f410002",
-      name: "Oil Libya",
-      latitude: 8.998,
-      longitude: 38.788,
-      fuel_status: "available",
-      queue_length: 12,
-      image: "https://example.com/libya.jpg",
-    },
-    {
-      id: 3,
-      stationId: "65f0c8a1b02d6a5e9f410003",
-      name: "NP Station",
-      latitude: 8.985,
-      longitude: 38.765,
-      fuel_status: "limited",
-      queue_length: 20,
-      image: "https://example.com/np.jpg",
-    },
-  ];
-};
+
+async function fetchNearbyFuelStations(basePoint, radiusMeters = 12000) {
+  const lat = Number(basePoint?.latitude);
+  const lon = Number(basePoint?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
+  const { data } = await api.get("/map/nearby-fuel", {
+    params: { lat, lon, radius: radiusMeters },
+  });
+  return Array.isArray(data?.stations) ? data.stations : [];
+}
 
 const getDistanceKm = (from, to) => {
   if (!from || !to) return null;
@@ -138,6 +118,7 @@ export default function HomeScreen({ navigation }) {
   const mapRef = useRef(null);
   const listRef = useRef(null);
   const locationWatcherRef = useRef(null);
+  const hasAutoLoadedStationsRef = useRef(false);
   const [location, setLocation] = useState(null);
   const [mapCenter, setMapCenter] = useState({
     latitude: DEFAULT_REGION.latitude,
@@ -147,14 +128,16 @@ export default function HomeScreen({ navigation }) {
   const [searchText, setSearchText] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState("all");
+  const [preferredFuel, setPreferredFuel] = useState("any");
   const [sortBy, setSortBy] = useState("distance");
   const [centerNotice, setCenterNotice] = useState("");
-
-  const { data: stations = [], refetch, isFetching, error } = useQuery({
-    queryKey: ["stations"],
-    queryFn: fetchStations,
-    staleTime: 1000 * 60 * 5,
-  });
+  const [stations, setStations] = useState([]);
+  const [stationsLoading, setStationsLoading] = useState(false);
+  const [stationsError, setStationsError] = useState("");
+  const [routeCoords, setRouteCoords] = useState([]);
+  const [routeSummary, setRouteSummary] = useState(null);
+  const [routingError, setRoutingError] = useState("");
+  const [activeRouteStationId, setActiveRouteStationId] = useState("");
 
   // Get location
   useEffect(() => {
@@ -196,14 +179,32 @@ export default function HomeScreen({ navigation }) {
     };
   }, []);
 
+  const loadNearbyStations = useCallback(async () => {
+    const basePoint = location || mapCenter;
+    if (!basePoint) return;
+    setStationsLoading(true);
+    setStationsError("");
+    try {
+      const liveStations = await fetchNearbyFuelStations(basePoint, 12000);
+      setStations(liveStations);
+    } catch (error) {
+      setStationsError("Failed to load nearby real fuel stations.");
+      if (error?.response?.status !== 404) {
+        console.error("[Stations:loadNearbyStations]", error?.message || error);
+      }
+    } finally {
+      setStationsLoading(false);
+    }
+  }, [location, mapCenter]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await refetch();
+      await loadNearbyStations();
     } finally {
       setRefreshing(false);
     }
-  }, [refetch]);
+  }, [loadNearbyStations]);
 
   const onCenterMap = useCallback(() => {
     if (!mapRef.current || !location) return;
@@ -220,13 +221,77 @@ export default function HomeScreen({ navigation }) {
     setTimeout(() => setCenterNotice(""), 1200);
   }, [location]);
 
+  const drawRouteToStation = useCallback(
+    async (station) => {
+      listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
+      if (!location) {
+        setRoutingError("Current location is required to draw directions.");
+        return;
+      }
+
+      setRoutingError("");
+      const fromLat = Number(location.latitude);
+      const fromLon = Number(location.longitude);
+      const toLat = Number(station?.latitude);
+      const toLon = Number(station?.longitude);
+      if (!Number.isFinite(fromLat) || !Number.isFinite(fromLon) || !Number.isFinite(toLat) || !Number.isFinite(toLon)) {
+        setRoutingError("Invalid location coordinates for route.");
+        return;
+      }
+
+      try {
+        const { data } = await api.get("/map/route", {
+          params: { fromLat, fromLon, toLat, toLon },
+        });
+        const nextCoords = Array.isArray(data?.coordinates) ? data.coordinates : [];
+        if (!nextCoords.length) {
+          setRouteCoords([]);
+          setRouteSummary(null);
+          setActiveRouteStationId("");
+          setRoutingError("Live road route unavailable right now. Please try again.");
+          return;
+        }
+
+        setRouteCoords(nextCoords);
+        setRouteSummary({
+          distanceKm: Number(data?.distanceKm || 0),
+          durationMin: Number(data?.durationMin || 0),
+        });
+        setActiveRouteStationId(String(station.id || ""));
+
+        if (mapRef.current) {
+          mapRef.current.fitToCoordinates(
+            [
+              { latitude: fromLat, longitude: fromLon },
+              { latitude: toLat, longitude: toLon },
+            ],
+            { edgePadding: { top: 80, right: 40, bottom: 80, left: 40 }, animated: true }
+          );
+        }
+      } catch (error) {
+        setRouteCoords([]);
+        setRouteSummary(null);
+        setActiveRouteStationId("");
+        setRoutingError("Network routing failed. Could not load road path.");
+        console.error("[Directions:drawRouteToStation]", error?.message || error);
+      }
+    },
+    [location]
+  );
+
+  useEffect(() => {
+    if (!location || hasAutoLoadedStationsRef.current) return;
+    hasAutoLoadedStationsRef.current = true;
+    loadNearbyStations();
+  }, [location, loadNearbyStations]);
+
   const onSelectStatusFilter = useCallback(
     (statusValue) => {
       setSelectedStatus(statusValue);
 
       // Jump user directly to station cards area after picking a status filter.
       setTimeout(() => {
-        listRef.current?.scrollToIndex?.({ index: 0, animated: true });
+        listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
       }, 120);
     },
     [setSelectedStatus]
@@ -270,8 +335,14 @@ export default function HomeScreen({ navigation }) {
     const distanceBase = location || mapCenter;
 
     const results = stations
-      .filter((s) => s.name.toLowerCase().includes(normalizedSearch))
+      .filter((s) => String(s.name || "").toLowerCase().includes(normalizedSearch))
       .filter((s) => selectedStatus === "all" || s.fuel_status === selectedStatus)
+      .filter(
+        (s) =>
+          preferredFuel === "any" ||
+          s?.supportedFuels?.[preferredFuel] === true ||
+          s?.supportedFuels?.unknown === true
+      )
       .map((s) => ({
         ...s,
         distanceKm: getDistanceKm(distanceBase, {
@@ -335,7 +406,7 @@ export default function HomeScreen({ navigation }) {
       ...station,
       isTopPick: station.id === topId,
     }));
-  }, [stations, searchText, selectedStatus, sortBy, location, mapCenter]);
+  }, [stations, searchText, selectedStatus, preferredFuel, sortBy, location, mapCenter]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -351,7 +422,7 @@ export default function HomeScreen({ navigation }) {
             listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
           }}
           refreshControl={
-            <RefreshControl refreshing={refreshing || isFetching} onRefresh={onRefresh} />
+            <RefreshControl refreshing={refreshing || stationsLoading} onRefresh={onRefresh} />
           }
           ListHeaderComponent={
             <View>
@@ -384,6 +455,13 @@ export default function HomeScreen({ navigation }) {
                     setMapCenter({ latitude: region.latitude, longitude: region.longitude })
                   }
                 >
+                  {routeCoords.length > 0 ? (
+                    <Polyline
+                      coordinates={routeCoords}
+                      strokeWidth={5}
+                      strokeColor="#2563EB"
+                    />
+                  ) : null}
                   {filteredStations.map((station) => (
                     <Marker
                       key={station.id}
@@ -413,22 +491,28 @@ export default function HomeScreen({ navigation }) {
                   </View>
                 )}
                 <Pressable
-                  onPress={onRefresh}
+                  onPress={loadNearbyStations}
                   style={({ pressed }) => [
                     styles.secondaryActionButton,
                     pressed && styles.secondaryActionButtonPressed,
                   ]}
                 >
-                  <Text style={styles.actionButtonText}>Refresh</Text>
+                  <Text style={styles.actionButtonText}>Find Nearby Stations</Text>
                 </Pressable>
               </View>
+              {routeSummary ? (
+                <Text style={styles.routeSummaryText}>
+                  Route: {routeSummary.distanceKm.toFixed(1)} km, about {Math.max(1, Math.round(routeSummary.durationMin))} min
+                </Text>
+              ) : null}
+              {routingError ? <Text style={styles.inlineError}>{routingError}</Text> : null}
               {centerNotice ? <Text style={styles.centerNotice}>{centerNotice}</Text> : null}
               {locationError ? (
                 <Text style={styles.inlineNotice}>
                   {locationError} Distances are estimated from map center.
                 </Text>
               ) : null}
-              {error ? <Text style={styles.inlineError}>Could not load stations.</Text> : null}
+              {stationsError ? <Text style={styles.inlineError}>{stationsError}</Text> : null}
 
               <View style={styles.searchContainer}>
                 <TextInput
@@ -463,6 +547,33 @@ export default function HomeScreen({ navigation }) {
                     </TouchableOpacity>
                   );
                 })}
+              </ScrollView>
+
+              <Text style={styles.sectionTitle}>Fuel preference</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.filterRow}
+              >
+                {FUEL_PREF_OPTIONS.map((option) => (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[
+                      styles.chip,
+                      preferredFuel === option.value ? styles.sortChipActive : styles.sortChip,
+                    ]}
+                    onPress={() => setPreferredFuel(option.value)}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        preferredFuel === option.value ? styles.sortChipTextActive : styles.sortChipText,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </ScrollView>
 
               <Text style={styles.sectionTitle}>Sort stations</Text>
@@ -529,7 +640,13 @@ export default function HomeScreen({ navigation }) {
                 style={styles.card}
                 onPress={() => navigation?.navigate?.("StationDetails", { station: item })}
               >
-                <Image source={{ uri: item.image }} style={styles.stationImage} />
+                {item.image ? (
+                  <Image source={{ uri: item.image }} style={styles.stationImage} />
+                ) : (
+                  <View style={styles.stationImagePlaceholder}>
+                    <Text style={styles.stationImagePlaceholderText}>⛽</Text>
+                  </View>
+                )}
                 <View style={styles.cardContent}>
                   {item.isTopPick ? (
                     <View style={styles.topPickBadge}>
@@ -569,10 +686,19 @@ export default function HomeScreen({ navigation }) {
                   <View style={styles.insightRow}>
                     <Text style={styles.insightReason}>{item.reason}</Text>
                   </View>
+                  <Text style={styles.metaAddress}>{item.address || "Address not listed"}</Text>
                   <View style={styles.smartScoreBottom}>
                     <Text style={styles.smartScoreBottomLabel}>Smart score</Text>
                     <Text style={styles.smartScoreBottomValue}>{item.smartScore}/100</Text>
                   </View>
+                  <Pressable
+                    style={styles.directionButton}
+                    onPress={() => drawRouteToStation(item)}
+                  >
+                    <Text style={styles.directionButtonText}>
+                      {activeRouteStationId === String(item.id || "") ? "Route Shown" : "Show Route"}
+                    </Text>
+                  </Pressable>
                 </View>
               </TouchableOpacity>
             )}
@@ -670,6 +796,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   },
+  routeSummaryText: {
+    marginTop: 8,
+    marginBottom: 2,
+    color: "#1D4ED8",
+    fontSize: 12,
+    fontWeight: "700",
+  },
   inlineNotice: { color: COLORS.muted, marginTop: 4, marginBottom: 4, fontWeight: "500" },
   inlineError: { color: COLORS.danger, marginTop: 2, marginBottom: 4, fontWeight: "600" },
   searchContainer: { paddingVertical: 8, backgroundColor: "transparent" },
@@ -725,6 +858,16 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   stationImage: { width: 56, height: 56, borderRadius: 8, marginRight: 8 },
+  stationImagePlaceholder: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    marginRight: 8,
+    backgroundColor: "#E2E8F0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stationImagePlaceholderText: { fontSize: 24 },
   cardContent: { flex: 1, justifyContent: "flex-start", alignItems: "flex-start" },
   topPickBadge: {
     alignSelf: "flex-start",
@@ -798,6 +941,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "left",
   },
+  metaAddress: {
+    marginTop: 4,
+    color: "#475569",
+    fontSize: 11,
+    fontWeight: "600",
+  },
   smartScoreBottom: {
     marginTop: 5,
     flexDirection: "row",
@@ -809,6 +958,15 @@ const styles = StyleSheet.create({
   },
   smartScoreBottomLabel: { color: "#334155", fontSize: 10, fontWeight: "700" },
   smartScoreBottomValue: { color: "#1D4ED8", fontSize: 12, fontWeight: "900" },
+  directionButton: {
+    marginTop: 6,
+    alignSelf: "flex-start",
+    backgroundColor: "#0F766E",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  directionButtonText: { color: "#FFFFFF", fontSize: 11, fontWeight: "800" },
   emptyState: { paddingTop: 36, alignItems: "center", paddingHorizontal: 16 },
   emptyTitle: { fontWeight: "700", color: COLORS.text, marginBottom: 6 },
   emptySubTitle: { color: COLORS.muted, textAlign: "center" },

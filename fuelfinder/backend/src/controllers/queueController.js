@@ -103,6 +103,20 @@ function resolveFuelType(value) {
   return null;
 }
 
+function resolveRequestedLiters(value) {
+  const liters = Number(value);
+  if (!Number.isFinite(liters)) return null;
+  if (liters <= 0 || liters > 1000) return null;
+  return Number(liters.toFixed(2));
+}
+
+function resolveUnitPrice(value) {
+  const price = Number(value);
+  if (!Number.isFinite(price)) return null;
+  if (price < 0 || price > 100000) return null;
+  return Number(price.toFixed(2));
+}
+
 async function activatePaidTicket(ticket, paymentReference, paymentSessionId) {
   const queueCount = await QueueTicket.countDocuments({
     stationId: ticket.stationId,
@@ -129,6 +143,8 @@ exports.reserveQueueSlot = async (req, res) => {
     const { stationId } = req.body;
     const requestedBand = resolveRequestedBand(req.body.requestedBand);
     const fuelType = resolveFuelType(req.body.fuelType);
+    const requestedLiters = resolveRequestedLiters(req.body.requestedLiters);
+    const unitPrice = resolveUnitPrice(req.body.unitPrice);
 
     if (!isObjectId(userId) || !isObjectId(stationId)) {
       return res.status(400).json({ message: "Invalid userId or stationId." });
@@ -138,6 +154,12 @@ exports.reserveQueueSlot = async (req, res) => {
     }
     if (!fuelType) {
       return res.status(400).json({ message: "fuelType must be one of: gasoline, diesel, other." });
+    }
+    if (requestedLiters === null) {
+      return res.status(400).json({ message: "requestedLiters must be a number between 1 and 1000." });
+    }
+    if (unitPrice === null) {
+      return res.status(400).json({ message: "unitPrice must be a non-negative number." });
     }
 
     await expireStaleTickets(stationId);
@@ -157,6 +179,7 @@ exports.reserveQueueSlot = async (req, res) => {
     }
 
     const depositAmount = RESERVATION_BAND_DEPOSITS[requestedBand];
+    const estimatedAmount = Number((requestedLiters * unitPrice).toFixed(2));
     const paymentExpiresAt = new Date(Date.now() + PAYMENT_WINDOW_MINUTES * 60 * 1000);
 
     const ticket = await QueueTicket.create({
@@ -165,6 +188,9 @@ exports.reserveQueueSlot = async (req, res) => {
       status: "pending_payment",
       position: 0,
       fuelType,
+      requestedLiters,
+      unitPrice,
+      estimatedAmount,
       requestedBand,
       depositAmount,
       depositStatus: depositAmount > 0 ? "pending" : "not_required",
@@ -177,6 +203,9 @@ exports.reserveQueueSlot = async (req, res) => {
       status: ticket.status,
       requestedBand: ticket.requestedBand,
       fuelType: ticket.fuelType,
+      requestedLiters: ticket.requestedLiters,
+      unitPrice: ticket.unitPrice,
+      estimatedAmount: ticket.estimatedAmount,
       depositAmount: ticket.depositAmount,
       depositCurrency: ticket.depositCurrency,
       paymentExpiresAt: ticket.paymentExpiresAt
@@ -442,9 +471,14 @@ exports.getMyReservationStatus = async (req, res) => {
       stationId: freshTicket.stationId,
       status: freshTicket.status,
       position: freshTicket.position,
+      requestedBand: freshTicket.requestedBand,
+      fuelType: freshTicket.fuelType,
       paymentProvider: freshTicket.paymentProvider,
       paymentSessionId: freshTicket.paymentSessionId,
       paymentReference: freshTicket.paymentReference,
+      requestedLiters: freshTicket.requestedLiters,
+      unitPrice: freshTicket.unitPrice,
+      estimatedAmount: freshTicket.estimatedAmount,
       depositStatus: freshTicket.depositStatus,
       paymentExpiresAt: freshTicket.paymentExpiresAt,
       depositPaidAt: freshTicket.depositPaidAt
@@ -482,6 +516,9 @@ exports.getMyTicket = async (req, res) => {
       etaMinutes,
       requestedBand: ticket.requestedBand,
       fuelType: ticket.fuelType,
+      requestedLiters: ticket.requestedLiters,
+      unitPrice: ticket.unitPrice,
+      estimatedAmount: ticket.estimatedAmount,
       depositAmount: ticket.depositAmount,
       depositCurrency: ticket.depositCurrency,
       depositStatus: ticket.depositStatus,

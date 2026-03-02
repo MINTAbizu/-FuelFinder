@@ -1,0 +1,10 @@
+const express = require("express");
+const mapController = require("../controllers/mapController");
+
+const router = express.Router();
+
+router.get("/nearby-fuel", mapController.getNearbyFuelStations);
+router.get("/route", mapController.getDrivingRoute);
+
+module.exports = router;
+

@@ -21,6 +21,9 @@ const queueTicketSchema = new mongoose.Schema(
       enum: ["gasoline", "diesel", "other"],
       default: "gasoline"
     },
+    requestedLiters: { type: Number, default: 0 },
+    unitPrice: { type: Number, default: 0 },
+    estimatedAmount: { type: Number, default: 0 },
     requestedBand: {
       type: String,
       enum: ["10-20", "20-40", "40+"],

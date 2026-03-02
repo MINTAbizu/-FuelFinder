@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { getMyQueueTicket, getReservationStatus, leaveQueue, reserveQueueSlot, startTelebirrCheckout } from "../../services/queueService";
 
 const statusMap = {
@@ -21,6 +21,11 @@ const fallbackReviews = [
 const getWaitEstimate = (queueLength) => Math.max(2, Number(queueLength || 0) * 3);
 const REQUESTED_BANDS = ["10-20", "20-40", "40+"];
 const FUEL_TYPES = ["gasoline", "diesel", "other"];
+const DEFAULT_FUEL_PRICES = {
+  gasoline: 95,
+  diesel: 92,
+  other: 90,
+};
 
 function isObjectId(value) {
   return /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
@@ -41,6 +46,7 @@ export default function StationDetails({ route }) {
   const { station } = route.params || {};
   const [requestedBand, setRequestedBand] = useState("10-20");
   const [fuelType, setFuelType] = useState("gasoline");
+  const [requestedLiters, setRequestedLiters] = useState("10");
   const [reservationId, setReservationId] = useState("");
   const [prepayId, setPrepayId] = useState("");
   const [rawRequest, setRawRequest] = useState("");
@@ -55,6 +61,25 @@ export default function StationDetails({ route }) {
     [station]
   );
   const queueEnabled = isObjectId(stationId);
+  const fuelPrices = useMemo(() => {
+    const fromMap = station?.fuel_prices || station?.fuelPrices || {};
+    return {
+      gasoline: Number(
+        fromMap.gasoline ?? station?.gasoline_price ?? station?.gasolinePrice ?? DEFAULT_FUEL_PRICES.gasoline
+      ),
+      diesel: Number(
+        fromMap.diesel ?? station?.diesel_price ?? station?.dieselPrice ?? DEFAULT_FUEL_PRICES.diesel
+      ),
+      other: Number(
+        fromMap.other ?? station?.other_price ?? station?.otherPrice ?? DEFAULT_FUEL_PRICES.other
+      ),
+    };
+  }, [station]);
+  const selectedUnitPrice = Number(fuelPrices[fuelType] || 0);
+  const litersValue = Number(requestedLiters);
+  const estimatedAmount = Number.isFinite(litersValue) && litersValue > 0
+    ? Number((litersValue * selectedUnitPrice).toFixed(2))
+    : 0;
 
   const detail = useMemo(() => {
     const queue = Number(station?.queue_length || 0);
@@ -114,6 +139,9 @@ export default function StationDetails({ route }) {
               status: status.status,
               position: status.position,
               etaMinutes: Number(status.position || 0) * 3,
+              fuelType: status.fuelType,
+              requestedLiters: status.requestedLiters,
+              estimatedAmount: status.estimatedAmount,
             });
             setPaymentPhase("verified");
             setMessage("Payment verified. Your queue ticket is now active.");
@@ -157,10 +185,18 @@ export default function StationDetails({ route }) {
     setMessage("");
     setPaymentPhase("reserving");
     try {
+      if (!Number.isFinite(litersValue) || litersValue <= 0) {
+        Alert.alert("Invalid Liters", "Enter a valid number of liters greater than 0.");
+        setPaymentPhase("idle");
+        setLoading(false);
+        return;
+      }
       const reserve = await reserveQueueSlot({
         stationId,
         requestedBand,
         fuelType,
+        requestedLiters: litersValue,
+        unitPrice: selectedUnitPrice,
       });
 
       const nextReservationId = String(reserve?.reservationId || "");
@@ -180,7 +216,7 @@ export default function StationDetails({ route }) {
     } finally {
       setLoading(false);
     }
-  }, [fuelType, pollReservation, queueEnabled, requestedBand, stationId]);
+  }, [fuelType, litersValue, pollReservation, queueEnabled, requestedBand, selectedUnitPrice, stationId]);
 
   const checkReservationNow = useCallback(async () => {
     if (!reservationId) {
@@ -279,6 +315,17 @@ export default function StationDetails({ route }) {
             </Pressable>
           ))}
         </View>
+        <Text style={styles.metaText}>How Many Liters</Text>
+        <TextInput
+          style={styles.input}
+          value={requestedLiters}
+          onChangeText={setRequestedLiters}
+          keyboardType="numeric"
+          placeholder="Enter liters (e.g. 25)"
+          placeholderTextColor="#94A3B8"
+        />
+        <Text style={styles.metaText}>Current Price ({fuelType}): {selectedUnitPrice.toFixed(2)} ETB/L</Text>
+        <Text style={styles.estimateText}>Estimated Total: {estimatedAmount.toFixed(2)} ETB</Text>
 
         <Pressable
           style={[styles.actionButton, styles.primaryButton, (!queueEnabled || loading) && styles.disabled]}
@@ -326,6 +373,9 @@ export default function StationDetails({ route }) {
             <Text style={styles.metaText}>status: {String(myTicket.status || "-")}</Text>
             <Text style={styles.metaText}>position: {String(myTicket.position ?? "-")}</Text>
             <Text style={styles.metaText}>etaMinutes: {String(myTicket.etaMinutes ?? "-")}</Text>
+            <Text style={styles.metaText}>fuelType: {String(myTicket.fuelType || fuelType)}</Text>
+            <Text style={styles.metaText}>requestedLiters: {String(myTicket.requestedLiters ?? "-")}</Text>
+            <Text style={styles.metaText}>estimatedAmount: {String(myTicket.estimatedAmount ?? "-")} ETB</Text>
           </View>
         ) : null}
       </View>
@@ -424,6 +474,24 @@ const styles = StyleSheet.create({
   },
   optionTextActive: {
     color: "#065F46",
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#0F172A",
+    marginBottom: 8,
+  },
+  estimateText: {
+    fontSize: 13,
+    color: "#1D4ED8",
+    fontWeight: "800",
+    marginBottom: 8,
   },
   ticketCard: {
     marginTop: 8,
