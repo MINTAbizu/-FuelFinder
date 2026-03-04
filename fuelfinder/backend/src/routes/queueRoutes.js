@@ -1,8 +1,10 @@
 const express = require("express");
 const auth = require("../middleware/auth");
+const { requireRole, requireScope } = require("../middleware/authorize");
 const queueController = require("../controllers/queueController");
 
 const router = express.Router();
+const STAFF_OPERATION_ROLES = ["staff", "station_manager", "city_manager", "org_admin", "super_admin"];
 
 router.post("/reserve", auth, queueController.reserveQueueSlot);
 router.post("/payments/telebirr/auth-token", auth, queueController.exchangeTelebirrAuthToken);
@@ -14,8 +16,14 @@ router.post("/join", auth, queueController.joinQueue);
 router.get("/me/:stationId", auth, queueController.getMyTicket);
 router.post("/leave", auth, queueController.leaveQueue);
 router.post("/check-in/start", auth, queueController.startCheckIn);
-router.post("/check-in/verify", auth, queueController.verifyCheckIn);
+router.post("/check-in/verify", auth, requireRole(STAFF_OPERATION_ROLES), queueController.verifyCheckIn);
 router.get("/station/:stationId", queueController.getStationQueue);
-router.post("/next", queueController.nextInQueue); // protect with staff/admin auth later
+router.post(
+  "/next",
+  auth,
+  requireRole(STAFF_OPERATION_ROLES),
+  requireScope({ stationKey: "stationId", requireAny: true }),
+  queueController.nextInQueue
+);
 
 module.exports = router;

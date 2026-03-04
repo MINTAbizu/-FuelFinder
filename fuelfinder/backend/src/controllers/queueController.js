@@ -37,6 +37,15 @@ function isObjectId(value) {
   return mongoose.Types.ObjectId.isValid(value);
 }
 
+function canOperateStation(user, stationId) {
+  if (!user) return false;
+  if (String(user.role || "") === "super_admin") return true;
+
+  const allowedStationIds = Array.isArray(user.stationIds) ? user.stationIds.map(String) : [];
+  if (!allowedStationIds.length) return false;
+  return allowedStationIds.includes(String(stationId));
+}
+
 async function recalculatePositions(stationId) {
   const waiting = await QueueTicket.find({
     stationId,
@@ -369,6 +378,7 @@ exports.confirmReservationPayment = async (req, res) => {
     const etaMinutes = ticket.position * AVERAGE_MINUTES_PER_CAR;
     return res.json({
       ticketId: ticket._id,
+      reservationId: ticket._id,
       stationId: ticket.stationId,
       status: ticket.status,
       position: ticket.position,
@@ -577,6 +587,7 @@ exports.getMyTicket = async (req, res) => {
     const etaMinutes = Math.max(0, ticket.position * AVERAGE_MINUTES_PER_CAR);
     return res.json({
       ticketId: ticket._id,
+      reservationId: ticket._id,
       stationId: ticket.stationId,
       status: ticket.status,
       position: ticket.position,
@@ -631,9 +642,13 @@ exports.leaveQueue = async (req, res) => {
 
 exports.nextInQueue = async (req, res) => {
   try {
+    const actor = req.user || null;
     const { stationId } = req.body;
     if (!isObjectId(stationId)) {
       return res.status(400).json({ message: "Invalid stationId." });
+    }
+    if (!canOperateStation(actor, stationId)) {
+      return res.status(403).json({ message: "Forbidden: station scope denied for queue control." });
     }
 
     await expireStaleTickets(stationId);
@@ -680,6 +695,7 @@ exports.nextInQueue = async (req, res) => {
       message: "Next ticket called.",
       nextTicket: {
         ticketId: next._id,
+        reservationId: next._id,
         userId: next.userId,
         status: next.status
       }
@@ -714,11 +730,25 @@ exports.getStationQueue = async (req, res) => {
       .select("userId calledAt expiresAt")
       .lean();
 
+    const waitingWithIds = waiting.map((item) => ({
+      ...item,
+      reservationId: item._id,
+      ticketId: item._id
+    }));
+
+    const calledWithIds = called
+      ? {
+          ...called,
+          reservationId: called._id,
+          ticketId: called._id
+        }
+      : null;
+
     return res.json({
       stationId,
-      waitingCount: waiting.length,
-      called,
-      waiting
+      waitingCount: waitingWithIds.length,
+      called: calledWithIds,
+      waiting: waitingWithIds
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load station queue." });
@@ -810,18 +840,23 @@ exports.startCheckIn = async (req, res) => {
 
 exports.verifyCheckIn = async (req, res) => {
   try {
+    const actor = req.user || null;
     const verifierUserId = req.user.id;
-    const { ticketId, otpCode, qrToken } = req.body;
-    if (!isObjectId(verifierUserId) || !isObjectId(ticketId)) {
-      return res.status(400).json({ message: "Invalid verifier userId or ticketId." });
+    const ticketOrReservationId = String(req.body.ticketId || req.body.reservationId || "").trim();
+    const { otpCode, qrToken } = req.body;
+    if (!isObjectId(verifierUserId) || !isObjectId(ticketOrReservationId)) {
+      return res.status(400).json({ message: "Invalid verifier userId or ticketId/reservationId." });
     }
 
     const ticket = await QueueTicket.findOne({
-      _id: ticketId,
+      _id: ticketOrReservationId,
       status: { $in: ["waiting", "called"] }
     });
     if (!ticket) {
       return res.status(404).json({ message: "Ticket not found for check-in verification." });
+    }
+    if (!canOperateStation(actor, ticket.stationId)) {
+      return res.status(403).json({ message: "Forbidden: station scope denied for check-in verification." });
     }
     if (ticket.checkInStatus === "verified") {
       return res.status(409).json({ message: "Ticket check-in already verified." });
@@ -880,6 +915,7 @@ exports.verifyCheckIn = async (req, res) => {
     return res.json({
       ok: true,
       ticketId: ticket._id,
+      reservationId: ticket._id,
       checkInStatus: ticket.checkInStatus,
       verifiedAt: ticket.checkInVerifiedAt
     });
