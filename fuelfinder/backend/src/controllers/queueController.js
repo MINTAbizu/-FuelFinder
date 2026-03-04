@@ -1045,11 +1045,21 @@ exports.validateReservationIdForStaff = async (req, res) => {
   try {
     const actor = req.user || null;
     const rawId = String(req.body.ticketId || req.body.reservationId || "").trim();
-    if (!isObjectId(rawId)) {
-      return res.status(400).json({ message: "Invalid ticketId/reservationId format." });
+    const reservationCode = normalizeReservationCode(req.body.reservationCode);
+    if (!rawId && !reservationCode) {
+      return res.status(400).json({ message: "ticketId/reservationId or reservationCode is required." });
     }
 
-    const ticket = await QueueTicket.findById(rawId).lean();
+    let ticket = null;
+    if (rawId) {
+      if (!isObjectId(rawId)) {
+        return res.status(400).json({ message: "Invalid ticketId/reservationId format." });
+      }
+      ticket = await QueueTicket.findById(rawId).lean();
+    } else if (reservationCode) {
+      ticket = await QueueTicket.findOne({ publicTicketCode: reservationCode }).lean();
+    }
+
     if (!ticket) {
       return res.status(404).json({ message: "Reservation not found." });
     }
@@ -1062,6 +1072,7 @@ exports.validateReservationIdForStaff = async (req, res) => {
         reservation: {
           reservationId: String(ticket._id),
           ticketId: String(ticket._id),
+          reservationCode: String(ticket.publicTicketCode || ""),
           stationId: String(ticket.stationId),
           stationName: String(station?.name || "Unknown station"),
           organizationId: station?.organizationId ? String(station.organizationId) : null
@@ -1082,6 +1093,7 @@ exports.validateReservationIdForStaff = async (req, res) => {
       reservation: {
         reservationId: String(ticket._id),
         ticketId: String(ticket._id),
+        reservationCode: String(ticket.publicTicketCode || ""),
         stationId: String(ticket.stationId),
         stationName: String(station?.name || "Unknown station"),
         organizationId: station?.organizationId ? String(station.organizationId) : null,
