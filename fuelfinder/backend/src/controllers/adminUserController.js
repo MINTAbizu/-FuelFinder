@@ -59,3 +59,19 @@ exports.createAdminUser = async (req, res) => {
   }
 };
 
+exports.listOrganizationOptions = async (_req, res) => {
+  try {
+    const ids = await User.distinct("organizationId", { organizationId: { $ne: null } });
+    const options = ids
+      .map((id) => String(id || "").trim())
+      .filter(Boolean)
+      .map((id) => ({
+        id,
+        label: `Org ${id.slice(-6).toUpperCase()}`
+      }));
+
+    return res.json({ organizations: options });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to load organization options." });
+  }
+};
