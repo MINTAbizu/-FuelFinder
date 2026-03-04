@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -14,35 +14,9 @@ import { useAuth } from "../../context/AuthContext";
 import { useLanguage } from "../../context/LanguageContext";
 import { API_BASE_URL } from "../../services/api";
 
-const I18N = {
-  en: {
-    title: "Welcome Back",
-    subtitle: "Login to continue with FuelFinder",
-    email: "Email",
-    password: "Password",
-    requiredError: "Enter both email and password.",
-    cannotConnect: "Cannot connect to backend",
-    login: "Login",
-    newHere: "New here?",
-    createAccount: "Create account",
-  },
-  am: {
-    title: "\u12a5\u1295\u12b3\u1295 \u12f0\u1205\u1293 \u1218\u1321",
-    subtitle: "FuelFinder \u1208\u1218\u1240\u1320\u120d \u12ed\u130d\u1261",
-    email: "\u12a2\u121c\u12ed\u120d",
-    password: "\u12ed\u1208\u134d \u1243\u120d",
-    requiredError: "\u12a2\u121c\u12ed\u120d \u12a5\u1293 \u12ed\u1208\u134d \u1243\u120d \u12eb\u1235\u1308\u1261\u1362",
-    cannotConnect: "Backend \u130b\u122d \u1218\u1308\u1293\u1298\u1275 \u12a0\u120d\u1270\u127b\u1208\u121d",
-    login: "\u130d\u1263",
-    newHere: "\u12a0\u12f2\u1235 \u1290\u1205?",
-    createAccount: "\u1218\u1208\u12eb \u134d\u1320\u122d",
-  },
-};
-
 export default function LoginScreen({ navigation }) {
   const { signIn } = useAuth();
-  const { language } = useLanguage();
-  const t = useMemo(() => I18N[language] || I18N.en, [language]);
+  const { t } = useLanguage();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -52,7 +26,7 @@ export default function LoginScreen({ navigation }) {
   const onLogin = async () => {
     setError("");
     if (!email.trim() || !password) {
-      setError(t.requiredError);
+      setError(t("auth.login.requiredError"));
       return;
     }
 
@@ -64,7 +38,7 @@ export default function LoginScreen({ navigation }) {
       if (backendMessage) {
         setError(backendMessage);
       } else {
-        setError(`${t.cannotConnect} (${API_BASE_URL}).`);
+        setError(`${t("auth.login.cannotConnect")} (${API_BASE_URL}).`);
       }
     } finally {
       setLoading(false);
@@ -77,11 +51,11 @@ export default function LoginScreen({ navigation }) {
         style={styles.container}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <Text style={styles.title}>{t.title}</Text>
-        <Text style={styles.subtitle}>{t.subtitle}</Text>
+        <Text style={styles.title}>{t("auth.login.title")}</Text>
+        <Text style={styles.subtitle}>{t("auth.login.subtitle")}</Text>
 
         <TextInput
-          placeholder={t.email}
+          placeholder={t("auth.login.email")}
           value={email}
           onChangeText={setEmail}
           style={styles.input}
@@ -89,7 +63,7 @@ export default function LoginScreen({ navigation }) {
           keyboardType="email-address"
         />
         <TextInput
-          placeholder={t.password}
+          placeholder={t("auth.login.password")}
           value={password}
           onChangeText={setPassword}
           style={styles.input}
@@ -102,14 +76,14 @@ export default function LoginScreen({ navigation }) {
           {loading ? (
             <ActivityIndicator color="#fff" size="small" />
           ) : (
-            <Text style={styles.primaryBtnText}>{t.login}</Text>
+            <Text style={styles.primaryBtnText}>{t("auth.login.button")}</Text>
           )}
         </Pressable>
 
         <View style={styles.row}>
-          <Text style={styles.helper}>{t.newHere}</Text>
+          <Text style={styles.helper}>{t("auth.login.newHere")}</Text>
           <Pressable onPress={() => navigation.navigate("Register")}>
-            <Text style={styles.link}> {t.createAccount}</Text>
+            <Text style={styles.link}> {t("auth.login.createAccount")}</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>

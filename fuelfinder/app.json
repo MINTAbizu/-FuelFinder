@@ -1,4 +1,4 @@
-{
+﻿{
   "expo": {
     "name": "fuelfinder",
     "slug": "fuelfinder",
@@ -20,13 +20,30 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "package": "com.mintesenotbizuayehw.fuelfinder",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-font"
-    ]
+      "expo-font",
+      "expo-localization",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow FuelFinder to access your location to find nearby fuel stations."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "1d441dd4-571d-4889-8cea-be49ef6dbe27"
+      }
+    }
   }
 }

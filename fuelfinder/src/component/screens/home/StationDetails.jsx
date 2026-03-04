@@ -13,12 +13,6 @@ import {
   startTelebirrCheckout,
 } from "../../services/queueService";
 
-const statusMap = {
-  available: "Full",
-  limited: "Partial",
-  empty: "Empty",
-};
-
 const getWaitEstimate = (queueLength) => Math.max(2, Number(queueLength || 0) * 3);
 const REQUESTED_BANDS = ["10-20", "20-40", "40+"];
 const FUEL_TYPES = ["gasoline", "diesel", "other"];
@@ -27,124 +21,7 @@ const DEFAULT_FUEL_PRICES = {
   diesel: 92,
   other: 90,
 };
-const I18N = {
-  en: {
-    stationFallback: "Fuel Station",
-    address: "Address",
-    contact: "Contact",
-    stationId: "Station ID",
-    coords: "Coordinates",
-    supportedFuels: "Supported fuels",
-    fuelStatus: "Fuel Status",
-    queueWait: "Queue & Wait",
-    queueLength: "Queue Length",
-    estWait: "Estimated Wait",
-    reservePay: "Queue Reservation & Payment",
-    requestedBand: "Requested Band",
-    fuelType: "Fuel Type",
-    liters: "How Many Liters",
-    litersPlaceholder: "Enter liters (e.g. 25)",
-    currentPrice: "Current Price",
-    estimatedTotal: "Estimated Total",
-    reservePayBtn: "Reserve & Pay with Telebirr",
-    checkPaymentBtn: "Check Payment Status",
-    refreshTicketBtn: "Refresh My Ticket",
-    leaveQueueBtn: "Leave Queue",
-    activeTicket: "My Active Ticket",
-    checkInTitle: "Station Check-In (QR + OTP)",
-    checkInDesc: "Start check-in at station, then show OTP/QR to attendant.",
-    startCheckInBtn: "Start Check-In",
-    otpFromSession: "OTP From Session",
-    checkInQr: "Check-In QR (show this to attendant)",
-    noReports: "No live reports for this station yet.",
-    noReviews: "No live reviews for this station yet.",
-    reportsTitle: "User Reports / Latest Updates",
-    reviewsTitle: "Ratings & Reviews",
-    avgRating: "Average Rating",
-    invalidLitersTitle: "Invalid Liters",
-    invalidLitersBody: "Enter a valid number of liters greater than 0.",
-    missingReservationTitle: "Missing Reservation",
-    missingReservationBody: "Start a reservation first.",
-    noTicketTitle: "No Ticket",
-    noTicketBody: "No active ticket found.",
-    stationIdMissingTitle: "Station ID Missing",
-    stationIdMissingBody: "This station does not have a valid backend stationId.",
-    checkInMissingTicketTitle: "Missing Ticket",
-    checkInMissingTicketBody: "You need an active queue ticket before check-in.",
-    locationRequiredTitle: "Location Required",
-    locationRequiredBody: "Enable location permission to start check-in.",
-    paymentInitiated: "Payment initiated. Complete payment in Telebirr, then status will update.",
-    failedStartPayment: "Failed to start payment.",
-    waitingPaymentConfirm: "Waiting for payment confirmation. Tap Check Payment Status.",
-    paymentVerified: "Payment verified. Your queue ticket is now active.",
-    reservationExpired: "Reservation expired before payment confirmation.",
-    activeTicketLoaded: "Active queue ticket loaded.",
-    noActiveTicket: "No active ticket.",
-    leftQueue: "You left the queue.",
-    failedLeaveQueue: "Failed to leave queue.",
-    startCheckInFailed: "Failed to start station check-in.",
-    startForQr: "Start check-in to generate QR and OTP.",
-    attendantNote: "Attendant verification should be done in staff app only.",
-  },
-  am: {
-    stationFallback: "ነዳጅ ማደያ",
-    address: "አድራሻ",
-    contact: "ስልክ",
-    stationId: "የማደያ መለያ",
-    coords: "ኮኦርዲኔት",
-    supportedFuels: "የሚደገፉ ነዳጆች",
-    fuelStatus: "የነዳጅ ሁኔታ",
-    queueWait: "ሰልፍ እና ቆይታ",
-    queueLength: "የሰልፍ ርዝመት",
-    estWait: "የተገመተ ቆይታ",
-    reservePay: "የሰልፍ ማስያዣ እና ክፍያ",
-    requestedBand: "የተጠየቀ መጠን",
-    fuelType: "የነዳጅ አይነት",
-    liters: "የሚፈልጉት ሊትር",
-    litersPlaceholder: "ሊትር ያስገቡ (ለምሳሌ 25)",
-    currentPrice: "አሁን ያለ ዋጋ",
-    estimatedTotal: "ጠቅላላ የተገመተ ዋጋ",
-    reservePayBtn: "ያስያዙ እና በቴሌብር ይክፈሉ",
-    checkPaymentBtn: "የክፍያ ሁኔታ ያረጋግጡ",
-    refreshTicketBtn: "የኔን ትኬት አድስ",
-    leaveQueueBtn: "ከሰልፍ ውጣ",
-    activeTicket: "የኔ ንቁ ትኬት",
-    checkInTitle: "የማደያ ቼክ-ኢን (QR + OTP)",
-    checkInDesc: "በማደያ ሲደርሱ ቼክ-ኢን ይጀምሩ እና OTP/QR ለሰራተኛ ያሳዩ።",
-    startCheckInBtn: "ቼክ-ኢን ጀምር",
-    otpFromSession: "ከሴሽን የተሰጠ OTP",
-    checkInQr: "የቼክ-ኢን QR (ለሰራተኛ አሳይ)",
-    noReports: "ለዚህ ማደያ የቀጥታ ሪፖርት የለም።",
-    noReviews: "ለዚህ ማደያ የቀጥታ አስተያየት የለም።",
-    reportsTitle: "የተጠቃሚ ሪፖርቶች / የቅርብ ማሻሻያ",
-    reviewsTitle: "ደረጃ እና አስተያየት",
-    avgRating: "አማካይ ደረጃ",
-    invalidLitersTitle: "የሊትር መጠን ስህተት",
-    invalidLitersBody: "ከ0 በላይ ትክክለኛ የሊትር መጠን ያስገቡ።",
-    missingReservationTitle: "ማስያዣ የለም",
-    missingReservationBody: "መጀመሪያ ማስያዣ ይፍጠሩ።",
-    noTicketTitle: "ትኬት የለም",
-    noTicketBody: "ንቁ ትኬት አልተገኘም።",
-    stationIdMissingTitle: "የማደያ መለያ ጎድሏል",
-    stationIdMissingBody: "ይህ ማደያ ትክክለኛ backend stationId የለውም።",
-    checkInMissingTicketTitle: "ትኬት የለም",
-    checkInMissingTicketBody: "ቼክ-ኢን ከመጀመር በፊት ንቁ ትኬት ያስፈልጋል።",
-    locationRequiredTitle: "አካባቢ ፍቃድ ያስፈልጋል",
-    locationRequiredBody: "ቼክ-ኢን ለመጀመር የአካባቢ ፍቃድ ያስፈልጋል።",
-    paymentInitiated: "ክፍያ ተጀምሯል። በቴሌብር ያጠናቅቁ።",
-    failedStartPayment: "ክፍያ መጀመር አልተቻለም።",
-    waitingPaymentConfirm: "የክፍያ ማረጋገጫ በመጠባበቅ ላይ።",
-    paymentVerified: "ክፍያ ተረጋግጧል። ትኬትዎ ንቁ ሆኗል።",
-    reservationExpired: "የማስያዣ ጊዜ አልቋል።",
-    activeTicketLoaded: "ንቁ ትኬት ተጭኗል።",
-    noActiveTicket: "ንቁ ትኬት የለም።",
-    leftQueue: "ከሰልፉ ወጥተዋል።",
-    failedLeaveQueue: "ከሰልፍ መውጣት አልተቻለም።",
-    startCheckInFailed: "የማደያ ቼክ-ኢን መጀመር አልተቻለም።",
-    startForQr: "QR እና OTP ለመፍጠር ቼክ-ኢን ይጀምሩ።",
-    attendantNote: "ማረጋገጫ በሰራተኛ መተግበሪያ ብቻ ይደረጋል።",
-  },
-};
+// Translations are handled by i18next (`src/i18n/locales/*.json`).
 
 function isObjectId(value) {
   return /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
@@ -172,8 +49,77 @@ function formatSupportedFuels(supportedFuels) {
 }
 
 export default function StationDetails({ route }) {
-  const { language } = useLanguage();
-  const t = I18N[language] || I18N.en;
+  const { t: tr } = useLanguage();
+  const t = useMemo(
+    () => ({
+      stationFallback: tr("stationDetails.stationFallback"),
+      address: tr("stationDetails.address"),
+      contact: tr("stationDetails.contact"),
+      stationId: tr("stationDetails.stationId"),
+      coords: tr("stationDetails.coords"),
+      supportedFuels: tr("stationDetails.supportedFuels"),
+      fuelStatus: tr("stationDetails.fuelStatus"),
+      queueWait: tr("stationDetails.queueWait"),
+      queueLength: tr("stationDetails.queueLength"),
+      estWait: tr("stationDetails.estWait"),
+      reservePay: tr("stationDetails.reservePay"),
+      requestedBand: tr("stationDetails.requestedBand"),
+      fuelType: tr("stationDetails.fuelType"),
+      liters: tr("stationDetails.liters"),
+      litersPlaceholder: tr("stationDetails.litersPlaceholder"),
+      currentPrice: tr("stationDetails.currentPrice"),
+      estimatedTotal: tr("stationDetails.estimatedTotal"),
+      reservePayBtn: tr("stationDetails.reservePayBtn"),
+      checkPaymentBtn: tr("stationDetails.checkPaymentBtn"),
+      refreshTicketBtn: tr("stationDetails.refreshTicketBtn"),
+      leaveQueueBtn: tr("stationDetails.leaveQueueBtn"),
+      activeTicket: tr("stationDetails.activeTicket"),
+      checkInTitle: tr("stationDetails.checkInTitle"),
+      checkInDesc: tr("stationDetails.checkInDesc"),
+      startCheckInBtn: tr("stationDetails.startCheckInBtn"),
+      otpFromSession: tr("stationDetails.otpFromSession"),
+      checkInQr: tr("stationDetails.checkInQr"),
+      noReports: tr("stationDetails.noReports"),
+      noReviews: tr("stationDetails.noReviews"),
+      reportsTitle: tr("stationDetails.reportsTitle"),
+      reviewsTitle: tr("stationDetails.reviewsTitle"),
+      avgRating: tr("stationDetails.avgRating"),
+      invalidLitersTitle: tr("stationDetails.invalidLitersTitle"),
+      invalidLitersBody: tr("stationDetails.invalidLitersBody"),
+      missingReservationTitle: tr("stationDetails.missingReservationTitle"),
+      missingReservationBody: tr("stationDetails.missingReservationBody"),
+      noTicketTitle: tr("stationDetails.noTicketTitle"),
+      noTicketBody: tr("stationDetails.noTicketBody"),
+      stationIdMissingTitle: tr("stationDetails.stationIdMissingTitle"),
+      stationIdMissingBody: tr("stationDetails.stationIdMissingBody"),
+      checkInMissingTicketTitle: tr("stationDetails.checkInMissingTicketTitle"),
+      checkInMissingTicketBody: tr("stationDetails.checkInMissingTicketBody"),
+      locationRequiredTitle: tr("stationDetails.locationRequiredTitle"),
+      locationRequiredBody: tr("stationDetails.locationRequiredBody"),
+      paymentInitiated: tr("stationDetails.paymentInitiated"),
+      failedStartPayment: tr("stationDetails.failedStartPayment"),
+      waitingPaymentConfirm: tr("stationDetails.waitingPaymentConfirm"),
+      paymentVerified: tr("stationDetails.paymentVerified"),
+      reservationExpired: tr("stationDetails.reservationExpired"),
+      activeTicketLoaded: tr("stationDetails.activeTicketLoaded"),
+      noActiveTicket: tr("stationDetails.noActiveTicket"),
+      leftQueue: tr("stationDetails.leftQueue"),
+      failedLeaveQueue: tr("stationDetails.failedLeaveQueue"),
+      startCheckInFailed: tr("stationDetails.startCheckInFailed"),
+      startForQr: tr("stationDetails.startForQr"),
+      attendantNote: tr("stationDetails.attendantNote"),
+      objectIdError: tr("stationDetails.objectIdError"),
+      otpForAttendant: tr("stationDetails.otpForAttendant"),
+    }),
+    [tr]
+  );
+  const statusLabels = useMemo(() => {
+    return {
+      available: tr("homeScreen.status.available"),
+      limited: tr("homeScreen.status.limited"),
+      empty: tr("homeScreen.status.empty"),
+    };
+  }, [tr]);
   const { station } = route.params || {};
   const [requestedBand, setRequestedBand] = useState("10-20");
   const [fuelType, setFuelType] = useState("gasoline");
@@ -219,9 +165,9 @@ export default function StationDetails({ route }) {
     const queue = Number(
       liveQueueCount !== null && liveQueueCount !== undefined ? liveQueueCount : station?.queue_length || 0
     );
-    const fuelStatus = statusMap[station?.fuel_status] || "Partial";
+    const fuelStatus = String(station?.fuel_status || "limited");
     return {
-      name: station?.name || "Fuel Station",
+      name: station?.name || t.stationFallback,
       address: station?.address || t.address,
       contact: station?.contact || t.contact,
       latitude: Number(station?.latitude),
@@ -240,7 +186,7 @@ export default function StationDetails({ route }) {
             ).toFixed(1)
           : "4.5",
     };
-  }, [liveQueueCount, station, t.address, t.contact]);
+  }, [liveQueueCount, station, t.address, t.contact, t.stationFallback]);
 
   useEffect(() => {
     return () => {
@@ -436,7 +382,7 @@ export default function StationDetails({ route }) {
         accuracy: position.coords.accuracy
       });
       setCheckInSession(session);
-      setCheckInStatusText(`${t.startCheckInBtn}. OTP: ${new Date(session.expiresAt).toLocaleTimeString()}`);
+      setCheckInStatusText(t.startCheckInBtn);
     } catch (error) {
       logReservationError("startCheckInNow", error);
       setCheckInStatusText(error?.response?.data?.message || t.startCheckInFailed);
@@ -446,9 +392,15 @@ export default function StationDetails({ route }) {
   }, [myTicket, reservationId]);
 
   const getStatusStyle = () => {
-    if (detail.fuelStatus === "Full") return styles.statusFull;
-    if (detail.fuelStatus === "Partial") return styles.statusPartial;
+    if (detail.fuelStatus === "available") return styles.statusFull;
+    if (detail.fuelStatus === "limited") return styles.statusPartial;
     return styles.statusEmpty;
+  };
+
+  const getStatusLabel = () => {
+    if (detail.fuelStatus === "available") return "available";
+    if (detail.fuelStatus === "limited") return "limited";
+    return "empty";
   };
 
   return (
@@ -467,7 +419,7 @@ export default function StationDetails({ route }) {
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>{t.fuelStatus}</Text>
-        <Text style={[styles.statusValue, getStatusStyle()]}>{detail.fuelStatus}</Text>
+        <Text style={[styles.statusValue, getStatusStyle()]}>{statusLabels[getStatusLabel()]}</Text>
         <Text style={styles.sectionTitle}>{t.queueWait}</Text>
         <Text style={styles.metaText}>{t.queueLength}: {detail.queueLength}</Text>
         <Text style={styles.metaText}>{t.estWait}: {detail.waitTime}</Text>
@@ -477,7 +429,7 @@ export default function StationDetails({ route }) {
         <Text style={styles.sectionTitle}>{t.reservePay}</Text>
         {!queueEnabled ? (
           <Text style={styles.errorText}>
-            This station lacks a valid backend ObjectId. Update station data before queueing.
+            {t.objectIdError}
           </Text>
         ) : null}
 
@@ -604,7 +556,7 @@ export default function StationDetails({ route }) {
         </View>
 
         <Text style={styles.metaText}>
-          OTP for attendant: {checkInSession?.otpCode || "-"}
+          {t.otpForAttendant}: {checkInSession?.otpCode || "-"}
         </Text>
         <Text style={styles.metaText}>
           {t.attendantNote}

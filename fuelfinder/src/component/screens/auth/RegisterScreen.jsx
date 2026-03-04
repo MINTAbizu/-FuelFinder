@@ -2,53 +2,24 @@ import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../context/AuthContext";
 import { useLanguage } from "../../context/LanguageContext";
 import { API_BASE_URL } from "../../services/api";
 
-const I18N = {
-  en: {
-    title: "Create Account",
-    subtitle: "Register and start using FuelFinder",
-    fullName: "Full name",
-    email: "Email",
-    phoneOptional: "Phone (optional)",
-    password: "Password",
-    passwordHint: "Password: 8+ chars with upper/lower/number/special.",
-    requiredError: "Name, email and password are required.",
-    cannotConnect: "Cannot connect to backend",
-    createAccount: "Create Account",
-    alreadyHave: "Already have an account?",
-    login: "Login",
-  },
-  am: {
-    title: "\u1218\u1208\u12eb \u134d\u1320\u122d",
-    subtitle: "FuelFinder \u1218\u1320\u1240\u121d \u1208\u1218\u1300\u1218\u122d \u12ed\u1218\u12dd\u1308\u1261",
-    fullName: "\u1219\u1209 \u1235\u121d",
-    email: "\u12a2\u121c\u12ed\u120d",
-    phoneOptional: "\u1235\u120d\u12ad (\u12a0\u121b\u122b\u132d)",
-    password: "\u12ed\u1208\u134d \u1243\u120d",
-    passwordHint: "\u12ed\u1208\u134d \u1243\u120d: 8+ \u134a\u12f0\u120d \u12a8\u134a\u12f0\u120d \u120d\u12e9\u1290\u1275, \u1241\u1325\u122d \u12a5\u1293 \u120d\u12e9 \u121d\u120d\u12ad\u1275 \u130b\u122d\u1362",
-    requiredError: "\u1235\u121d\u1363 \u12a2\u121c\u12ed\u120d \u12a5\u1293 \u12ed\u1208\u134d \u1243\u120d \u12eb\u1235\u1348\u120d\u130b\u120d\u1362",
-    cannotConnect: "Backend \u130b\u122d \u1218\u1308\u1293\u1298\u1275 \u12a0\u120d\u1270\u127b\u1208\u121d",
-    createAccount: "\u1218\u1208\u12eb \u134d\u1320\u122d",
-    alreadyHave: "\u1240\u12f0\u121d \u1232\u120d \u1218\u1208\u12eb \u12a0\u1208\u12ce\u1275?",
-    login: "\u130d\u1263",
-  },
-};
-
 export default function RegisterScreen({ navigation }) {
   const { signUp } = useAuth();
-  const { language } = useLanguage();
-  const t = useMemo(() => I18N[language] || I18N.en, [language]);
+  const { language, changeLanguage, supportedLanguages, t } = useLanguage();
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -56,11 +27,13 @@ export default function RegisterScreen({ navigation }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
+  const [languageQuery, setLanguageQuery] = useState("");
 
   const onRegister = async () => {
     setError("");
     if (!name.trim() || !email.trim() || !password) {
-      setError(t.requiredError);
+      setError(t("auth.register.requiredError"));
       return;
     }
 
@@ -77,11 +50,74 @@ export default function RegisterScreen({ navigation }) {
       if (backendMessage) {
         setError(backendMessage);
       } else {
-        setError(`${t.cannotConnect} (${API_BASE_URL}).`);
+        setError(`${t("auth.register.cannotConnect")} (${API_BASE_URL}).`);
       }
     } finally {
       setLoading(false);
     }
+  };
+
+  const selectedLanguage = useMemo(() => {
+    return supportedLanguages.find((l) => l.code === language) || supportedLanguages[0];
+  }, [language, supportedLanguages]);
+
+  const normalizedQuery = languageQuery.trim().toLowerCase();
+
+  const groupedLanguages = useMemo(() => {
+    const q = normalizedQuery;
+    const matches = (l) => {
+      if (!q) return true;
+      const code = String(l.code || "").toLowerCase();
+      const n = String(l.nativeName || "").toLowerCase();
+      const e = String(l.englishName || "").toLowerCase();
+      return code.includes(q) || n.includes(q) || e.includes(q);
+    };
+
+    const geezCodes = new Set(["am", "ti", "gez"]);
+    const geez = [];
+    const latin = [];
+
+    for (const l of supportedLanguages) {
+      if (!matches(l)) continue;
+      if (geezCodes.has(l.code)) geez.push(l);
+      else latin.push(l);
+    }
+
+    return [
+      { key: "geez", title: t("auth.languagePicker.groupGeEz"), items: geez },
+      { key: "latin", title: t("auth.languagePicker.groupLatin"), items: latin },
+    ].filter((g) => g.items.length);
+  }, [normalizedQuery, supportedLanguages, t]);
+
+  const renderLanguageRow = (l) => {
+    const active = language === l.code;
+    return (
+      <Pressable
+        key={l.code}
+        onPress={async () => {
+          await changeLanguage(l.code);
+          setLanguageMenuOpen(false);
+          setLanguageQuery("");
+        }}
+        style={({ pressed }) => [
+          styles.langRow,
+          pressed && styles.langRowPressed,
+          active && styles.langRowActive,
+        ]}
+      >
+        <View style={styles.langRowLeft}>
+          <Text style={styles.langRowTitle}>{l.nativeName}</Text>
+          <Text style={styles.langRowSub}>
+            {l.englishName} · {String(l.code).toUpperCase()}
+          </Text>
+        </View>
+        {active ? (
+          <Ionicons name="checkmark-circle" size={20} color="#0F766E" />
+        ) : (
+          <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+        )}
+      </Pressable>
+    );
   };
 
   return (
@@ -90,17 +126,85 @@ export default function RegisterScreen({ navigation }) {
         style={styles.container}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <Text style={styles.title}>{t.title}</Text>
-        <Text style={styles.subtitle}>{t.subtitle}</Text>
+        <Text style={styles.title}>{t("auth.register.title")}</Text>
+        <Text style={styles.subtitle}>{t("auth.register.subtitle")}</Text>
+
+        <Pressable
+          onPress={() => setLanguageMenuOpen(true)}
+          style={({ pressed }) => [styles.langMenu, pressed && styles.langMenuPressed]}
+          accessibilityRole="button"
+        >
+          <View style={styles.langMenuLeft}>
+            <Ionicons name="language-outline" size={18} color="#0F172A" />
+            <Text style={styles.langMenuLabel}>{t("auth.languageLabel")}</Text>
+          </View>
+          <View style={styles.langMenuRight}>
+            <Text style={styles.langMenuValue} numberOfLines={1}>
+              {selectedLanguage?.nativeName || language}
+            </Text>
+            <Ionicons name="chevron-down" size={18} color="#64748B" />
+          </View>
+        </Pressable>
+
+        <Modal
+          visible={languageMenuOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setLanguageMenuOpen(false)}
+        >
+          <Pressable style={styles.modalBackdrop} onPress={() => setLanguageMenuOpen(false)}>
+            <Pressable style={styles.modalCard} onPress={() => {}}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>{t("auth.languagePicker.title")}</Text>
+                <Pressable
+                  onPress={() => setLanguageMenuOpen(false)}
+                  style={styles.modalClose}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.modalCloseText}>{t("auth.languagePicker.close")}</Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.searchWrap}>
+                <Ionicons name="search-outline" size={18} color="#64748B" />
+                <TextInput
+                  value={languageQuery}
+                  onChangeText={setLanguageQuery}
+                  placeholder={t("auth.languagePicker.searchPlaceholder")}
+                  placeholderTextColor="#94A3B8"
+                  style={styles.searchInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {languageQuery ? (
+                  <Pressable onPress={() => setLanguageQuery("")} style={styles.searchClear}>
+                    <Ionicons name="close-circle" size={18} color="#94A3B8" />
+                  </Pressable>
+                ) : null}
+              </View>
+
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalContent}>
+                {groupedLanguages.map((g) => (
+                  <View key={g.key} style={styles.groupBlock}>
+                    <Text style={styles.groupTitle}>{g.title}</Text>
+                    <View style={styles.groupCard}>
+                      {g.items.map(renderLanguageRow)}
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         <TextInput
-          placeholder={t.fullName}
+          placeholder={t("auth.register.fullName")}
           value={name}
           onChangeText={setName}
           style={styles.input}
         />
         <TextInput
-          placeholder={t.email}
+          placeholder={t("auth.register.email")}
           value={email}
           onChangeText={setEmail}
           style={styles.input}
@@ -108,20 +212,20 @@ export default function RegisterScreen({ navigation }) {
           keyboardType="email-address"
         />
         <TextInput
-          placeholder={t.phoneOptional}
+          placeholder={t("auth.register.phoneOptional")}
           value={phone}
           onChangeText={setPhone}
           style={styles.input}
           keyboardType="phone-pad"
         />
         <TextInput
-          placeholder={t.password}
+          placeholder={t("auth.register.password")}
           value={password}
           onChangeText={setPassword}
           style={styles.input}
           secureTextEntry
         />
-        <Text style={styles.hint}>{t.passwordHint}</Text>
+        <Text style={styles.hint}>{t("auth.register.passwordHint")}</Text>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -129,14 +233,14 @@ export default function RegisterScreen({ navigation }) {
           {loading ? (
             <ActivityIndicator color="#fff" size="small" />
           ) : (
-            <Text style={styles.primaryBtnText}>{t.createAccount}</Text>
+            <Text style={styles.primaryBtnText}>{t("auth.register.button")}</Text>
           )}
         </Pressable>
 
         <View style={styles.row}>
-          <Text style={styles.helper}>{t.alreadyHave}</Text>
+          <Text style={styles.helper}>{t("auth.register.alreadyHave")}</Text>
           <Pressable onPress={() => navigation.navigate("Login")}>
-            <Text style={styles.link}> {t.login}</Text>
+            <Text style={styles.link}> {t("auth.register.login")}</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -149,6 +253,105 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 18, justifyContent: "center" },
   title: { fontSize: 28, fontWeight: "900", color: "#0F172A", marginBottom: 4 },
   subtitle: { color: "#64748B", marginBottom: 20, fontWeight: "600" },
+  langMenu: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  langMenuPressed: { opacity: 0.9 },
+  langMenuLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
+  langMenuLabel: { color: "#0F172A", fontWeight: "900" },
+  langMenuRight: { flexDirection: "row", alignItems: "center", gap: 8, maxWidth: "55%" },
+  langMenuValue: { color: "#334155", fontWeight: "800" },
+
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.55)",
+    padding: 18,
+    justifyContent: "center",
+  },
+  modalCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    overflow: "hidden",
+    maxHeight: "85%",
+  },
+  modalHeader: {
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F6",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  modalTitle: { fontSize: 16, fontWeight: "900", color: "#0F172A" },
+  modalClose: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 10,
+    backgroundColor: "#F1F5F9",
+  },
+  modalCloseText: { fontWeight: "900", color: "#0F172A", fontSize: 12 },
+  searchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F6",
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 8,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  searchClear: { padding: 6 },
+  modalContent: { padding: 12, paddingBottom: 16 },
+  groupBlock: { marginBottom: 12 },
+  groupTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#0F172A",
+    letterSpacing: 0.7,
+    textTransform: "uppercase",
+    marginBottom: 8,
+  },
+  groupCard: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 14,
+    overflow: "hidden",
+  },
+  langRow: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F6",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  langRowPressed: { backgroundColor: "#F8FAFC" },
+  langRowActive: { backgroundColor: "#ECFDF5" },
+  langRowLeft: { flex: 1 },
+  langRowTitle: { fontWeight: "900", color: "#0F172A" },
+  langRowSub: { marginTop: 2, color: "#64748B", fontWeight: "700", fontSize: 12 },
   input: {
     backgroundColor: "#fff",
     borderWidth: 1,

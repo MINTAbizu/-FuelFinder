@@ -1,53 +1,29 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const STORAGE_KEY = "fuelfinder_language";
+import i18n, { getDeviceLanguage, initI18n } from "../../i18n/i18n";
+import {
+  DEFAULT_LANGUAGE,
+  isSupportedLanguage,
+  SUPPORTED_LANGUAGES,
+} from "../../i18n/supportedLanguages";
 
-const STRINGS = {
-  en: {
-    loadingSession: "Loading session...",
-    comingSoon: "Coming soon",
-    profile: "Profile",
-    name: "Name",
-    email: "Email",
-    logout: "Logout",
-    switchToAm: "Switch to Amharic",
-    switchToEn: "Switch to English",
-    home: "Home",
-    map: "Map",
-    alerts: "Alerts",
-    stationDetails: "Station Details",
-  },
-  am: {
-    loadingSession: "\u1218\u130d\u1262\u12eb \u1260\u1218\u132b\u1295 \u120b\u12ed...",
-    comingSoon: "\u1260\u1245\u122d\u1265 \u1240\u1295",
-    profile: "\u1218\u1208\u12eb",
-    name: "\u1235\u121d",
-    email: "\u12a2\u121c\u12ed\u120d",
-    logout: "\u12cd\u1323",
-    switchToAm: "\u12c8\u12f0 \u12a0\u121b\u122d\u129b \u1240\u12ed\u122d",
-    switchToEn: "Switch to English",
-    home: "\u1218\u1290\u123b",
-    map: "\u12ab\u122d\u1273",
-    alerts: "\u121b\u1233\u12c8\u1242\u12eb",
-    stationDetails: "\u12e8\u121b\u12f0\u12eb \u12dd\u122d\u12dd\u122d",
-  },
-};
+const STORAGE_KEY = "fuelfinder_language";
 
 const LanguageContext = createContext(null);
 
 export function LanguageProvider({ children }) {
-  const [language, setLanguage] = useState("am");
+  const [language, setLanguage] = useState(DEFAULT_LANGUAGE);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        const saved = await AsyncStorage.getItem(STORAGE_KEY);
-        if (mounted && (saved === "en" || saved === "am")) {
-          setLanguage(saved);
-        }
+        const saved = (await AsyncStorage.getItem(STORAGE_KEY)) || "";
+        const startLang = isSupportedLanguage(saved) ? saved : getDeviceLanguage();
+        await initI18n(startLang);
+        if (mounted) setLanguage(startLang);
       } finally {
         if (mounted) setIsReady(true);
       }
@@ -58,20 +34,30 @@ export function LanguageProvider({ children }) {
   }, []);
 
   const changeLanguage = async (next) => {
-    if (next !== "en" && next !== "am") return;
+    if (!isSupportedLanguage(next)) return;
     setLanguage(next);
     await AsyncStorage.setItem(STORAGE_KEY, next);
+    await i18n.changeLanguage(next);
   };
 
   const toggleLanguage = async () => {
-    const next = language === "am" ? "en" : "am";
+    const order = SUPPORTED_LANGUAGES.map((l) => l.code);
+    const idx = Math.max(0, order.indexOf(language));
+    const next = order[(idx + 1) % order.length] || DEFAULT_LANGUAGE;
     await changeLanguage(next);
   };
 
-  const t = (key) => STRINGS[language]?.[key] || STRINGS.en[key] || key;
+  const t = (key, options) => i18n.t(key, options);
 
   const value = useMemo(
-    () => ({ language, isReady, changeLanguage, toggleLanguage, t }),
+    () => ({
+      language,
+      isReady,
+      supportedLanguages: SUPPORTED_LANGUAGES,
+      changeLanguage,
+      toggleLanguage,
+      t,
+    }),
     [language, isReady]
   );
 

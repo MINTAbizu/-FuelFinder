@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FlatList,
+  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -23,98 +24,7 @@ const DEFAULT_REGION = {
   longitudeDelta: 0.05,
 };
 
-const I18N = {
-  en: {
-    subtitle: "Live stations, queue status, and nearby options",
-    all: "All",
-    available: "Available",
-    limited: "Limited",
-    empty: "Empty",
-    nearest: "Nearest",
-    shortestQueue: "Shortest Queue",
-    az: "A-Z",
-    anyFuel: "Any Fuel",
-    gasoline: "Gasoline",
-    diesel: "Diesel",
-    other: "Other",
-    centerOnMe: "Center on me",
-    centerUnavailable: "Center unavailable",
-    findNearby: "Find Nearby Stations",
-    mapCentered: "Map centered to your location",
-    denied: "Location access denied. Showing stations only.",
-    locationFail: "Could not fetch current location.",
-    loadStationFail: "Failed to load nearby real fuel stations.",
-    routeNeedLocation: "Current location is required to draw directions.",
-    routeInvalidCoords: "Invalid location coordinates for route.",
-    routeUnavailable: "Live road route unavailable right now. Please try again.",
-    routeFail: "Network routing failed. Could not load road path.",
-    route: "Route",
-    about: "about",
-    min: "min",
-    search: "Search station",
-    filter: "Filter by fuel status",
-    fuelPref: "Fuel preference",
-    sortBy: "Sort stations",
-    sort: "Sort",
-    found: "stations found",
-    queue: "Queue",
-    wait: "Wait",
-    distance: "Distance",
-    showRoute: "Show Route",
-    routeShown: "Route Shown",
-    details: "Details",
-    noMatch: "No stations match your filters.",
-    noMatchSub: "Try a different search, status, or sort option.",
-    meters: "m",
-    km: "km",
-    cars: "cars",
-  },
-  am: {
-    subtitle: "\u12e8\u1240\u1325\u1273 \u121b\u12f0\u12eb\u12ce\u127d\u1363 \u1230\u120d\u134d \u1201\u1294\u1273 \u12a5\u1293 \u12a0\u1245\u122b\u1262\u12eb \u121d\u122d\u132b\u12ce\u127d",
-    all: "\u1201\u1209\u121d",
-    available: "\u12eb\u1208",
-    limited: "\u1260\u12a8\u134a\u120d",
-    empty: "\u1263\u12f6",
-    nearest: "\u1245\u122d\u1265",
-    shortestQueue: "\u12a0\u132d\u122d \u1230\u120d\u134d",
-    az: "\u1260\u134a\u12f0\u120d \u1270\u122d\u1273",
-    anyFuel: "\u121b\u1295\u129b\u12cd\u121d \u1290\u12f3\u1305",
-    gasoline: "\u1264\u1295\u12da\u1295",
-    diesel: "\u12f2\u12bc\u120d",
-    other: "\u120c\u120b",
-    centerOnMe: "\u12c8\u12f0 \u12a5\u1294 \u12ab\u122d\u1273 \u12a0\u12e8",
-    centerUnavailable: "\u1218\u1210\u120d \u1218\u1240\u1218\u1325 \u12a0\u12ed\u127b\u120d\u121d",
-    findNearby: "\u1245\u122d\u1265 \u121b\u12f0\u12eb\u12ce\u127d \u1348\u120d\u130d",
-    mapCentered: "\u12ab\u122d\u1273\u12cd \u12c8\u12f0 \u12a0\u12ab\u1263\u1262\u12ce \u1270\u1240\u121d\u1327\u120d",
-    denied: "\u12e8\u12a0\u12ab\u1263\u1262 \u134d\u1243\u12f5 \u12a0\u120d\u1270\u1348\u1240\u12f0\u121d\u1362 \u121b\u12f0\u12eb\u12ce\u127d \u1265\u127b \u12ed\u1273\u12eb\u1209\u1362",
-    locationFail: "\u12e8\u12a0\u1201\u1291 \u12a0\u12ab\u1263\u1262 \u1218\u1228\u1303 \u1218\u12cd\u1230\u12f5 \u12a0\u120d\u1270\u127b\u1208\u121d\u1362",
-    loadStationFail: "\u1245\u122d\u1265 \u12eb\u1209 \u121b\u12f0\u12eb\u12ce\u127d\u1295 \u1218\u132b\u1295 \u12a0\u120d\u1270\u127b\u1208\u121d\u1362",
-    routeNeedLocation: "\u1218\u1295\u1308\u12f5 \u1208\u1218\u1233\u12e8\u1275 \u12e8\u12a0\u1201\u1291 \u12a0\u12ab\u1263\u1262 \u12eb\u1235\u1348\u120d\u130b\u120d\u1362",
-    routeInvalidCoords: "\u12e8\u1270\u1233\u1233\u1270 \u12ae\u12a6\u122d\u12f2\u1294\u1275 \u1218\u1228\u1303",
-    routeUnavailable: "\u12e8\u1240\u1325\u1273 \u1218\u1295\u1308\u12f5 \u1260\u12da\u1205 \u130a\u12dc \u12a0\u120d\u1270\u1308\u1298\u121d\u1362",
-    routeFail: "\u12e8\u1294\u1275\u12c8\u122d\u12ad \u1218\u1295\u1308\u12f5 \u1325\u122a \u12a0\u120d\u1270\u127b\u1208\u121d\u1362",
-    route: "\u1218\u1295\u1308\u12f5",
-    about: "\u12c8\u12f0",
-    min: "\u12f0\u1242\u1243",
-    search: "\u121b\u12f0\u12eb \u1348\u120d\u130d",
-    filter: "\u1260\u1290\u12f3\u1305 \u1201\u1294\u1273 \u12a0\u1323\u122b",
-    fuelPref: "\u12e8\u1290\u12f3\u1305 \u121d\u122d\u132b",
-    sortBy: "\u121b\u12f0\u12eb\u12ce\u127d \u12f0\u122d\u12f5\u122d",
-    sort: "\u12f0\u122d\u12f5\u122d",
-    found: "\u121b\u12f0\u12eb\u12ce\u127d \u1270\u1308\u1299",
-    queue: "\u1230\u120d\u134d",
-    wait: "\u1246\u12ed\u1273",
-    distance: "\u122d\u1240\u1275",
-    showRoute: "\u1218\u1295\u1308\u12f5 \u12a0\u1233\u12ed",
-    routeShown: "\u1218\u1295\u1308\u12f5 \u1273\u12ed\u1277\u120d",
-    details: "\u12dd\u122d\u12dd\u122d",
-    noMatch: "\u1270\u1218\u1323\u1323\u129d \u121b\u12f0\u12eb \u12a0\u120d\u1270\u1308\u1298\u121d\u1362",
-    noMatchSub: "\u120c\u120b \u134d\u1208\u130b \u12c8\u12ed\u121d \u121b\u1323\u122a\u12eb \u12ed\u121e\u12ad\u1229\u1362",
-    meters: "\u121c",
-    km: "\u12aa.\u121c",
-    cars: "\u1218\u12aa\u1293",
-  },
-};
+// Translations are handled by i18next (`src/i18n/locales/*.json`).
 
 const toDistanceKm = (from, to) => {
   if (!from || !to) return null;
@@ -138,34 +48,40 @@ async function fetchNearbyFuelStations(basePoint, radiusMeters = 12000) {
 }
 
 function statusLabel(t, status) {
-  if (status === "available") return t.available;
-  if (status === "limited") return t.limited;
-  if (status === "empty") return t.empty;
-  return t.all;
+  if (status === "available") return t("homeScreen.status.available");
+  if (status === "limited") return t("homeScreen.status.limited");
+  if (status === "empty") return t("homeScreen.status.empty");
+  return t("homeScreen.status.all");
 }
 
 function sortLabel(t, value) {
-  if (value === "queue") return t.shortestQueue;
-  if (value === "name") return t.az;
-  return t.nearest;
+  if (value === "queue") return t("homeScreen.sort.shortestQueue");
+  if (value === "name") return t("homeScreen.sort.az");
+  return t("homeScreen.sort.nearest");
 }
 
 function fuelLabel(t, value) {
-  if (value === "gasoline") return t.gasoline;
-  if (value === "diesel") return t.diesel;
-  if (value === "other") return t.other;
-  return t.anyFuel;
+  if (value === "gasoline") return t("homeScreen.fuel.gasoline");
+  if (value === "diesel") return t("homeScreen.fuel.diesel");
+  if (value === "other") return t("homeScreen.fuel.other");
+  return t("homeScreen.fuel.any");
 }
 
 function formatDistance(t, distanceKm) {
   if (distanceKm == null) return "N/A";
-  if (distanceKm < 1) return `${Math.round(distanceKm * 1000)} ${t.meters}`;
-  return `${distanceKm.toFixed(1)} ${t.km}`;
+  if (distanceKm < 1) return `${Math.round(distanceKm * 1000)} ${t("homeScreen.units.meters")}`;
+  return `${distanceKm.toFixed(1)} ${t("homeScreen.units.km")}`;
+}
+
+function markerColor(status) {
+  if (status === "available") return "green";
+  if (status === "limited") return "orange";
+  if (status === "empty") return "red";
+  return "gray";
 }
 
 export default function HomeScreen({ navigation }) {
-  const { language } = useLanguage();
-  const t = I18N[language] || I18N.en;
+  const { t } = useLanguage();
 
   const mapRef = useRef(null);
   const listRef = useRef(null);
@@ -198,7 +114,7 @@ export default function HomeScreen({ navigation }) {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== "granted") {
-          if (mounted) setLocationError(t.denied);
+          if (mounted) setLocationError(t("homeScreen.location.denied"));
           return;
         }
 
@@ -210,7 +126,7 @@ export default function HomeScreen({ navigation }) {
           (pos) => mounted && setLocation(pos.coords)
         );
       } catch (_error) {
-        if (mounted) setLocationError(t.locationFail);
+        if (mounted) setLocationError(t("homeScreen.location.fail"));
       }
     })();
 
@@ -219,7 +135,7 @@ export default function HomeScreen({ navigation }) {
       watcherRef.current?.remove?.();
       watcherRef.current = null;
     };
-  }, [t.denied, t.locationFail]);
+  }, [t]);
 
   const loadNearbyStations = useCallback(async () => {
     const basePoint = location || mapCenter;
@@ -231,7 +147,7 @@ export default function HomeScreen({ navigation }) {
       const next = await fetchNearbyFuelStations(basePoint, 12000);
       setStations(next);
     } catch (error) {
-      setStationsError(t.loadStationFail);
+      setStationsError(t("homeScreen.stations.loadFail"));
       console.error(
         "[Stations:loadNearbyStations:debug]",
         error?.response?.status,
@@ -241,7 +157,7 @@ export default function HomeScreen({ navigation }) {
     } finally {
       setLoadingStations(false);
     }
-  }, [location, mapCenter, t.loadStationFail]);
+  }, [location, mapCenter, t]);
 
   useEffect(() => {
     if (!location || loadedRef.current) return;
@@ -264,16 +180,16 @@ export default function HomeScreen({ navigation }) {
       { latitude: location.latitude, longitude: location.longitude, latitudeDelta: 0.025, longitudeDelta: 0.025 },
       500
     );
-    setCenterNotice(t.mapCentered);
+    setCenterNotice(t("homeScreen.mapCentered"));
     setTimeout(() => setCenterNotice(""), 1200);
-  }, [location, t.mapCentered]);
+  }, [location, t]);
 
   const drawRouteToStation = useCallback(
     async (station) => {
       listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
 
       if (!location) {
-        setRoutingError(t.routeNeedLocation);
+        setRoutingError(t("homeScreen.route.needLocation"));
         return;
       }
       const fromLat = Number(location.latitude);
@@ -281,7 +197,7 @@ export default function HomeScreen({ navigation }) {
       const toLat = Number(station?.latitude);
       const toLon = Number(station?.longitude);
       if (!Number.isFinite(fromLat) || !Number.isFinite(fromLon) || !Number.isFinite(toLat) || !Number.isFinite(toLon)) {
-        setRoutingError(t.routeInvalidCoords);
+        setRoutingError(t("homeScreen.route.invalidCoords"));
         return;
       }
 
@@ -293,7 +209,7 @@ export default function HomeScreen({ navigation }) {
           setRouteCoords([]);
           setRouteSummary(null);
           setActiveRouteStationId("");
-          setRoutingError(t.routeUnavailable);
+          setRoutingError(t("homeScreen.route.unavailable"));
           return;
         }
 
@@ -312,7 +228,7 @@ export default function HomeScreen({ navigation }) {
         setRouteCoords([]);
         setRouteSummary(null);
         setActiveRouteStationId("");
-        setRoutingError(t.routeFail);
+        setRoutingError(t("homeScreen.route.fail"));
         console.error("[Directions:drawRouteToStation]", error?.message || error);
       }
     },
@@ -346,8 +262,40 @@ export default function HomeScreen({ navigation }) {
       next.sort((a, b) => (a.distanceKm ?? Number.POSITIVE_INFINITY) - (b.distanceKm ?? Number.POSITIVE_INFINITY));
     }
 
-    return next;
-  }, [stations, location, mapCenter, searchText, statusFilter, fuelFilter, sortBy]);
+    const scored = next.map((station) => {
+      const statusPenalty =
+        station.fuel_status === "available" ? 0 : station.fuel_status === "limited" ? 12 : 30;
+      const distancePenalty = station.distanceKm != null ? station.distanceKm * 3 : 8;
+      const queuePenalty = Number(station.queue_length || 0) * 1.8;
+      const score = 100 - (statusPenalty + distancePenalty + queuePenalty);
+
+      let reason = t("homeScreen.balancedOption");
+      if (station.fuel_status === "available" && Number(station.queue_length || 0) <= 6) {
+        reason = t("homeScreen.fastLineReason");
+      } else if (station.fuel_status === "limited") {
+        reason = t("homeScreen.limitedReason");
+      } else if (Number(station.queue_length || 0) >= 15) {
+        reason = t("homeScreen.highDemandReason");
+      }
+
+      return {
+        ...station,
+        smartScore: Math.max(1, Math.round(score)),
+        reason,
+      };
+    });
+
+    const topId = scored.reduce((bestId, current) => {
+      if (!bestId) return current.id;
+      const best = scored.find((item) => item.id === bestId);
+      return current.smartScore > best.smartScore ? current.id : bestId;
+    }, null);
+
+    return scored.map((station) => ({
+      ...station,
+      isTopPick: station.id === topId,
+    }));
+  }, [stations, location, mapCenter, searchText, statusFilter, fuelFilter, sortBy, t]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -362,7 +310,7 @@ export default function HomeScreen({ navigation }) {
         ListHeaderComponent={
           <View>
             <Text style={styles.title}>FuelFinder</Text>
-            <Text style={styles.subtitle}>{t.subtitle}</Text>
+            <Text style={styles.subtitle}>{t("homeScreen.subtitle")}</Text>
 
             <View style={styles.mapCard}>
               <MapView
@@ -387,7 +335,7 @@ export default function HomeScreen({ navigation }) {
                     key={String(s.id)}
                     coordinate={{ latitude: Number(s.latitude), longitude: Number(s.longitude) }}
                     title={s.name}
-                    description={`${t.queue}: ${s.queue_length} ${t.cars}`}
+                    description={`${t("homeScreen.queue")}: ${s.queue_length} ${t("homeScreen.units.cars")}`}
                   />
                 ))}
               </MapView>
@@ -396,21 +344,22 @@ export default function HomeScreen({ navigation }) {
             <View style={styles.row}>
               {location ? (
                 <Pressable style={[styles.button, styles.primary]} onPress={onCenterMap}>
-                  <Text style={styles.buttonText}>{t.centerOnMe}</Text>
+                  <Text style={styles.buttonText}>{t("homeScreen.centerOnMe")}</Text>
                 </Pressable>
               ) : (
                 <View style={[styles.button, styles.disabled]}>
-                  <Text style={styles.buttonText}>{t.centerUnavailable}</Text>
+                  <Text style={styles.buttonText}>{t("homeScreen.centerUnavailable")}</Text>
                 </View>
               )}
               <Pressable style={[styles.button, styles.secondary]} onPress={loadNearbyStations}>
-                <Text style={styles.buttonText}>{t.findNearby}</Text>
+                <Text style={styles.buttonText}>{t("homeScreen.findNearby")}</Text>
               </Pressable>
             </View>
 
             {routeSummary ? (
               <Text style={styles.routeText}>
-                {t.route}: {routeSummary.distanceKm.toFixed(1)} {t.km}, {t.about} {Math.max(1, Math.round(routeSummary.durationMin))} {t.min}
+                {t("homeScreen.route.label")}: {routeSummary.distanceKm.toFixed(1)} {t("homeScreen.units.km")},{" "}
+                {t("homeScreen.route.about")} {Math.max(1, Math.round(routeSummary.durationMin))} {t("homeScreen.route.min")}
               </Text>
             ) : null}
             {centerNotice ? <Text style={styles.ok}>{centerNotice}</Text> : null}
@@ -418,9 +367,9 @@ export default function HomeScreen({ navigation }) {
             {stationsError ? <Text style={styles.error}>{stationsError}</Text> : null}
             {routingError ? <Text style={styles.error}>{routingError}</Text> : null}
 
-            <TextInput value={searchText} onChangeText={setSearchText} placeholder={t.search} style={styles.search} />
+            <TextInput value={searchText} onChangeText={setSearchText} placeholder={t("homeScreen.search")} style={styles.search} />
 
-            <Text style={styles.section}>{t.filter}</Text>
+            <Text style={styles.section}>{t("homeScreen.filter")}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
               {["all", "available", "limited", "empty"].map((value) => (
                 <TouchableOpacity
@@ -433,7 +382,7 @@ export default function HomeScreen({ navigation }) {
               ))}
             </ScrollView>
 
-            <Text style={styles.section}>{t.fuelPref}</Text>
+            <Text style={styles.section}>{t("homeScreen.fuel.label")}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
               {["any", "gasoline", "diesel", "other"].map((value) => (
                 <TouchableOpacity
@@ -446,40 +395,83 @@ export default function HomeScreen({ navigation }) {
               ))}
             </ScrollView>
 
-            <Text style={styles.section}>{t.sortBy}</Text>
+            <Text style={styles.section}>{t("homeScreen.sort.sortBy")}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
               {["distance", "queue", "name"].map((value) => (
                 <TouchableOpacity key={value} style={[styles.chip, sortBy === value && styles.chipActive]} onPress={() => setSortBy(value)}>
-                  <Text style={[styles.chipText, sortBy === value && styles.chipTextActive]}>{t.sort}: {sortLabel(t, value)}</Text>
+                  <Text style={[styles.chipText, sortBy === value && styles.chipTextActive]}>
+                    {t("homeScreen.sort.label")}: {sortLabel(t, value)}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
 
-            <Text style={styles.count}>{filteredStations.length} {t.found}</Text>
+            <Text style={styles.count}>{filteredStations.length} {t("homeScreen.found")}</Text>
           </View>
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>{t.noMatch}</Text>
-            <Text style={styles.emptySub}>{t.noMatchSub}</Text>
+            <Text style={styles.emptyTitle}>{t("homeScreen.noMatch")}</Text>
+            <Text style={styles.emptySub}>{t("homeScreen.noMatchSub")}</Text>
           </View>
         }
         renderItem={({ item }) => (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>{item.name}</Text>
-            <Text style={styles.cardLine}>{statusLabel(t, item.fuel_status)}</Text>
-            <Text style={styles.cardLine}>{t.queue}: {item.queue_length} {t.cars}</Text>
-            <Text style={styles.cardLine}>{t.wait}: {item.waitMins} {t.min}</Text>
-            <Text style={styles.cardLine}>{t.distance}: {formatDistance(t, item.distanceKm)}</Text>
-            <Pressable style={styles.routeBtn} onPress={() => drawRouteToStation(item)}>
-              <Text style={styles.routeBtnText}>
-                {activeRouteStationId === String(item.id || "") ? t.routeShown : t.showRoute}
-              </Text>
-            </Pressable>
-            <Pressable onPress={() => navigation?.navigate?.("StationDetails", { station: item })}>
-              <Text style={styles.detailsLink}>{t.details}</Text>
-            </Pressable>
-          </View>
+          <TouchableOpacity
+            style={styles.card}
+            onPress={() => navigation?.navigate?.("StationDetails", { station: item })}
+          >
+            {item.image ? (
+              <Image source={{ uri: item.image }} style={styles.stationImage} />
+            ) : (
+              <View style={styles.stationImagePlaceholder}>
+                <Text style={styles.stationImagePlaceholderText}>F</Text>
+              </View>
+            )}
+            <View style={styles.cardContent}>
+              {item.isTopPick ? (
+                <View style={styles.topPickBadge}>
+                  <Text style={styles.topPickText}>{t("homeScreen.bestOption")}</Text>
+                </View>
+              ) : null}
+              <View style={styles.headerRow}>
+                <Text style={styles.stationName}>{item.name}</Text>
+                <Pressable style={[styles.statusPill, { borderColor: markerColor(item.fuel_status) }]}>
+                  <Text style={[styles.statusText, { color: markerColor(item.fuel_status) }]}>
+                    {statusLabel(t, item.fuel_status)}
+                  </Text>
+                </Pressable>
+              </View>
+              <View style={styles.factsWrap}>
+                <View style={styles.factPill}>
+                  <Text style={styles.factLabel}>{t("homeScreen.queue")}</Text>
+                  <Text style={styles.factValue}>{item.queue_length} {t("homeScreen.units.cars")}</Text>
+                </View>
+                <View style={styles.factPill}>
+                  <Text style={styles.factLabel}>{t("homeScreen.wait")}</Text>
+                  <Text style={styles.factValue}>{item.waitMins} {t("homeScreen.route.min")}</Text>
+                </View>
+                <View style={styles.factPill}>
+                  <Text style={styles.factLabel}>{t("homeScreen.distance")}</Text>
+                  <Text style={styles.factValue}>{formatDistance(t, item.distanceKm)}</Text>
+                </View>
+              </View>
+              <View style={styles.insightRow}>
+                <Text style={styles.insightReason}>{item.reason}</Text>
+              </View>
+              <Text style={styles.metaAddress}>{item.address || t("homeScreen.addressMissing")}</Text>
+              <View style={styles.smartScoreBottom}>
+                <Text style={styles.smartScoreBottomLabel}>{t("homeScreen.smartScore")}</Text>
+                <Text style={styles.smartScoreBottomValue}>{item.smartScore}/100</Text>
+              </View>
+              <Pressable style={styles.routeBtn} onPress={() => drawRouteToStation(item)}>
+                <Text style={styles.routeBtnText}>
+                  {activeRouteStationId === String(item.id || "")
+                    ? t("homeScreen.route.shown")
+                    : t("homeScreen.route.show")}
+                </Text>
+              </Pressable>
+            </View>
+          </TouchableOpacity>
         )}
       />
     </SafeAreaView>
@@ -528,18 +520,99 @@ const styles = StyleSheet.create({
   chipTextActive: { color: "#1D4ED8" },
   count: { marginTop: 4, marginBottom: 8, color: "#475569", fontWeight: "700" },
   card: {
+    flexDirection: "row",
     backgroundColor: "#fff",
     borderWidth: 1,
     borderColor: "#E2E8F0",
     borderRadius: 12,
-    padding: 12,
+    padding: 8,
     marginBottom: 8,
   },
-  cardTitle: { color: "#0F172A", fontWeight: "900", fontSize: 15, marginBottom: 3 },
-  cardLine: { color: "#334155", fontWeight: "600", marginBottom: 2 },
+  stationImage: { width: 56, height: 56, borderRadius: 8, marginRight: 8 },
+  stationImagePlaceholder: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    marginRight: 8,
+    backgroundColor: "#E2E8F0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stationImagePlaceholderText: { fontSize: 20, fontWeight: "800", color: "#0F172A" },
+  cardContent: { flex: 1, justifyContent: "flex-start", alignItems: "flex-start" },
+  topPickBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#FFEDD5",
+    borderColor: "#F97316",
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    marginBottom: 4,
+  },
+  topPickText: { color: "#C2410C", fontSize: 9, fontWeight: "800", letterSpacing: 0.2 },
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  stationName: {
+    flex: 1,
+    fontWeight: "800",
+    fontSize: 14,
+    marginBottom: 3,
+    color: "#0F172A",
+    marginRight: 8,
+  },
+  statusPill: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    backgroundColor: "#FFFFFF",
+  },
+  statusText: { fontSize: 10, fontWeight: "800" },
+  factsWrap: {
+    marginTop: 4,
+    marginBottom: 4,
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    gap: 5,
+    alignItems: "flex-start",
+    width: "100%",
+  },
+  factPill: {
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    minWidth: 0,
+    flex: 1,
+  },
+  factLabel: { color: "#64748B", fontSize: 9, fontWeight: "700", marginBottom: 1 },
+  factValue: { color: "#0F172A", fontSize: 11, fontWeight: "800" },
+  insightRow: {
+    marginTop: 1,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+  },
+  insightReason: { marginTop: 1, color: "#334155", fontSize: 10, fontWeight: "600" },
+  metaAddress: { marginTop: 4, color: "#475569", fontSize: 11, fontWeight: "600" },
+  smartScoreBottom: {
+    marginTop: 5,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+    paddingTop: 6,
+  },
+  smartScoreBottomLabel: { color: "#334155", fontSize: 10, fontWeight: "700" },
+  smartScoreBottomValue: { color: "#1D4ED8", fontSize: 12, fontWeight: "900" },
   routeBtn: { marginTop: 8, alignSelf: "flex-start", backgroundColor: "#0F766E", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   routeBtnText: { color: "#fff", fontSize: 12, fontWeight: "800" },
-  detailsLink: { marginTop: 8, color: "#1D4ED8", fontWeight: "800" },
   empty: { alignItems: "center", paddingTop: 30 },
   emptyTitle: { color: "#0F172A", fontWeight: "800", marginBottom: 4 },
   emptySub: { color: "#64748B", textAlign: "center" },
