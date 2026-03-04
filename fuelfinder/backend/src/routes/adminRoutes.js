@@ -4,6 +4,7 @@ const { requireRole, requireScope } = require("../middleware/authorize");
 const { validateAdminCreate } = require("../middleware/validateAdmin");
 const { auditAction } = require("../middleware/auditLog");
 const adminUserController = require("../controllers/adminUserController");
+const adminStationController = require("../controllers/adminStationController");
 
 const router = express.Router();
 
@@ -67,6 +68,33 @@ router.post(
   requireRole(["super_admin"]),
   auditAction("admin.user.force_logout", { targetType: "user" }),
   adminUserController.forceLogoutAdminUser
+);
+
+router.get(
+  "/stations",
+  requireRole(["super_admin", "org_admin"]),
+  adminStationController.listStations
+);
+
+router.post(
+  "/stations",
+  requireRole(["super_admin", "org_admin"]),
+  auditAction("admin.station.create", { targetType: "station" }),
+  adminStationController.createStation
+);
+
+router.patch(
+  "/stations/:stationId",
+  requireRole(["super_admin", "org_admin"]),
+  auditAction("admin.station.update", { targetType: "station" }),
+  adminStationController.updateStation
+);
+
+router.patch(
+  "/stations/:stationId/active",
+  requireRole(["super_admin", "org_admin"]),
+  auditAction("admin.station.set_active", { targetType: "station" }),
+  adminStationController.setStationActive
 );
 
 module.exports = router;
