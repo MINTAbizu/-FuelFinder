@@ -41,6 +41,14 @@ function buildStationResponse(station) {
   };
 }
 
+function isOrgAdmin(req) {
+  return String(req?.user?.role || "") === "org_admin";
+}
+
+function getActorOrgId(req) {
+  return String(req?.user?.organizationId || "").trim();
+}
+
 exports.listStations = async (req, res) => {
   try {
     const query = {};
@@ -71,6 +79,14 @@ exports.listStations = async (req, res) => {
       query.branchId = branchId;
     }
 
+    if (isOrgAdmin(req)) {
+      const actorOrgId = getActorOrgId(req);
+      if (!actorOrgId) {
+        return res.status(403).json({ message: "Forbidden: organization scope not configured." });
+      }
+      query.organizationId = actorOrgId;
+    }
+
     const stations = await Station.find(query).sort({ createdAt: -1 }).lean();
     return res.json({
       total: stations.length,
@@ -89,7 +105,7 @@ exports.createStation = async (req, res) => {
     const fuelStatus = asText(req.body.fuelStatus) || "partial";
     const latitude = asNumber(req.body.latitude, "latitude");
     const longitude = asNumber(req.body.longitude, "longitude");
-    const organizationId = asObjectIdOrNull(req.body.organizationId, "organizationId");
+    let organizationId = asObjectIdOrNull(req.body.organizationId, "organizationId");
     const cityId = asObjectIdOrNull(req.body.cityId, "cityId");
     const branchId = asObjectIdOrNull(req.body.branchId, "branchId");
 
@@ -98,6 +114,16 @@ exports.createStation = async (req, res) => {
     }
     if (!["full", "partial", "empty"].includes(fuelStatus)) {
       return res.status(400).json({ message: "fuelStatus must be one of: full, partial, empty." });
+    }
+    if (isOrgAdmin(req)) {
+      const actorOrgId = getActorOrgId(req);
+      if (!actorOrgId) {
+        return res.status(403).json({ message: "Forbidden: organization scope not configured." });
+      }
+      if (organizationId && organizationId !== actorOrgId) {
+        return res.status(403).json({ message: "Forbidden: cannot create station for another organization." });
+      }
+      organizationId = actorOrgId;
     }
     if (latitude < -90 || latitude > 90) {
       return res.status(400).json({ message: "latitude must be between -90 and 90." });
@@ -144,6 +170,16 @@ exports.updateStation = async (req, res) => {
     if (!station) {
       return res.status(404).json({ message: "Station not found." });
     }
+    if (isOrgAdmin(req)) {
+      const actorOrgId = getActorOrgId(req);
+      if (!actorOrgId) {
+        return res.status(403).json({ message: "Forbidden: organization scope not configured." });
+      }
+      const stationOrg = station.organizationId ? String(station.organizationId) : "";
+      if (!stationOrg || stationOrg !== actorOrgId) {
+        return res.status(403).json({ message: "Forbidden: cannot update station outside your organization." });
+      }
+    }
 
     if (req.body.name !== undefined) {
       const name = asText(req.body.name);
@@ -166,7 +202,16 @@ exports.updateStation = async (req, res) => {
       station.fuelStatus = fuelStatus;
     }
     if (req.body.organizationId !== undefined) {
-      station.organizationId = asObjectIdOrNull(req.body.organizationId, "organizationId");
+      const requestedOrganizationId = asObjectIdOrNull(req.body.organizationId, "organizationId");
+      if (isOrgAdmin(req)) {
+        const actorOrgId = getActorOrgId(req);
+        if (!actorOrgId || (requestedOrganizationId && requestedOrganizationId !== actorOrgId)) {
+          return res.status(403).json({ message: "Forbidden: cannot move station to another organization." });
+        }
+        station.organizationId = actorOrgId;
+      } else {
+        station.organizationId = requestedOrganizationId;
+      }
     }
     if (req.body.cityId !== undefined) {
       station.cityId = asObjectIdOrNull(req.body.cityId, "cityId");
@@ -223,6 +268,16 @@ exports.setStationActive = async (req, res) => {
     if (!station) {
       return res.status(404).json({ message: "Station not found." });
     }
+    if (isOrgAdmin(req)) {
+      const actorOrgId = getActorOrgId(req);
+      if (!actorOrgId) {
+        return res.status(403).json({ message: "Forbidden: organization scope not configured." });
+      }
+      const stationOrg = station.organizationId ? String(station.organizationId) : "";
+      if (!stationOrg || stationOrg !== actorOrgId) {
+        return res.status(403).json({ message: "Forbidden: cannot update station outside your organization." });
+      }
+    }
 
     station.isActive = Boolean(req.body?.isActive);
     await station.save();
@@ -235,4 +290,3 @@ exports.setStationActive = async (req, res) => {
     return res.status(500).json({ message: "Failed to update station status." });
   }
 };
-
