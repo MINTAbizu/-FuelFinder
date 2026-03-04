@@ -337,6 +337,7 @@ exports.reserveQueueSlot = async (req, res) => {
       depositStatus: depositAmount > 0 ? "pending" : "not_required",
       paymentExpiresAt
     });
+    emitQueueUpdated(stationId);
 
     return res.status(201).json({
       reservationId: ticket._id,
@@ -784,6 +785,7 @@ exports.nextInQueue = async (req, res) => {
 exports.getStationQueue = async (req, res) => {
   try {
     const { stationId } = req.params;
+    const includePending = String(req.query.includePending || "").toLowerCase() === "true";
     if (!isObjectId(stationId)) {
       return res.status(400).json({ message: "Invalid stationId." });
     }
@@ -822,11 +824,32 @@ exports.getStationQueue = async (req, res) => {
         }
       : null;
 
+    const pending = includePending
+      ? await QueueTicket.find({
+          stationId,
+          status: "pending_payment"
+        })
+          .sort({ createdAt: -1 })
+          .select("userId paymentExpiresAt createdAt publicTicketCode requestedBand requestedLiters fuelType")
+          .lean()
+      : [];
+
+    const pendingWithIds = includePending
+      ? pending.map((item) => ({
+          ...item,
+          reservationId: item._id,
+          ticketId: item._id,
+          reservationCode: item.publicTicketCode || ""
+        }))
+      : [];
+
     return res.json({
       stationId,
       waitingCount: waitingWithIds.length,
       called: calledWithIds,
-      waiting: waitingWithIds
+      waiting: waitingWithIds,
+      pendingCount: pendingWithIds.length,
+      pending: pendingWithIds
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load station queue." });
