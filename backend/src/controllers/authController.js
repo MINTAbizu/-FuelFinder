@@ -40,14 +40,35 @@ exports.register = async (req, res) => {
     const phone = String(req.body.phone || "").trim();
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "");
+    const requestedRole = String(req.body.role || "customer").trim().toLowerCase();
+    const adminRegistrationKey = String(req.body.adminRegistrationKey || "").trim();
+    const systemAdminRegistrationKey = String(process.env.ADMIN_REGISTRATION_KEY || "").trim();
+    const isAdminLikeRole = requestedRole !== "customer";
 
     const existing = await User.findOne({ email });
     if (existing) {
       return res.status(409).json({ message: "Email already registered." });
     }
 
+    if (isAdminLikeRole) {
+      if (!systemAdminRegistrationKey) {
+        return res.status(403).json({
+          message: "Admin registration is disabled. Missing ADMIN_REGISTRATION_KEY on server."
+        });
+      }
+      if (!adminRegistrationKey || adminRegistrationKey !== systemAdminRegistrationKey) {
+        return res.status(403).json({ message: "Invalid admin registration key." });
+      }
+    }
+
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    const user = await User.create({ name, phone, email, passwordHash });
+    const user = await User.create({
+      name,
+      phone,
+      email,
+      passwordHash,
+      role: requestedRole
+    });
     const { accessToken, refreshToken } = await issueTokenPair(user);
 
     return res.status(201).json({

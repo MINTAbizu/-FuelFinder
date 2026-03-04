@@ -18,11 +18,22 @@ function sendValidationError(res, message) {
   return res.status(400).json({ message });
 }
 
+const ALLOWED_ROLES = new Set([
+  "customer",
+  "staff",
+  "station_manager",
+  "city_manager",
+  "org_admin",
+  "super_admin"
+]);
+
 exports.validateRegister = (req, res, next) => {
   const name = normalize(req.body.name);
   const phone = normalize(req.body.phone);
   const email = normalizeEmail(req.body.email);
   const password = String(req.body.password || "");
+  const role = normalize(req.body.role || "customer").toLowerCase();
+  const adminRegistrationKey = normalize(req.body.adminRegistrationKey);
 
   if (!name || !email || !password) {
     return sendValidationError(res, "name, email, and password are required.");
@@ -42,11 +53,16 @@ exports.validateRegister = (req, res, next) => {
       "Password must be 8+ chars and include upper, lower, number, and special character."
     );
   }
+  if (!ALLOWED_ROLES.has(role)) {
+    return sendValidationError(res, "Invalid role.");
+  }
 
   req.body.name = name;
   req.body.phone = phone;
   req.body.email = email;
   req.body.password = password;
+  req.body.role = role;
+  req.body.adminRegistrationKey = adminRegistrationKey;
   return next();
 };
 
