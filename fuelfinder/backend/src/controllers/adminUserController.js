@@ -1,4 +1,5 @@
 const bcrypt = require("bcryptjs");
+const mongoose = require("mongoose");
 const User = require("../models/User");
 
 const SALT_ROUNDS = 12;
@@ -64,7 +65,7 @@ exports.listOrganizationOptions = async (_req, res) => {
     const ids = await User.distinct("organizationId", { organizationId: { $ne: null } });
     const options = ids
       .map((id) => String(id || "").trim())
-      .filter(Boolean)
+      .filter((id) => Boolean(id) && mongoose.isValidObjectId(id))
       .map((id) => ({
         id,
         label: `Org ${id.slice(-6).toUpperCase()}`
