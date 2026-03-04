@@ -37,13 +37,37 @@ function isObjectId(value) {
   return mongoose.Types.ObjectId.isValid(value);
 }
 
-function canOperateStation(user, stationId) {
+async function canOperateStation(user, stationId) {
   if (!user) return false;
   if (String(user.role || "") === "super_admin") return true;
 
   const allowedStationIds = Array.isArray(user.stationIds) ? user.stationIds.map(String) : [];
-  if (!allowedStationIds.length) return false;
-  return allowedStationIds.includes(String(stationId));
+  if (allowedStationIds.length) {
+    return allowedStationIds.includes(String(stationId));
+  }
+
+  // If user has no explicit station restriction, evaluate optional broader scope.
+  // This keeps behavior aligned with requireScope middleware while supporting future station metadata.
+  const station = await Station.findById(stationId)
+    .select("_id organizationId cityId branchId")
+    .lean();
+  if (!station) return false;
+
+  const userOrganizationId = String(user.organizationId || "");
+  const userCityIds = Array.isArray(user.cityIds) ? user.cityIds.map(String) : [];
+  const userBranchIds = Array.isArray(user.branchIds) ? user.branchIds.map(String) : [];
+
+  if (userOrganizationId && station.organizationId) {
+    if (String(station.organizationId) !== userOrganizationId) return false;
+  }
+  if (userCityIds.length && station.cityId) {
+    if (!userCityIds.includes(String(station.cityId))) return false;
+  }
+  if (userBranchIds.length && station.branchId) {
+    if (!userBranchIds.includes(String(station.branchId))) return false;
+  }
+
+  return true;
 }
 
 async function recalculatePositions(stationId) {
@@ -647,7 +671,7 @@ exports.nextInQueue = async (req, res) => {
     if (!isObjectId(stationId)) {
       return res.status(400).json({ message: "Invalid stationId." });
     }
-    if (!canOperateStation(actor, stationId)) {
+    if (!(await canOperateStation(actor, stationId))) {
       return res.status(403).json({ message: "Forbidden: station scope denied for queue control." });
     }
 
@@ -855,7 +879,7 @@ exports.verifyCheckIn = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({ message: "Ticket not found for check-in verification." });
     }
-    if (!canOperateStation(actor, ticket.stationId)) {
+    if (!(await canOperateStation(actor, ticket.stationId))) {
       return res.status(403).json({ message: "Forbidden: station scope denied for check-in verification." });
     }
     if (ticket.checkInStatus === "verified") {
@@ -936,7 +960,7 @@ exports.validateReservationIdForStaff = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({ message: "Reservation not found." });
     }
-    if (!canOperateStation(actor, ticket.stationId)) {
+    if (!(await canOperateStation(actor, ticket.stationId))) {
       return res.status(403).json({ message: "Forbidden: station scope denied for this reservation." });
     }
 

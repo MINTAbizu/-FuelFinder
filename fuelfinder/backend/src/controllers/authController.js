@@ -205,7 +205,7 @@ exports.logout = async (req, res) => {
 exports.me = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "_id name email phone role organizationId cityIds stationIds branchIds createdAt"
+      "_id name email phone isBlocked role organizationId cityIds stationIds branchIds createdAt"
     );
     if (!user) return res.status(404).json({ message: "User not found." });
 

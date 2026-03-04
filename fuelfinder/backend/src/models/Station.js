@@ -7,6 +7,9 @@ const stationSchema = new mongoose.Schema(
     contact: { type: String, trim: true },
     externalSource: { type: String, trim: true },
     externalSourceId: { type: String, trim: true },
+    organizationId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    cityId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    branchId: { type: mongoose.Schema.Types.ObjectId, default: null },
     fuelStatus: {
       type: String,
       enum: ["full", "partial", "empty"],
