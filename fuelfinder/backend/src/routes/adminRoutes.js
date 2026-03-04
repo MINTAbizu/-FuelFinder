@@ -28,6 +28,12 @@ router.get("/scope-check", requireScope({ requireAny: true }), (req, res) => {
   });
 });
 
+router.get(
+  "/organizations/options",
+  requireRole(["super_admin"]),
+  adminUserController.listOrganizationOptions
+);
+
 router.post(
   "/users/create-admin",
   requireRole(["super_admin"]),
@@ -37,4 +43,3 @@ router.post(
 );
 
 module.exports = router;
-
