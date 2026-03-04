@@ -1,6 +1,7 @@
 const { verifyAccessToken } = require("../utils/tokens");
+const User = require("../models/User");
 
-function auth(req, res, next) {
+async function auth(req, res, next) {
   const authHeader = req.header("authorization") || "";
   const parts = authHeader.split(" ");
 
@@ -10,7 +11,22 @@ function auth(req, res, next) {
 
   try {
     const payload = verifyAccessToken(parts[1]);
-    req.user = { id: payload.sub, email: payload.email };
+    const user = await User.findById(payload.sub).select(
+      "_id email role organizationId cityIds stationIds branchIds"
+    );
+    if (!user) {
+      return res.status(401).json({ message: "User not found for this token." });
+    }
+
+    req.user = {
+      id: String(user._id),
+      email: user.email,
+      role: user.role || "customer",
+      organizationId: user.organizationId ? String(user.organizationId) : "",
+      cityIds: (user.cityIds || []).map((id) => String(id)),
+      stationIds: (user.stationIds || []).map((id) => String(id)),
+      branchIds: (user.branchIds || []).map((id) => String(id))
+    };
     return next();
   } catch (error) {
     return res.status(401).json({ message: "Invalid or expired token." });
