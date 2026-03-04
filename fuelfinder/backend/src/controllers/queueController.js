@@ -827,10 +827,13 @@ exports.getStationQueue = async (req, res) => {
     const pending = includePending
       ? await QueueTicket.find({
           stationId,
-          status: "pending_payment"
+          $or: [
+            { status: "pending_payment" },
+            { status: "expired", depositStatus: "pending" }
+          ]
         })
           .sort({ createdAt: -1 })
-          .select("userId paymentExpiresAt createdAt publicTicketCode requestedBand requestedLiters fuelType")
+          .select("userId status paymentExpiresAt createdAt publicTicketCode requestedBand requestedLiters fuelType")
           .lean()
       : [];
 
