@@ -99,7 +99,7 @@ exports.bootstrapSuperAdmin = async (req, res) => {
     }
 
     const existingSuperAdminCount = await User.countDocuments({ role: "super_admin" });
-    if (existingSuperAdminCount > 0) {
+    if (existingSuperAdminCount > 1) {
       return res.status(409).json({ message: "Bootstrap already completed." });
     }
 
