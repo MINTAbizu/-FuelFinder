@@ -81,7 +81,7 @@ exports.listOrganizationOptions = async (_req, res) => {
 exports.listAdminUsers = async (_req, res) => {
   try {
     const users = await User.find({ role: { $ne: "customer" } })
-      .select("_id name email phone role organizationId cityIds stationIds branchIds createdAt updatedAt")
+      .select("_id name email phone isBlocked role organizationId cityIds stationIds branchIds createdAt updatedAt")
       .sort({ createdAt: -1 })
       .lean();
 

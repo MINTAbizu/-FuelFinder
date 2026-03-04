@@ -48,4 +48,25 @@ router.post(
   adminUserController.createAdminUser
 );
 
+router.patch(
+  "/users/:userId",
+  requireRole(["super_admin"]),
+  auditAction("admin.user.update", { targetType: "user" }),
+  adminUserController.updateAdminUser
+);
+
+router.patch(
+  "/users/:userId/block",
+  requireRole(["super_admin"]),
+  auditAction("admin.user.block", { targetType: "user" }),
+  adminUserController.setAdminUserBlocked
+);
+
+router.post(
+  "/users/:userId/force-logout",
+  requireRole(["super_admin"]),
+  auditAction("admin.user.force_logout", { targetType: "user" }),
+  adminUserController.forceLogoutAdminUser
+);
+
 module.exports = router;
