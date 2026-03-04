@@ -5,12 +5,19 @@ const { authLimiter } = require("../middleware/rateLimiters");
 const {
   validateRegister,
   validateLogin,
-  validateRefresh
+  validateRefresh,
+  validateBootstrapSuperAdmin
 } = require("../middleware/validateAuth");
 
 const router = express.Router();
 
 router.post("/register", authLimiter, validateRegister, authController.register);
+router.post(
+  "/bootstrap-super-admin",
+  authLimiter,
+  validateBootstrapSuperAdmin,
+  authController.bootstrapSuperAdmin
+);
 router.post("/login", authLimiter, validateLogin, authController.login);
 router.post("/refresh", authLimiter, validateRefresh, authController.refresh);
 router.post("/logout", auth, authController.logout);

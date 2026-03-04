@@ -84,6 +84,55 @@ exports.register = async (req, res) => {
   }
 };
 
+exports.bootstrapSuperAdmin = async (req, res) => {
+  try {
+    const expectedBootstrapKey = String(process.env.BOOTSTRAP_ADMIN_KEY || "").trim();
+    if (!expectedBootstrapKey) {
+      return res.status(403).json({
+        message: "Bootstrap is disabled. Missing BOOTSTRAP_ADMIN_KEY on server."
+      });
+    }
+
+    const providedBootstrapKey = String(req.body.bootstrapKey || "").trim();
+    if (providedBootstrapKey !== expectedBootstrapKey) {
+      return res.status(403).json({ message: "Invalid bootstrap key." });
+    }
+
+    const existingSuperAdminCount = await User.countDocuments({ role: "super_admin" });
+    if (existingSuperAdminCount > 0) {
+      return res.status(409).json({ message: "Bootstrap already completed." });
+    }
+
+    const name = String(req.body.name || "").trim();
+    const phone = String(req.body.phone || "").trim();
+    const email = normalizeEmail(req.body.email);
+    const password = String(req.body.password || "");
+
+    const existing = await User.findOne({ email });
+    if (existing) {
+      return res.status(409).json({ message: "Email already registered." });
+    }
+
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    const user = await User.create({
+      name,
+      phone,
+      email,
+      passwordHash,
+      role: "super_admin"
+    });
+    const { accessToken, refreshToken } = await issueTokenPair(user);
+
+    return res.status(201).json({
+      message: "Super admin bootstrapped successfully.",
+      user: buildUserResponse(user),
+      tokens: { accessToken, refreshToken }
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Bootstrap failed." });
+  }
+};
+
 exports.login = async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);

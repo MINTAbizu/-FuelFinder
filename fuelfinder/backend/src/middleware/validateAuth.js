@@ -75,3 +75,37 @@ exports.validateRefresh = (req, res, next) => {
   req.body.refreshToken = refreshToken;
   return next();
 };
+
+exports.validateBootstrapSuperAdmin = (req, res, next) => {
+  const name = normalize(req.body.name);
+  const phone = normalize(req.body.phone);
+  const email = normalizeEmail(req.body.email);
+  const password = String(req.body.password || "");
+  const bootstrapKey = normalize(req.body.bootstrapKey);
+
+  if (!name || !email || !password || !bootstrapKey) {
+    return sendValidationError(res, "name, email, password, and bootstrapKey are required.");
+  }
+  if (name.length > 120) {
+    return sendValidationError(res, "name is too long.");
+  }
+  if (phone.length > 40) {
+    return sendValidationError(res, "phone is too long.");
+  }
+  if (!isValidEmail(email)) {
+    return sendValidationError(res, "Invalid email format.");
+  }
+  if (!isStrongPassword(password)) {
+    return sendValidationError(
+      res,
+      "Password must be 8+ chars and include upper, lower, number, and special character."
+    );
+  }
+
+  req.body.name = name;
+  req.body.phone = phone;
+  req.body.email = email;
+  req.body.password = password;
+  req.body.bootstrapKey = bootstrapKey;
+  return next();
+};
