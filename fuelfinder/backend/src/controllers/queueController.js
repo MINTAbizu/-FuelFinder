@@ -37,6 +37,41 @@ function isObjectId(value) {
   return mongoose.Types.ObjectId.isValid(value);
 }
 
+function normalizeReservationCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .replace(/[^A-Z0-9-]/g, "");
+}
+
+function buildReservationCodePrefix(stationId) {
+  const text = String(stationId || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const suffix = text.slice(-3) || "GEN";
+  return `R${suffix}`;
+}
+
+function generateRandomCodePart(length = 6) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = "";
+  const bytes = crypto.randomBytes(length);
+  for (let i = 0; i < length; i += 1) {
+    out += chars[bytes[i] % chars.length];
+  }
+  return out;
+}
+
+async function generateUniquePublicTicketCode(stationId) {
+  const prefix = buildReservationCodePrefix(stationId);
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const candidate = `${prefix}-${generateRandomCodePart(6)}`;
+    // eslint-disable-next-line no-await-in-loop
+    const exists = await QueueTicket.exists({ publicTicketCode: candidate });
+    if (!exists) return candidate;
+  }
+  throw new Error("Unable to generate unique reservation code.");
+}
+
 async function canOperateStation(user, stationId) {
   if (!user) return false;
   if (String(user.role || "") === "super_admin") return true;
@@ -273,6 +308,7 @@ exports.reserveQueueSlot = async (req, res) => {
       return res.status(409).json({
         message: "You already have an active reservation/ticket for this station.",
         ticketId: existing._id,
+        reservationCode: existing.publicTicketCode || "",
         status: existing.status,
         position: existing.position
       });
@@ -281,10 +317,12 @@ exports.reserveQueueSlot = async (req, res) => {
     const depositAmount = RESERVATION_BAND_DEPOSITS[requestedBand];
     const estimatedAmount = Number((requestedLiters * unitPrice).toFixed(2));
     const paymentExpiresAt = new Date(Date.now() + PAYMENT_WINDOW_MINUTES * 60 * 1000);
+    const publicTicketCode = await generateUniquePublicTicketCode(stationId);
 
     const ticket = await QueueTicket.create({
       userId,
       stationId,
+      publicTicketCode,
       status: "pending_payment",
       position: 0,
       fuelType,
@@ -299,6 +337,7 @@ exports.reserveQueueSlot = async (req, res) => {
 
     return res.status(201).json({
       reservationId: ticket._id,
+      reservationCode: ticket.publicTicketCode || "",
       stationId,
       status: ticket.status,
       requestedBand: ticket.requestedBand,
@@ -335,6 +374,7 @@ exports.joinQueue = async (req, res) => {
       return res.status(409).json({
         message: "You already have an active ticket for this station.",
         ticketId: existing._id,
+        reservationCode: existing.publicTicketCode || "",
         position: existing.position
       });
     }
@@ -344,10 +384,12 @@ exports.joinQueue = async (req, res) => {
       status: "waiting"
     });
     const position = queueCount + 1;
+    const publicTicketCode = await generateUniquePublicTicketCode(stationId);
 
     const ticket = await QueueTicket.create({
       userId,
       stationId,
+      publicTicketCode,
       status: "waiting",
       position,
       depositStatus: "not_required"
@@ -358,6 +400,7 @@ exports.joinQueue = async (req, res) => {
 
     return res.status(201).json({
       ticketId: ticket._id,
+      reservationCode: ticket.publicTicketCode || "",
       stationId,
       position,
       status: ticket.status,
@@ -403,6 +446,7 @@ exports.confirmReservationPayment = async (req, res) => {
     return res.json({
       ticketId: ticket._id,
       reservationId: ticket._id,
+      reservationCode: ticket.publicTicketCode || "",
       stationId: ticket.stationId,
       status: ticket.status,
       position: ticket.position,
@@ -455,6 +499,7 @@ exports.startTelebirrCheckout = async (req, res) => {
 
     return res.json({
       reservationId: ticket._id,
+      reservationCode: ticket.publicTicketCode || "",
       paymentProvider: "telebirr",
       merchantOrderId: checkout.merchantOrderId,
       prepayId: checkout.prepayId,
@@ -569,6 +614,7 @@ exports.getMyReservationStatus = async (req, res) => {
 
     return res.json({
       reservationId: freshTicket._id,
+      reservationCode: freshTicket.publicTicketCode || "",
       stationId: freshTicket.stationId,
       status: freshTicket.status,
       position: freshTicket.position,
@@ -612,6 +658,7 @@ exports.getMyTicket = async (req, res) => {
     return res.json({
       ticketId: ticket._id,
       reservationId: ticket._id,
+      reservationCode: ticket.publicTicketCode || "",
       stationId: ticket.stationId,
       status: ticket.status,
       position: ticket.position,
@@ -711,6 +758,7 @@ exports.nextInQueue = async (req, res) => {
       io.to(stationRoom(stationId)).emit("ticket_called", {
         stationId: String(stationId),
         ticketId: String(next._id),
+        reservationCode: String(next.publicTicketCode || ""),
         userId: String(next.userId)
       });
     }
@@ -720,6 +768,7 @@ exports.nextInQueue = async (req, res) => {
       nextTicket: {
         ticketId: next._id,
         reservationId: next._id,
+        reservationCode: next.publicTicketCode || "",
         userId: next.userId,
         status: next.status
       }
@@ -743,7 +792,7 @@ exports.getStationQueue = async (req, res) => {
       status: "waiting"
     })
       .sort({ position: 1 })
-      .select("userId position joinedAt")
+      .select("userId position joinedAt publicTicketCode")
       .lean();
 
     const called = await QueueTicket.findOne({
@@ -751,20 +800,22 @@ exports.getStationQueue = async (req, res) => {
       status: "called"
     })
       .sort({ calledAt: -1 })
-      .select("userId calledAt expiresAt")
+      .select("userId calledAt expiresAt publicTicketCode")
       .lean();
 
     const waitingWithIds = waiting.map((item) => ({
       ...item,
       reservationId: item._id,
-      ticketId: item._id
+      ticketId: item._id,
+      reservationCode: item.publicTicketCode || ""
     }));
 
     const calledWithIds = called
       ? {
           ...called,
           reservationId: called._id,
-          ticketId: called._id
+          ticketId: called._id,
+          reservationCode: called.publicTicketCode || ""
         }
       : null;
 
@@ -832,6 +883,7 @@ exports.startCheckIn = async (req, res) => {
     const qrNonce = crypto.randomBytes(12).toString("hex");
     const qrToken = buildCheckInQrToken({
       ticketId: String(ticket._id),
+      reservationCode: String(ticket.publicTicketCode || ""),
       stationId: String(ticket.stationId),
       nonce: qrNonce,
       exp: Math.floor(otpExpiresAt.getTime() / 1000)
@@ -852,6 +904,7 @@ exports.startCheckIn = async (req, res) => {
 
     return res.json({
       ticketId: ticket._id,
+      reservationCode: ticket.publicTicketCode || "",
       checkInStatus: ticket.checkInStatus,
       expiresAt: otpExpiresAt,
       otpCode,
@@ -867,15 +920,44 @@ exports.verifyCheckIn = async (req, res) => {
     const actor = req.user || null;
     const verifierUserId = req.user.id;
     const ticketOrReservationId = String(req.body.ticketId || req.body.reservationId || "").trim();
+    const reservationCode = normalizeReservationCode(req.body.reservationCode);
     const { otpCode, qrToken } = req.body;
-    if (!isObjectId(verifierUserId) || !isObjectId(ticketOrReservationId)) {
-      return res.status(400).json({ message: "Invalid verifier userId or ticketId/reservationId." });
+    if (!isObjectId(verifierUserId)) {
+      return res.status(400).json({ message: "Invalid verifier userId." });
+    }
+    if (!ticketOrReservationId && !reservationCode && !String(qrToken || "").trim()) {
+      return res.status(400).json({
+        message: "ticketId/reservationId, reservationCode, or qrToken is required."
+      });
+    }
+    if (ticketOrReservationId && !isObjectId(ticketOrReservationId)) {
+      return res.status(400).json({ message: "Invalid ticketId/reservationId." });
     }
 
-    const ticket = await QueueTicket.findOne({
-      _id: ticketOrReservationId,
-      status: { $in: ["waiting", "called"] }
-    });
+    let qrPayload = null;
+    let ticketFilter = null;
+    if (ticketOrReservationId) {
+      ticketFilter = {
+        _id: ticketOrReservationId,
+        status: { $in: ["waiting", "called"] }
+      };
+    } else if (reservationCode) {
+      ticketFilter = {
+        publicTicketCode: reservationCode,
+        status: { $in: ["waiting", "called"] }
+      };
+    } else {
+      qrPayload = verifyCheckInQrToken(qrToken);
+      if (!qrPayload || !isObjectId(qrPayload.ticketId)) {
+        return res.status(401).json({ message: "Invalid OTP/QR check-in proof." });
+      }
+      ticketFilter = {
+        _id: qrPayload.ticketId,
+        status: { $in: ["waiting", "called"] }
+      };
+    }
+
+    const ticket = await QueueTicket.findOne(ticketFilter);
     if (!ticket) {
       return res.status(404).json({ message: "Ticket not found for check-in verification." });
     }
@@ -907,7 +989,7 @@ exports.verifyCheckIn = async (req, res) => {
 
     let verified = false;
     if (qrToken) {
-      const payload = verifyCheckInQrToken(qrToken);
+      const payload = qrPayload || verifyCheckInQrToken(qrToken);
       if (
         payload &&
         String(payload.ticketId) === String(ticket._id) &&
@@ -950,6 +1032,7 @@ exports.verifyCheckIn = async (req, res) => {
       ok: true,
       ticketId: ticket._id,
       reservationId: ticket._id,
+      reservationCode: ticket.publicTicketCode || "",
       checkInStatus: ticket.checkInStatus,
       verifiedAt: ticket.checkInVerifiedAt
     });

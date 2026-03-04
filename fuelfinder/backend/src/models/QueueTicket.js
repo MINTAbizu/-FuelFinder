@@ -9,6 +9,7 @@ const queueTicketSchema = new mongoose.Schema(
       required: true,
       index: true
     },
+    publicTicketCode: { type: String, trim: true, uppercase: true, default: "" },
     status: {
       type: String,
       enum: ["pending_payment", "waiting", "called", "served", "cancelled", "expired"],
@@ -75,5 +76,12 @@ const queueTicketSchema = new mongoose.Schema(
 queueTicketSchema.index({ stationId: 1, status: 1, joinedAt: 1 });
 queueTicketSchema.index({ userId: 1, status: 1 });
 queueTicketSchema.index({ stationId: 1, paymentExpiresAt: 1, status: 1 });
+queueTicketSchema.index(
+  { publicTicketCode: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { publicTicketCode: { $type: "string", $gt: "" } }
+  }
+);
 
 module.exports = mongoose.model("QueueTicket", queueTicketSchema);
