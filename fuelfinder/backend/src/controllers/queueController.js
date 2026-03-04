@@ -880,7 +880,17 @@ exports.verifyCheckIn = async (req, res) => {
       return res.status(404).json({ message: "Ticket not found for check-in verification." });
     }
     if (!(await canOperateStation(actor, ticket.stationId))) {
-      return res.status(403).json({ message: "Forbidden: station scope denied for check-in verification." });
+      const station = await Station.findById(ticket.stationId).select("_id name organizationId").lean();
+      return res.status(403).json({
+        message: "Forbidden: this reservation belongs to another station/company.",
+        reason: "station_scope_mismatch",
+        reservation: {
+          reservationId: String(ticket._id),
+          stationId: String(ticket.stationId),
+          stationName: String(station?.name || "Unknown station"),
+          organizationId: station?.organizationId ? String(station.organizationId) : null
+        }
+      });
     }
     if (ticket.checkInStatus === "verified") {
       return res.status(409).json({ message: "Ticket check-in already verified." });
@@ -960,8 +970,20 @@ exports.validateReservationIdForStaff = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({ message: "Reservation not found." });
     }
+    const station = await Station.findById(ticket.stationId).select("_id name organizationId").lean();
+
     if (!(await canOperateStation(actor, ticket.stationId))) {
-      return res.status(403).json({ message: "Forbidden: station scope denied for this reservation." });
+      return res.status(403).json({
+        message: "Forbidden: this reservation belongs to another station/company.",
+        reason: "station_scope_mismatch",
+        reservation: {
+          reservationId: String(ticket._id),
+          ticketId: String(ticket._id),
+          stationId: String(ticket.stationId),
+          stationName: String(station?.name || "Unknown station"),
+          organizationId: station?.organizationId ? String(station.organizationId) : null
+        }
+      });
     }
 
     const eligibleStatuses = new Set(["waiting", "called"]);
@@ -978,6 +1000,8 @@ exports.validateReservationIdForStaff = async (req, res) => {
         reservationId: String(ticket._id),
         ticketId: String(ticket._id),
         stationId: String(ticket.stationId),
+        stationName: String(station?.name || "Unknown station"),
+        organizationId: station?.organizationId ? String(station.organizationId) : null,
         userId: String(ticket.userId),
         status,
         position: Number(ticket.position || 0),
