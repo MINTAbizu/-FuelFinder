@@ -16,7 +16,9 @@ function buildAuthPayload(user) {
   return {
     sub: String(user._id),
     email: user.email,
-    name: user.name
+    name: user.name,
+    role: user.role || "customer",
+    organizationId: user.organizationId ? String(user.organizationId) : ""
   };
 }
 
@@ -49,7 +51,13 @@ exports.register = async (req, res) => {
     const { accessToken, refreshToken } = await issueTokenPair(user);
 
     return res.status(201).json({
-      user: { id: user._id, name: user.name, email: user.email, phone: user.phone || "" },
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone || "",
+        role: user.role
+      },
       tokens: { accessToken, refreshToken }
     });
   } catch (error) {
@@ -75,7 +83,13 @@ exports.login = async (req, res) => {
     const { accessToken, refreshToken } = await issueTokenPair(user);
 
     return res.json({
-      user: { id: user._id, name: user.name, email: user.email, phone: user.phone || "" },
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone || "",
+        role: user.role
+      },
       tokens: { accessToken, refreshToken }
     });
   } catch (error) {
@@ -121,7 +135,9 @@ exports.logout = async (req, res) => {
 
 exports.me = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("_id name email phone createdAt");
+    const user = await User.findById(req.user.id).select(
+      "_id name email phone role organizationId cityIds stationIds branchIds createdAt"
+    );
     if (!user) return res.status(404).json({ message: "User not found." });
 
     return res.json({
@@ -130,6 +146,11 @@ exports.me = async (req, res) => {
         name: user.name,
         email: user.email,
         phone: user.phone || "",
+        role: user.role || "customer",
+        organizationId: user.organizationId || null,
+        cityIds: user.cityIds || [],
+        stationIds: user.stationIds || [],
+        branchIds: user.branchIds || [],
         createdAt: user.createdAt
       }
     });

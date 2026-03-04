@@ -6,7 +6,16 @@ const userSchema = new mongoose.Schema(
     phone: { type: String, trim: true, default: "" },
     email: { type: String, required: true, trim: true, lowercase: true, unique: true },
     passwordHash: { type: String, required: true },
-    refreshTokenHash: { type: String, default: "" }
+    refreshTokenHash: { type: String, default: "" },
+    role: {
+      type: String,
+      enum: ["customer", "staff", "station_manager", "city_manager", "org_admin", "super_admin"],
+      default: "customer"
+    },
+    organizationId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    cityIds: [{ type: mongoose.Schema.Types.ObjectId }],
+    stationIds: [{ type: mongoose.Schema.Types.ObjectId }],
+    branchIds: [{ type: mongoose.Schema.Types.ObjectId }]
   },
   { timestamps: true }
 );
