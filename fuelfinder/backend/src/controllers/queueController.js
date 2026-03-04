@@ -923,3 +923,46 @@ exports.verifyCheckIn = async (req, res) => {
     return res.status(500).json({ message: "Failed to verify station check-in." });
   }
 };
+
+exports.validateReservationIdForStaff = async (req, res) => {
+  try {
+    const actor = req.user || null;
+    const rawId = String(req.body.ticketId || req.body.reservationId || "").trim();
+    if (!isObjectId(rawId)) {
+      return res.status(400).json({ message: "Invalid ticketId/reservationId format." });
+    }
+
+    const ticket = await QueueTicket.findById(rawId).lean();
+    if (!ticket) {
+      return res.status(404).json({ message: "Reservation not found." });
+    }
+    if (!canOperateStation(actor, ticket.stationId)) {
+      return res.status(403).json({ message: "Forbidden: station scope denied for this reservation." });
+    }
+
+    const eligibleStatuses = new Set(["waiting", "called"]);
+    const status = String(ticket.status || "");
+    const checkInStatus = String(ticket.checkInStatus || "pending");
+    const canVerifyCheckIn =
+      eligibleStatuses.has(status) &&
+      checkInStatus === "arrived" &&
+      (!ticket.checkInOtpExpiresAt || new Date(ticket.checkInOtpExpiresAt) > new Date());
+
+    return res.json({
+      ok: true,
+      reservation: {
+        reservationId: String(ticket._id),
+        ticketId: String(ticket._id),
+        stationId: String(ticket.stationId),
+        userId: String(ticket.userId),
+        status,
+        position: Number(ticket.position || 0),
+        checkInStatus,
+        checkInOtpExpiresAt: ticket.checkInOtpExpiresAt || null,
+        canVerifyCheckIn
+      }
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to validate reservation id." });
+  }
+};

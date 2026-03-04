@@ -17,6 +17,7 @@ router.get("/me/:stationId", auth, queueController.getMyTicket);
 router.post("/leave", auth, queueController.leaveQueue);
 router.post("/check-in/start", auth, queueController.startCheckIn);
 router.post("/check-in/verify", auth, requireRole(STAFF_OPERATION_ROLES), queueController.verifyCheckIn);
+router.post("/validate-id", auth, requireRole(STAFF_OPERATION_ROLES), queueController.validateReservationIdForStaff);
 router.get("/station/:stationId", queueController.getStationQueue);
 router.post(
   "/next",
