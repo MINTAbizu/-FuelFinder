@@ -7,6 +7,7 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, trim: true, lowercase: true, unique: true },
     passwordHash: { type: String, required: true },
     refreshTokenHash: { type: String, default: "" },
+    isBlocked: { type: Boolean, default: false },
     role: {
       type: String,
       enum: ["customer", "staff", "station_manager", "city_manager", "org_admin", "super_admin"],

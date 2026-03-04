@@ -28,6 +28,7 @@ function buildUserResponse(user) {
     name: user.name,
     email: user.email,
     phone: user.phone || "",
+    isBlocked: Boolean(user.isBlocked),
     role: user.role || "customer",
     organizationId: user.organizationId || null,
     cityIds: user.cityIds || [],
@@ -142,6 +143,9 @@ exports.login = async (req, res) => {
     if (!user) {
       return res.status(401).json({ message: "Invalid credentials." });
     }
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
 
     const validPassword = await bcrypt.compare(password, user.passwordHash);
     if (!validPassword) {
@@ -167,6 +171,9 @@ exports.refresh = async (req, res) => {
     const user = await User.findById(payload.sub);
     if (!user || !user.refreshTokenHash) {
       return res.status(401).json({ message: "Invalid refresh token." });
+    }
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
     }
 
     const tokenMatch = await bcrypt.compare(refreshToken, user.refreshTokenHash);

@@ -12,10 +12,13 @@ async function auth(req, res, next) {
   try {
     const payload = verifyAccessToken(parts[1]);
     const user = await User.findById(payload.sub).select(
-      "_id email role organizationId cityIds stationIds branchIds"
+      "_id email role isBlocked organizationId cityIds stationIds branchIds"
     );
     if (!user) {
       return res.status(401).json({ message: "User not found for this token." });
+    }
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
     }
 
     req.user = {
