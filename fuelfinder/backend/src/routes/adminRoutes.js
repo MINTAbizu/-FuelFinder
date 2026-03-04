@@ -34,6 +34,12 @@ router.get(
   adminUserController.listOrganizationOptions
 );
 
+router.get(
+  "/users",
+  requireRole(["super_admin"]),
+  adminUserController.listAdminUsers
+);
+
 router.post(
   "/users/create-admin",
   requireRole(["super_admin"]),
