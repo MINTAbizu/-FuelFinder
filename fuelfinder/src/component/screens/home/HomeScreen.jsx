@@ -138,8 +138,12 @@ export default function HomeScreen({ navigation }) {
   }, [t]);
 
   const loadNearbyStations = useCallback(async () => {
-    const basePoint = location || mapCenter;
-    if (!basePoint) return;
+    const basePoint = location;
+    if (!basePoint) {
+      setStations([]);
+      setStationsError(t("homeScreen.location.denied"));
+      return;
+    }
 
     setLoadingStations(true);
     setStationsError("");
@@ -157,7 +161,7 @@ export default function HomeScreen({ navigation }) {
     } finally {
       setLoadingStations(false);
     }
-  }, [location, mapCenter, t]);
+  }, [location, t]);
 
   useEffect(() => {
     if (!location || loadedRef.current) return;
@@ -351,9 +355,15 @@ export default function HomeScreen({ navigation }) {
                   <Text style={styles.buttonText}>{t("homeScreen.centerUnavailable")}</Text>
                 </View>
               )}
-              <Pressable style={[styles.button, styles.secondary]} onPress={loadNearbyStations}>
-                <Text style={styles.buttonText}>{t("homeScreen.findNearby")}</Text>
-              </Pressable>
+              {location ? (
+                <Pressable style={[styles.button, styles.secondary]} onPress={loadNearbyStations}>
+                  <Text style={styles.buttonText}>{t("homeScreen.findNearby")}</Text>
+                </Pressable>
+              ) : (
+                <View style={[styles.button, styles.disabled]}>
+                  <Text style={styles.buttonText}>{t("homeScreen.findNearby")}</Text>
+                </View>
+              )}
             </View>
 
             {routeSummary ? (
