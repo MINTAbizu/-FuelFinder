@@ -6,6 +6,7 @@ const morgan = require("morgan");
 const authRoutes = require("./routes/authRoutes");
 const queueRoutes = require("./routes/queueRoutes");
 const mapRoutes = require("./routes/mapRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 
 const app = express();
 const isProduction = process.env.NODE_ENV === "production";
@@ -45,9 +46,11 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/queue", queueRoutes);
 app.use("/api/map", mapRoutes);
+app.use("/api/admin", adminRoutes);
 app.use("/auth", authRoutes);
 app.use("/queue", queueRoutes);
 app.use("/map", mapRoutes);
+app.use("/admin", adminRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ message: "Route not found." });

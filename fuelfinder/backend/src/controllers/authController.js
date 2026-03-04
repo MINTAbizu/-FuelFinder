@@ -16,7 +16,24 @@ function buildAuthPayload(user) {
   return {
     sub: String(user._id),
     email: user.email,
-    name: user.name
+    name: user.name,
+    role: user.role || "customer",
+    organizationId: user.organizationId ? String(user.organizationId) : ""
+  };
+}
+
+function buildUserResponse(user) {
+  return {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone || "",
+    role: user.role || "customer",
+    organizationId: user.organizationId || null,
+    cityIds: user.cityIds || [],
+    stationIds: user.stationIds || [],
+    branchIds: user.branchIds || [],
+    createdAt: user.createdAt
   };
 }
 
@@ -38,18 +55,28 @@ exports.register = async (req, res) => {
     const phone = String(req.body.phone || "").trim();
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "");
+    const role = String(req.body.role || "customer").trim().toLowerCase();
 
     const existing = await User.findOne({ email });
     if (existing) {
       return res.status(409).json({ message: "Email already registered." });
     }
+    if (role !== "customer") {
+      return res.status(403).json({ message: "Public registration only supports customer role." });
+    }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    const user = await User.create({ name, phone, email, passwordHash });
+    const user = await User.create({
+      name,
+      phone,
+      email,
+      passwordHash,
+      role: "customer"
+    });
     const { accessToken, refreshToken } = await issueTokenPair(user);
 
     return res.status(201).json({
-      user: { id: user._id, name: user.name, email: user.email, phone: user.phone || "" },
+      user: buildUserResponse(user),
       tokens: { accessToken, refreshToken }
     });
   } catch (error) {
@@ -75,7 +102,7 @@ exports.login = async (req, res) => {
     const { accessToken, refreshToken } = await issueTokenPair(user);
 
     return res.json({
-      user: { id: user._id, name: user.name, email: user.email, phone: user.phone || "" },
+      user: buildUserResponse(user),
       tokens: { accessToken, refreshToken }
     });
   } catch (error) {
@@ -121,17 +148,13 @@ exports.logout = async (req, res) => {
 
 exports.me = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("_id name email phone createdAt");
+    const user = await User.findById(req.user.id).select(
+      "_id name email phone role organizationId cityIds stationIds branchIds createdAt"
+    );
     if (!user) return res.status(404).json({ message: "User not found." });
 
     return res.json({
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone || "",
-        createdAt: user.createdAt
-      }
+      user: buildUserResponse(user)
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load profile." });
