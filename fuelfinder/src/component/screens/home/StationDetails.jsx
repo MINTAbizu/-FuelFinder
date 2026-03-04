@@ -125,6 +125,7 @@ export default function StationDetails({ route }) {
   const [fuelType, setFuelType] = useState("gasoline");
   const [requestedLiters, setRequestedLiters] = useState("10");
   const [reservationId, setReservationId] = useState("");
+  const [reservationCode, setReservationCode] = useState("");
   const [prepayId, setPrepayId] = useState("");
   const [rawRequest, setRawRequest] = useState("");
   const [myTicket, setMyTicket] = useState(null);
@@ -218,6 +219,7 @@ export default function StationDetails({ route }) {
     try {
       const ticket = await getMyQueueTicket(stationId);
       setMyTicket(ticket);
+      setReservationCode(String(ticket?.reservationCode || ""));
       setMessage(t.activeTicketLoaded);
     } catch (error) {
       logReservationError("refreshMyTicket", error);
@@ -239,6 +241,7 @@ export default function StationDetails({ route }) {
           if (status.status === "waiting" || status.status === "called") {
             setMyTicket({
               ticketId: String(status.reservationId),
+              reservationCode: String(status.reservationCode || ""),
               status: status.status,
               position: status.position,
               etaMinutes: Number(status.position || 0) * 3,
@@ -303,7 +306,9 @@ export default function StationDetails({ route }) {
       });
 
       const nextReservationId = String(reserve?.reservationId || "");
+      const nextReservationCode = String(reserve?.reservationCode || "");
       setReservationId(nextReservationId);
+      setReservationCode(nextReservationCode);
       setPaymentPhase("initiating");
 
       const initiate = await startTelebirrCheckout(nextReservationId);
@@ -345,6 +350,7 @@ export default function StationDetails({ route }) {
       await leaveQueue(ticketId);
       setMyTicket(null);
       setReservationId("");
+      setReservationCode("");
       setPrepayId("");
       setRawRequest("");
       setPaymentPhase("idle");
@@ -509,6 +515,7 @@ export default function StationDetails({ route }) {
         {loading ? <ActivityIndicator size="small" color="#0F766E" style={styles.loader} /> : null}
         <Text style={styles.metaText}>phase: {paymentPhase}</Text>
         <Text style={styles.metaText}>reservationId: {reservationId || "-"}</Text>
+        <Text style={styles.metaText}>reservationCode: {reservationCode || "-"}</Text>
         <Text style={styles.metaText}>prepayId: {prepayId || "-"}</Text>
         <Text style={styles.metaText}>rawRequest: {rawRequest || "-"}</Text>
         {message ? <Text style={styles.infoText}>{message}</Text> : null}
@@ -517,6 +524,7 @@ export default function StationDetails({ route }) {
           <View style={styles.ticketCard}>
             <Text style={styles.ticketTitle}>{t.activeTicket}</Text>
             <Text style={styles.metaText}>ticketId: {String(myTicket.ticketId || "-")}</Text>
+            <Text style={styles.metaText}>reservationCode: {String(myTicket.reservationCode || "-")}</Text>
             <Text style={styles.metaText}>status: {String(myTicket.status || "-")}</Text>
             <Text style={styles.metaText}>position: {String(myTicket.position ?? "-")}</Text>
             <Text style={styles.metaText}>etaMinutes: {String(myTicket.etaMinutes ?? "-")}</Text>

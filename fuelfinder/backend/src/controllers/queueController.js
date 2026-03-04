@@ -263,6 +263,9 @@ async function activatePaidTicket(ticket, paymentReference, paymentSessionId) {
   ticket.paymentReference = String(paymentReference || ticket.paymentReference || "").trim();
   ticket.paymentSessionId = String(paymentSessionId || ticket.paymentSessionId || "").trim();
   ticket.paymentProvider = "telebirr";
+  if (!String(ticket.publicTicketCode || "").trim()) {
+    ticket.publicTicketCode = await generateUniquePublicTicketCode(ticket.stationId);
+  }
   ticket.depositStatus = ticket.depositAmount > 0 ? "authorized" : "not_required";
   ticket.depositPaidAt = new Date();
   ticket.joinedAt = new Date();
