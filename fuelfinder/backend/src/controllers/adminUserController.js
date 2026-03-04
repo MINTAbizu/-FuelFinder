@@ -76,3 +76,31 @@ exports.listOrganizationOptions = async (_req, res) => {
     return res.status(500).json({ message: "Failed to load organization options." });
   }
 };
+
+exports.listAdminUsers = async (_req, res) => {
+  try {
+    const users = await User.find({ role: { $ne: "customer" } })
+      .select("_id name email phone role organizationId cityIds stationIds branchIds createdAt updatedAt")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json({
+      total: users.length,
+      users: users.map((user) => ({
+        id: String(user._id),
+        name: user.name || "",
+        email: user.email || "",
+        phone: user.phone || "",
+        role: user.role || "customer",
+        organizationId: user.organizationId || null,
+        cityIds: user.cityIds || [],
+        stationIds: user.stationIds || [],
+        branchIds: user.branchIds || [],
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      }))
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to load admin users." });
+  }
+};
