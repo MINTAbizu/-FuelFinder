@@ -968,6 +968,7 @@ exports.verifyCheckIn = async (req, res) => {
         reason: "station_scope_mismatch",
         reservation: {
           reservationId: String(ticket._id),
+          reservationCode: String(ticket.publicTicketCode || ""),
           stationId: String(ticket.stationId),
           stationName: String(station?.name || "Unknown station"),
           organizationId: station?.organizationId ? String(station.organizationId) : null
