@@ -22,7 +22,8 @@ function normalizeAddress(value) {
 function isMissingAddress(value) {
   const text = normalizeAddress(value);
   if (!text) return true;
-  return text === "address not listed";
+  if (text === "address not listed") return true;
+  return text.startsWith("approx location");
 }
 
 function buildApproxAddress(station) {
