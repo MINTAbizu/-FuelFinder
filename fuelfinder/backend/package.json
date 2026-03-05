@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "telebirr:flow": "node scripts/telebirr-flow.js"
+    "telebirr:flow": "node scripts/telebirr-flow.js",
+    "stations:merge": "node scripts/merge-stations.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
