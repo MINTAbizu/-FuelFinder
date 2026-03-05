@@ -39,11 +39,44 @@ function resolveSupportedFuels(tags) {
   };
 }
 
-function buildAddress(tags) {
-  const parts = [tags["addr:street"], tags["addr:suburb"], tags["addr:city"], tags["addr:state"]].filter(
-    Boolean
-  );
-  return parts.length ? parts.join(", ") : "Address not listed";
+function buildAddress(tags, latitude, longitude) {
+  const house = String(tags["addr:housenumber"] || "").trim();
+  const street = String(tags["addr:street"] || "").trim();
+  const line1 = [house, street].filter(Boolean).join(" ");
+
+  const locality = [
+    tags["addr:neighbourhood"],
+    tags["addr:suburb"],
+    tags["addr:district"],
+    tags["addr:city"],
+    tags["addr:town"],
+    tags["addr:village"],
+    tags["addr:hamlet"],
+    tags["addr:place"]
+  ]
+    .map((item) => String(item || "").trim())
+    .find(Boolean);
+
+  const region = [
+    tags["addr:state"],
+    tags["addr:province"],
+    tags["is_in:state"]
+  ]
+    .map((item) => String(item || "").trim())
+    .find(Boolean);
+
+  const country = String(tags["addr:country"] || tags["is_in:country"] || "").trim();
+  const postcode = String(tags["addr:postcode"] || "").trim();
+
+  const parts = [line1, locality, region, country, postcode].filter(Boolean);
+  if (parts.length) return parts.join(", ");
+
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+  if (Number.isFinite(lat) && Number.isFinite(lon)) {
+    return `Approx location (${lat.toFixed(5)}, ${lon.toFixed(5)})`;
+  }
+  return "Address not listed";
 }
 
 async function fetchNearbyFuelStations(lat, lon, radiusMeters = 12000) {
@@ -85,7 +118,7 @@ out center tags;
             queue_length: 0,
             supportedFuels: resolveSupportedFuels(tags),
             image: "",
-            address: buildAddress(tags),
+            address: buildAddress(tags, latitude, longitude),
             contact: tags.phone || tags["contact:phone"] || ""
           };
         })
@@ -129,4 +162,3 @@ module.exports = {
   fetchNearbyFuelStations,
   fetchDrivingRoute
 };
-
