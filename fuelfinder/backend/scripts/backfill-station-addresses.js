@@ -58,10 +58,11 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function reverseGeocode(lat, lon, userAgent) {
+async function reverseGeocode(lat, lon, userAgent, email) {
+  const emailPart = email ? `&email=${encodeURIComponent(email)}` : "";
   const url =
     `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}` +
-    `&lon=${encodeURIComponent(lon)}&zoom=18&addressdetails=1&accept-language=en`;
+    `&lon=${encodeURIComponent(lon)}&zoom=18&addressdetails=1&accept-language=en${emailPart}`;
 
   const response = await fetch(url, {
     headers: {
@@ -85,6 +86,16 @@ async function main() {
     getArg("userAgent") ||
     process.env.GEOCODER_USER_AGENT ||
     "fuelfinder-address-backfill/1.0 (contact: admin@fuelfinder.local)";
+  const contactEmail =
+    getArg("email") ||
+    process.env.GEOCODER_EMAIL ||
+    "";
+
+  if (typeof fetch !== "function" && useReverse) {
+    throw new Error(
+      "Global fetch is not available in this Node runtime. Use Node 18+ or run with --no-reverse."
+    );
+  }
   await connectDB();
 
   const stations = await Station.find({})
@@ -116,6 +127,7 @@ async function main() {
   const geoCache = new Map();
   let reverseOk = 0;
   let reverseFail = 0;
+  const reverseErrors = [];
 
   if (useReverse) {
     for (const item of candidates) {
@@ -134,7 +146,7 @@ async function main() {
       }
       try {
         // eslint-disable-next-line no-await-in-loop
-        const resolved = await reverseGeocode(lat, lon, userAgent);
+        const resolved = await reverseGeocode(lat, lon, userAgent, contactEmail);
         if (resolved) {
           item.nextAddress = resolved;
           geoCache.set(cacheKey, resolved);
@@ -142,8 +154,13 @@ async function main() {
         } else {
           reverseFail += 1;
         }
-      } catch (_err) {
+      } catch (err) {
         reverseFail += 1;
+        if (reverseErrors.length < 5) {
+          reverseErrors.push(
+            `${cacheKey} -> ${String(err?.message || err)}`
+          );
+        }
       }
       // Respect Nominatim usage policy: max ~1 request/second.
       // eslint-disable-next-line no-await-in-loop
@@ -160,6 +177,10 @@ async function main() {
   if (useReverse) {
     console.log(`Reverse geocode resolved: ${reverseOk}`);
     console.log(`Reverse geocode fallback/failed: ${reverseFail}`);
+    if (reverseErrors.length) {
+      console.log("Sample reverse geocode errors:");
+      reverseErrors.forEach((line, idx) => console.log(`${idx + 1}. ${line}`));
+    }
   }
 
   if (!apply) {
