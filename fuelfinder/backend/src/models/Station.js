@@ -15,6 +15,13 @@ const stationSchema = new mongoose.Schema(
       enum: ["full", "partial", "empty"],
       default: "partial"
     },
+    fuelInventory: {
+      gasolineLiters: { type: Number, default: 0 },
+      dieselLiters: { type: Number, default: 0 },
+      otherLiters: { type: Number, default: 0 },
+      updatedAt: { type: Date, default: null },
+      updatedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null }
+    },
     isActive: { type: Boolean, default: true },
     location: {
       type: {

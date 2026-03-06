@@ -33,6 +33,21 @@ function emitQueueUpdated(stationId) {
   io.to(stationRoom(stationId)).emit("queue_updated", { stationId: String(stationId) });
 }
 
+function emitStationFuelUpdated(stationId, fuelInventory, fuelStatus) {
+  const io = getIO();
+  if (!io) return;
+  io.to(stationRoom(stationId)).emit("station_fuel_updated", {
+    stationId: String(stationId),
+    fuelStatus: String(fuelStatus || ""),
+    fuelInventory: {
+      gasolineLiters: Number(fuelInventory?.gasolineLiters || 0),
+      dieselLiters: Number(fuelInventory?.dieselLiters || 0),
+      otherLiters: Number(fuelInventory?.otherLiters || 0),
+      updatedAt: fuelInventory?.updatedAt || null
+    }
+  });
+}
+
 function isObjectId(value) {
   return mongoose.Types.ObjectId.isValid(value);
 }
@@ -191,6 +206,128 @@ function resolveUnitPrice(value) {
   return Number(price.toFixed(2));
 }
 
+function resolveLitersInput(value) {
+  const liters = Number(value);
+  if (!Number.isFinite(liters)) return null;
+  if (liters < 0 || liters > 1000000) return null;
+  return Number(liters.toFixed(2));
+}
+
+function deriveFuelStatusFromInventory(inventory) {
+  const gasoline = Number(inventory?.gasolineLiters || 0);
+  const diesel = Number(inventory?.dieselLiters || 0);
+  const other = Number(inventory?.otherLiters || 0);
+  const total = gasoline + diesel + other;
+  if (total <= 0) return "empty";
+  if (total <= 300) return "partial";
+  return "full";
+}
+
+async function getStationFuelSnapshot(stationId) {
+  const station = await Station.findById(stationId)
+    .select("_id fuelStatus fuelInventory")
+    .lean();
+  if (!station) return null;
+  const inventory = station.fuelInventory || {};
+  return {
+    stationId: String(station._id),
+    fuelStatus: station.fuelStatus || deriveFuelStatusFromInventory(inventory),
+    fuelInventory: {
+      gasolineLiters: Number(inventory.gasolineLiters || 0),
+      dieselLiters: Number(inventory.dieselLiters || 0),
+      otherLiters: Number(inventory.otherLiters || 0),
+      updatedAt: inventory.updatedAt || null,
+      updatedByUserId: inventory.updatedByUserId ? String(inventory.updatedByUserId) : null
+    }
+  };
+}
+
+async function setStationFuelInventory(stationId, payload, actorUserId) {
+  const station = await Station.findById(stationId);
+  if (!station) return null;
+
+  const current = station.fuelInventory || {};
+  const nextGasoline = payload.gasolineLiters !== undefined
+    ? resolveLitersInput(payload.gasolineLiters)
+    : Number(current.gasolineLiters || 0);
+  const nextDiesel = payload.dieselLiters !== undefined
+    ? resolveLitersInput(payload.dieselLiters)
+    : Number(current.dieselLiters || 0);
+  const nextOther = payload.otherLiters !== undefined
+    ? resolveLitersInput(payload.otherLiters)
+    : Number(current.otherLiters || 0);
+
+  if (nextGasoline === null || nextDiesel === null || nextOther === null) {
+    throw new Error("Fuel liters must be non-negative numbers.");
+  }
+
+  station.fuelInventory = {
+    gasolineLiters: nextGasoline,
+    dieselLiters: nextDiesel,
+    otherLiters: nextOther,
+    updatedAt: new Date(),
+    updatedByUserId: actorUserId || null
+  };
+  station.fuelStatus = deriveFuelStatusFromInventory(station.fuelInventory);
+  await station.save();
+
+  return {
+    fuelStatus: station.fuelStatus,
+    fuelInventory: {
+      gasolineLiters: Number(station.fuelInventory.gasolineLiters || 0),
+      dieselLiters: Number(station.fuelInventory.dieselLiters || 0),
+      otherLiters: Number(station.fuelInventory.otherLiters || 0),
+      updatedAt: station.fuelInventory.updatedAt || null,
+      updatedByUserId: station.fuelInventory.updatedByUserId
+        ? String(station.fuelInventory.updatedByUserId)
+        : null
+    }
+  };
+}
+
+async function consumeStationFuel(stationId, fuelType, requestedLiters) {
+  const liters = Number(requestedLiters || 0);
+  if (!Number.isFinite(liters) || liters <= 0) {
+    return { ok: true, changed: false };
+  }
+  const keyByType = {
+    gasoline: "fuelInventory.gasolineLiters",
+    diesel: "fuelInventory.dieselLiters",
+    other: "fuelInventory.otherLiters"
+  };
+  const field = keyByType[String(fuelType || "").toLowerCase()];
+  if (!field) return { ok: true, changed: false };
+
+  const station = await Station.findOne({
+    _id: stationId,
+    [field]: { $gte: liters }
+  });
+  if (!station) {
+    return { ok: false, reason: "insufficient_fuel" };
+  }
+
+  const current = station.fuelInventory || {};
+  const next = {
+    gasolineLiters: Number(current.gasolineLiters || 0),
+    dieselLiters: Number(current.dieselLiters || 0),
+    otherLiters: Number(current.otherLiters || 0)
+  };
+  if (field === "fuelInventory.gasolineLiters") next.gasolineLiters -= liters;
+  if (field === "fuelInventory.dieselLiters") next.dieselLiters -= liters;
+  if (field === "fuelInventory.otherLiters") next.otherLiters -= liters;
+
+  station.fuelInventory = {
+    ...current,
+    ...next,
+    updatedAt: new Date(),
+    updatedByUserId: null
+  };
+  station.fuelStatus = deriveFuelStatusFromInventory(station.fuelInventory);
+  await station.save();
+  emitStationFuelUpdated(stationId, station.fuelInventory, station.fuelStatus);
+  return { ok: true, changed: true };
+}
+
 function toRadians(degrees) {
   return (degrees * Math.PI) / 180;
 }
@@ -253,6 +390,11 @@ function verifyCheckInQrToken(token) {
 }
 
 async function activatePaidTicket(ticket, paymentReference, paymentSessionId) {
+  const consume = await consumeStationFuel(ticket.stationId, ticket.fuelType, ticket.requestedLiters);
+  if (!consume.ok) {
+    throw new Error("insufficient_fuel_stock");
+  }
+
   const queueCount = await QueueTicket.countDocuments({
     stationId: ticket.stationId,
     status: "waiting"

@@ -485,7 +485,10 @@ export default function HomeScreen({ navigation }) {
               <View style={styles.insightRow}>
                 <Text style={styles.insightReason}>{item.reason}</Text>
               </View>
-              <Text style={styles.metaAddress}>{item.address || t("homeScreen.addressMissing")}</Text>
+              <View style={styles.addressChip}>
+                <Text style={styles.addressLabel}>Address</Text>
+                <Text style={styles.metaAddress}>{item.address || t("homeScreen.addressMissing")}</Text>
+              </View>
               <View style={styles.smartScoreBottom}>
                 <Text style={styles.smartScoreBottomLabel}>{t("homeScreen.smartScore")}</Text>
                 <Text style={styles.smartScoreBottomValue}>{item.smartScore}/100</Text>
@@ -647,7 +650,23 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   insightReason: { marginTop: 1, color: "#334155", fontSize: 10, fontWeight: "600" },
-  metaAddress: { marginTop: 4, color: "#475569", fontSize: 11, fontWeight: "600" },
+  addressChip: {
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    backgroundColor: "#EFF6FF",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  addressLabel: {
+    color: "#1D4ED8",
+    fontSize: 10,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    marginBottom: 2,
+  },
+  metaAddress: { color: "#1E3A8A", fontSize: 11, fontWeight: "700" },
   smartScoreBottom: {
     marginTop: 5,
     flexDirection: "row",

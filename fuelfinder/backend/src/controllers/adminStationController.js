@@ -24,12 +24,20 @@ function asNumber(value, fieldName) {
 
 function buildStationResponse(station) {
   const coords = Array.isArray(station.location?.coordinates) ? station.location.coordinates : [];
+  const fuelInventory = station.fuelInventory || {};
   return {
     id: String(station._id),
     name: station.name || "",
     address: station.address || "",
     contact: station.contact || "",
     fuelStatus: station.fuelStatus || "partial",
+    fuelInventory: {
+      gasolineLiters: Number(fuelInventory.gasolineLiters || 0),
+      dieselLiters: Number(fuelInventory.dieselLiters || 0),
+      otherLiters: Number(fuelInventory.otherLiters || 0),
+      updatedAt: fuelInventory.updatedAt || null,
+      updatedByUserId: fuelInventory.updatedByUserId ? String(fuelInventory.updatedByUserId) : null
+    },
     isActive: Boolean(station.isActive),
     organizationId: station.organizationId ? String(station.organizationId) : null,
     cityId: station.cityId ? String(station.cityId) : null,
