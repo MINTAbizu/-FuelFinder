@@ -28,6 +28,40 @@ function isPlaceholderAddress(value) {
   return text.startsWith("approx location");
 }
 
+function buildAddressFromReversePayload(data) {
+  const addr = data?.address || {};
+  const line1 = [addr.house_number, addr.road].filter(Boolean).join(" ").trim();
+  const locality =
+    addr.neighbourhood ||
+    addr.suburb ||
+    addr.city_district ||
+    addr.county ||
+    "";
+  const city = addr.city || addr.town || addr.village || addr.municipality || "";
+  const region = addr.state || addr.region || "";
+  const country = addr.country || "";
+  const parts = [line1, locality, city, region, country]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  if (parts.length) return parts.join(", ");
+  return String(data?.display_name || "").trim();
+}
+
+async function reverseGeocodeAddress(lat, lon) {
+  const url =
+    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}` +
+    `&lon=${encodeURIComponent(lon)}&zoom=18&addressdetails=1&accept-language=en`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "fuelfinder-backend/1.0"
+    }
+  });
+  if (!response.ok) return "";
+  const data = await response.json();
+  return buildAddressFromReversePayload(data);
+}
+
 async function findNearbyCanonicalStation(station) {
   const lat = Number(station?.latitude);
   const lon = Number(station?.longitude);
@@ -100,6 +134,20 @@ async function attachBackendStationIds(stations) {
         doc.contact = String(station?.contact || doc.contact || "").trim();
         doc.location = { type: "Point", coordinates: [lon, lat] };
         doc.isActive = true;
+
+        // Self-heal legacy placeholder addresses using reverse geocoding.
+        if (isPlaceholderAddress(doc.address)) {
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            const resolvedAddress = await reverseGeocodeAddress(lat, lon);
+            if (resolvedAddress && !isPlaceholderAddress(resolvedAddress)) {
+              doc.address = resolvedAddress;
+            }
+          } catch (_err) {
+            // keep current address if reverse geocoding fails
+          }
+        }
+
         await doc.save();
       }
 

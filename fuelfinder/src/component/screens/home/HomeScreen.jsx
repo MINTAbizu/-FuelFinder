@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   Image,
   Pressable,
@@ -376,7 +377,6 @@ export default function HomeScreen({ navigation }) {
             {locationError ? <Text style={styles.notice}>{locationError}</Text> : null}
             {stationsError ? <Text style={styles.error}>{stationsError}</Text> : null}
             {routingError ? <Text style={styles.error}>{routingError}</Text> : null}
-
             <TextInput value={searchText} onChangeText={setSearchText} placeholder={t("homeScreen.search")} style={styles.search} />
 
             <Text style={styles.section}>{t("homeScreen.filter")}</Text>
@@ -421,8 +421,25 @@ export default function HomeScreen({ navigation }) {
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>{t("homeScreen.noMatch")}</Text>
-            <Text style={styles.emptySub}>{t("homeScreen.noMatchSub")}</Text>
+            {loadingStations ? (
+              <>
+                {[1, 2, 3].map((item) => (
+                  <View key={`loading-card-${item}`} style={styles.loadingCard}>
+                    <View style={styles.loadingImage} />
+                    <View style={styles.loadingBody}>
+                      <View style={styles.loadingLineWide} />
+                      <View style={styles.loadingLine} />
+                      <View style={styles.loadingLineShort} />
+                    </View>
+                  </View>
+                ))}
+              </>
+            ) : (
+              <>
+                <Text style={styles.emptyTitle}>{t("homeScreen.noMatch")}</Text>
+                <Text style={styles.emptySub}>{t("homeScreen.noMatchSub")}</Text>
+              </>
+            )}
           </View>
         }
         renderItem={({ item }) => (
@@ -505,6 +522,27 @@ const styles = StyleSheet.create({
   ok: { marginTop: 6, color: "#15803D", fontWeight: "700", fontSize: 12 },
   notice: { marginTop: 6, color: "#475569", fontWeight: "600", fontSize: 12 },
   error: { marginTop: 6, color: "#B91C1C", fontWeight: "700", fontSize: 12 },
+  loadingCard: {
+    width: "100%",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+    padding: 10,
+    marginBottom: 8,
+    flexDirection: "row",
+    gap: 10,
+  },
+  loadingImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 10,
+    backgroundColor: "#E2E8F0",
+  },
+  loadingBody: { flex: 1, justifyContent: "center", gap: 8 },
+  loadingLineWide: { height: 12, borderRadius: 8, backgroundColor: "#E2E8F0", width: "90%" },
+  loadingLine: { height: 10, borderRadius: 8, backgroundColor: "#E2E8F0", width: "70%" },
+  loadingLineShort: { height: 10, borderRadius: 8, backgroundColor: "#E2E8F0", width: "50%" },
   search: {
     marginTop: 10,
     backgroundColor: "#fff",
