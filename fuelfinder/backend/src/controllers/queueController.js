@@ -1338,3 +1338,56 @@ exports.validateReservationIdForStaff = async (req, res) => {
     return res.status(500).json({ message: "Failed to validate reservation id." });
   }
 };
+
+exports.getStationFuelStatus = async (req, res) => {
+  try {
+    const { stationId } = req.params;
+    if (!isObjectId(stationId)) {
+      return res.status(400).json({ message: "Invalid stationId." });
+    }
+    const snapshot = await getStationFuelSnapshot(stationId);
+    if (!snapshot) {
+      return res.status(404).json({ message: "Station not found." });
+    }
+    return res.json(snapshot);
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to load station fuel status." });
+  }
+};
+
+exports.updateStationFuelStock = async (req, res) => {
+  try {
+    const actor = req.user || null;
+    const actorUserId = String(req.user?.id || "").trim();
+    const stationId = String(req.body.stationId || req.params.stationId || "").trim();
+    if (!isObjectId(stationId)) {
+      return res.status(400).json({ message: "Invalid stationId." });
+    }
+    if (!(await canOperateStation(actor, stationId))) {
+      return res.status(403).json({ message: "Forbidden: station scope denied for fuel update." });
+    }
+
+    const payload = {
+      gasolineLiters: req.body.gasolineLiters,
+      dieselLiters: req.body.dieselLiters,
+      otherLiters: req.body.otherLiters
+    };
+    const updated = await setStationFuelInventory(stationId, payload, actorUserId || null);
+    if (!updated) {
+      return res.status(404).json({ message: "Station not found." });
+    }
+
+    emitStationFuelUpdated(stationId, updated.fuelInventory, updated.fuelStatus);
+    return res.json({
+      message: "Station fuel stock updated.",
+      stationId: String(stationId),
+      fuelStatus: updated.fuelStatus,
+      fuelInventory: updated.fuelInventory
+    });
+  } catch (error) {
+    if (String(error?.message || "").includes("Fuel liters")) {
+      return res.status(400).json({ message: error.message });
+    }
+    return res.status(500).json({ message: "Failed to update station fuel stock." });
+  }
+};

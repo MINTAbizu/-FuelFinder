@@ -19,6 +19,14 @@ router.post("/check-in/start", auth, queueController.startCheckIn);
 router.post("/check-in/verify", auth, requireRole(STAFF_OPERATION_ROLES), queueController.verifyCheckIn);
 router.post("/validate-id", auth, requireRole(STAFF_OPERATION_ROLES), queueController.validateReservationIdForStaff);
 router.get("/station/:stationId", queueController.getStationQueue);
+router.get("/station/:stationId/fuel-status", queueController.getStationFuelStatus);
+router.patch(
+  "/station/:stationId/fuel-stock",
+  auth,
+  requireRole(STAFF_OPERATION_ROLES),
+  requireScope({ stationKey: "stationId", requireAny: true }),
+  queueController.updateStationFuelStock
+);
 router.post(
   "/next",
   auth,
