@@ -586,7 +586,14 @@ exports.confirmReservationPayment = async (req, res) => {
       return res.status(410).json({ message: "Reservation payment window expired." });
     }
 
-    await activatePaidTicket(ticket, paymentRef, ticket.paymentSessionId);
+    try {
+      await activatePaidTicket(ticket, paymentRef, ticket.paymentSessionId);
+    } catch (err) {
+      if (String(err?.message || "") === "insufficient_fuel_stock") {
+        return res.status(409).json({ message: "Not enough fuel left at this station for requested liters." });
+      }
+      throw err;
+    }
 
     const etaMinutes = ticket.position * AVERAGE_MINUTES_PER_CAR;
     return res.json({
@@ -712,7 +719,14 @@ exports.handleTelebirrWebhook = async (req, res) => {
     }
 
     if (status === "success" || status === "paid" || status === "completed") {
-      await activatePaidTicket(ticket, paymentReference, paymentSessionId);
+      try {
+        await activatePaidTicket(ticket, paymentReference, paymentSessionId);
+      } catch (err) {
+        if (String(err?.message || "") === "insufficient_fuel_stock") {
+          return res.status(409).json({ ok: false, message: "Insufficient station fuel stock." });
+        }
+        throw err;
+      }
       return res.json({ ok: true, message: "Payment confirmed." });
     }
 
