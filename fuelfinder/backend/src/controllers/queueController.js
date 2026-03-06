@@ -1035,6 +1035,7 @@ exports.getStationQueue = async (req, res) => {
           reservationCode: item.publicTicketCode || ""
         }))
       : [];
+    const stationFuel = await getStationFuelSnapshot(stationId);
 
     return res.json({
       stationId,
@@ -1042,7 +1043,15 @@ exports.getStationQueue = async (req, res) => {
       called: calledWithIds,
       waiting: waitingWithIds,
       pendingCount: pendingWithIds.length,
-      pending: pendingWithIds
+      pending: pendingWithIds,
+      fuelStatus: stationFuel?.fuelStatus || "partial",
+      fuelInventory: stationFuel?.fuelInventory || {
+        gasolineLiters: 0,
+        dieselLiters: 0,
+        otherLiters: 0,
+        updatedAt: null,
+        updatedByUserId: null
+      }
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load station queue." });
