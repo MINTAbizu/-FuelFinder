@@ -160,6 +160,13 @@ async function attachBackendStationIds(stations) {
         name: String(doc?.name || station?.name || "Fuel Station"),
         address: String(doc?.address || station?.address || "Address not listed"),
         contact: String(doc?.contact || station?.contact || ""),
+        fuel_status: String(doc?.fuelStatus || station?.fuel_status || "partial"),
+        fuelInventory: {
+          gasolineLiters: Number(doc?.fuelInventory?.gasolineLiters || 0),
+          dieselLiters: Number(doc?.fuelInventory?.dieselLiters || 0),
+          otherLiters: Number(doc?.fuelInventory?.otherLiters || 0),
+          updatedAt: doc?.fuelInventory?.updatedAt || null
+        },
         latitude: Number.isFinite(docLat) ? docLat : lat,
         longitude: Number.isFinite(docLon) ? docLon : lon,
         stationId: String(doc?._id || "")
