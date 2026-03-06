@@ -28,6 +28,13 @@ function isPlaceholderAddress(value) {
   return text.startsWith("approx location");
 }
 
+function mapFuelStatusForClient(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "full" || text === "available") return "available";
+  if (text === "partial" || text === "limited") return "limited";
+  return "empty";
+}
+
 function buildAddressFromReversePayload(data) {
   const addr = data?.address || {};
   const line1 = [addr.house_number, addr.road].filter(Boolean).join(" ").trim();
@@ -160,7 +167,7 @@ async function attachBackendStationIds(stations) {
         name: String(doc?.name || station?.name || "Fuel Station"),
         address: String(doc?.address || station?.address || "Address not listed"),
         contact: String(doc?.contact || station?.contact || ""),
-        fuel_status: String(doc?.fuelStatus || station?.fuel_status || "partial"),
+        fuel_status: mapFuelStatusForClient(doc?.fuelStatus || station?.fuel_status || "partial"),
         fuelInventory: {
           gasolineLiters: Number(doc?.fuelInventory?.gasolineLiters || 0),
           dieselLiters: Number(doc?.fuelInventory?.dieselLiters || 0),
