@@ -882,12 +882,17 @@ exports.leaveQueue = async (req, res) => {
       status: { $in: ACTIVE_STATUSES }
     });
     if (!ticket) return res.status(404).json({ message: "Active ticket not found." });
+    const previousStatus = String(ticket.status || "");
 
     ticket.status = "cancelled";
     if (ticket.depositStatus === "authorized") {
       ticket.depositStatus = "refunded";
     }
     await ticket.save();
+
+    if (["waiting", "called"].includes(previousStatus)) {
+      await restoreStationFuel(ticket.stationId, ticket.fuelType, ticket.requestedLiters);
+    }
 
     if (ticket.position > 0) {
       await recalculatePositions(ticket.stationId);
