@@ -22,6 +22,28 @@ const RESERVATION_BAND_DEPOSITS = {
   "20-40": 200,
   "40+": 300
 };
+const STATUS_TRANSITIONS = {
+  pending_payment: new Set(["waiting", "expired", "cancelled"]),
+  waiting: new Set(["called", "served", "cancelled", "expired"]),
+  called: new Set(["served", "cancelled", "expired"]),
+  served: new Set([]),
+  cancelled: new Set([]),
+  expired: new Set([])
+};
+
+function canTransitionStatus(fromStatus, toStatus) {
+  const from = String(fromStatus || "");
+  const to = String(toStatus || "");
+  if (from === to) return true;
+  const allowed = STATUS_TRANSITIONS[from];
+  return Boolean(allowed && allowed.has(to));
+}
+
+function isDuplicateActiveTicketError(error) {
+  if (!error) return false;
+  const code = Number(error.code || 0);
+  return code === 11000 && String(error?.message || "").includes("userId_1_stationId_1");
+}
 
 function stationRoom(stationId) {
   return `station:${stationId}`;
@@ -419,6 +441,10 @@ function verifyCheckInQrToken(token) {
 }
 
 async function activatePaidTicket(ticket, paymentReference, paymentSessionId) {
+  if (!canTransitionStatus(ticket.status, "waiting")) {
+    return ticket;
+  }
+
   const consume = await consumeStationFuel(ticket.stationId, ticket.fuelType, ticket.requestedLiters);
   if (!consume.ok) {
     throw new Error("insufficient_fuel_stock");
@@ -525,6 +551,24 @@ exports.reserveQueueSlot = async (req, res) => {
       paymentExpiresAt: ticket.paymentExpiresAt
     });
   } catch (error) {
+    if (isDuplicateActiveTicketError(error)) {
+      const userId = req.user?.id;
+      const stationId = req.body?.stationId;
+      const existing = await QueueTicket.findOne({
+        userId,
+        stationId,
+        status: { $in: ACTIVE_STATUSES }
+      }).lean();
+      if (existing) {
+        return res.status(409).json({
+          message: "You already have an active reservation/ticket for this station.",
+          ticketId: existing._id,
+          reservationCode: existing.publicTicketCode || "",
+          status: existing.status,
+          position: existing.position
+        });
+      }
+    }
     return res.status(500).json({ message: "Failed to reserve queue slot." });
   }
 };
@@ -582,6 +626,24 @@ exports.joinQueue = async (req, res) => {
       etaMinutes
     });
   } catch (error) {
+    if (isDuplicateActiveTicketError(error)) {
+      const userId = req.user?.id;
+      const stationId = req.body?.stationId;
+      const existing = await QueueTicket.findOne({
+        userId,
+        stationId,
+        status: { $in: ACTIVE_STATUSES }
+      }).lean();
+      if (existing) {
+        return res.status(409).json({
+          message: "You already have an active ticket for this station.",
+          ticketId: existing._id,
+          reservationCode: existing.publicTicketCode || "",
+          status: existing.status,
+          position: existing.position
+        });
+      }
+    }
     return res.status(500).json({ message: "Failed to join queue." });
   }
 };
@@ -602,11 +664,31 @@ exports.confirmReservationPayment = async (req, res) => {
 
     const ticket = await QueueTicket.findOne({
       _id: reservationId,
-      userId,
-      status: "pending_payment"
+      userId
     });
     if (!ticket) {
-      return res.status(404).json({ message: "Pending reservation not found." });
+      return res.status(404).json({ message: "Reservation not found." });
+    }
+
+    if (["waiting", "called", "served"].includes(String(ticket.status || ""))) {
+      const etaMinutes = Math.max(0, Number(ticket.position || 0) * AVERAGE_MINUTES_PER_CAR);
+      return res.json({
+        ticketId: ticket._id,
+        reservationId: ticket._id,
+        reservationCode: ticket.publicTicketCode || "",
+        stationId: ticket.stationId,
+        status: ticket.status,
+        position: ticket.position,
+        etaMinutes,
+        depositStatus: ticket.depositStatus,
+        message: "Reservation already paid."
+      });
+    }
+    if (ticket.status !== "pending_payment") {
+      return res.status(409).json({
+        message: `Reservation is already ${ticket.status}.`,
+        status: ticket.status
+      });
     }
 
     if (ticket.paymentExpiresAt && ticket.paymentExpiresAt <= new Date()) {
@@ -624,7 +706,7 @@ exports.confirmReservationPayment = async (req, res) => {
       throw err;
     }
 
-    const etaMinutes = ticket.position * AVERAGE_MINUTES_PER_CAR;
+    const etaMinutes = Math.max(0, Number(ticket.position || 0) * AVERAGE_MINUTES_PER_CAR);
     return res.json({
       ticketId: ticket._id,
       reservationId: ticket._id,

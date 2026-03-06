@@ -424,6 +424,12 @@ export default function StationDetails({ route }) {
     return styles.statusEmpty;
   };
 
+  const getStatusBadgeStyle = () => {
+    if (detail.fuelStatus === "available" || detail.fuelStatus === "full") return styles.badgeFull;
+    if (detail.fuelStatus === "limited" || detail.fuelStatus === "partial") return styles.badgePartial;
+    return styles.badgeEmpty;
+  };
+
   const getStatusLabel = () => {
     if (detail.fuelStatus === "available" || detail.fuelStatus === "full") return "available";
     if (detail.fuelStatus === "limited" || detail.fuelStatus === "partial") return "limited";
@@ -445,14 +451,41 @@ export default function StationDetails({ route }) {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>{t.fuelStatus}</Text>
-        <Text style={[styles.statusValue, getStatusStyle()]}>{statusLabels[getStatusLabel()]}</Text>
-        <Text style={styles.metaText}>Gasoline left: {detail.fuelInventory.gasolineLiters.toFixed(2)} L</Text>
-        <Text style={styles.metaText}>Diesel left: {detail.fuelInventory.dieselLiters.toFixed(2)} L</Text>
-        <Text style={styles.metaText}>Other left: {detail.fuelInventory.otherLiters.toFixed(2)} L</Text>
-        <Text style={styles.sectionTitle}>{t.queueWait}</Text>
-        <Text style={styles.metaText}>{t.queueLength}: {detail.queueLength}</Text>
-        <Text style={styles.metaText}>{t.estWait}: {detail.waitTime}</Text>
+        <View style={styles.statusHeaderRow}>
+          <Text style={styles.sectionTitle}>{t.fuelStatus}</Text>
+          <View style={[styles.statusBadge, getStatusBadgeStyle()]}>
+            <Text style={[styles.statusValue, getStatusStyle()]}>{statusLabels[getStatusLabel()]}</Text>
+          </View>
+        </View>
+
+        <View style={styles.fuelGrid}>
+          <View style={[styles.fuelCard, styles.fuelCardGasoline]}>
+            <Text style={styles.fuelCardTitle}>Gasoline</Text>
+            <Text style={styles.fuelCardValue}>{detail.fuelInventory.gasolineLiters.toFixed(2)} L</Text>
+          </View>
+          <View style={[styles.fuelCard, styles.fuelCardDiesel]}>
+            <Text style={styles.fuelCardTitle}>Diesel</Text>
+            <Text style={styles.fuelCardValue}>{detail.fuelInventory.dieselLiters.toFixed(2)} L</Text>
+          </View>
+          <View style={[styles.fuelCard, styles.fuelCardOther]}>
+            <Text style={styles.fuelCardTitle}>Other</Text>
+            <Text style={styles.fuelCardValue}>{detail.fuelInventory.otherLiters.toFixed(2)} L</Text>
+          </View>
+        </View>
+
+        <View style={styles.queueCard}>
+          <Text style={styles.sectionTitle}>{t.queueWait}</Text>
+          <View style={styles.queueStatsRow}>
+            <View style={styles.queueMiniCard}>
+              <Text style={styles.queueMiniLabel}>{t.queueLength}</Text>
+              <Text style={styles.queueMiniValue}>{detail.queueLength}</Text>
+            </View>
+            <View style={[styles.queueMiniCard, styles.queueMiniCardLast]}>
+              <Text style={styles.queueMiniLabel}>{t.estWait}</Text>
+              <Text style={styles.queueMiniValue}>{detail.waitTime} min</Text>
+            </View>
+          </View>
+        </View>
       </View>
 
       <View style={styles.card}>
@@ -637,10 +670,108 @@ const styles = StyleSheet.create({
   stationName: { fontSize: 22, fontWeight: "900", color: "#0F172A", marginBottom: 8 },
   sectionTitle: { fontSize: 14, fontWeight: "800", color: "#111827", marginBottom: 6 },
   metaText: { fontSize: 13, color: "#334155", marginBottom: 4, fontWeight: "600" },
-  statusValue: { fontSize: 16, fontWeight: "900", marginBottom: 10 },
+  statusValue: { fontSize: 16, fontWeight: "900" },
   statusFull: { color: "#15803D" },
   statusPartial: { color: "#B45309" },
   statusEmpty: { color: "#B91C1C" },
+  statusHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  statusBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+  },
+  badgeFull: {
+    backgroundColor: "#DCFCE7",
+    borderColor: "#86EFAC",
+  },
+  badgePartial: {
+    backgroundColor: "#FEF3C7",
+    borderColor: "#FCD34D",
+  },
+  badgeEmpty: {
+    backgroundColor: "#FEE2E2",
+    borderColor: "#FCA5A5",
+  },
+  fuelGrid: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  fuelCard: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    marginBottom: 8,
+  },
+  fuelCardGasoline: {
+    backgroundColor: "#ECFEFF",
+    borderColor: "#67E8F9",
+  },
+  fuelCardDiesel: {
+    backgroundColor: "#EEF2FF",
+    borderColor: "#A5B4FC",
+    marginHorizontal: 6,
+  },
+  fuelCardOther: {
+    backgroundColor: "#FFF7ED",
+    borderColor: "#FDBA74",
+  },
+  fuelCardTitle: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#0F172A",
+    marginBottom: 2,
+  },
+  fuelCardValue: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#1E293B",
+  },
+  queueCard: {
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    backgroundColor: "#EFF6FF",
+    borderRadius: 12,
+    padding: 10,
+  },
+  queueStatsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  queueMiniCard: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#93C5FD",
+    backgroundColor: "#DBEAFE",
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    marginRight: 6,
+  },
+  queueMiniCardLast: {
+    marginRight: 0,
+  },
+  queueMiniLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#1E3A8A",
+    marginBottom: 2,
+  },
+  queueMiniValue: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: "#1E40AF",
+  },
   ratingHeadline: { fontSize: 13, fontWeight: "800", color: "#1D4ED8", marginBottom: 6 },
   listItem: {
     backgroundColor: "#F8FAFC",

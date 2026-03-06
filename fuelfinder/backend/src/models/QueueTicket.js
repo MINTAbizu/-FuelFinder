@@ -77,6 +77,15 @@ queueTicketSchema.index({ stationId: 1, status: 1, joinedAt: 1 });
 queueTicketSchema.index({ userId: 1, status: 1 });
 queueTicketSchema.index({ stationId: 1, paymentExpiresAt: 1, status: 1 });
 queueTicketSchema.index(
+  { userId: 1, stationId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: { $in: ["pending_payment", "waiting", "called"] }
+    }
+  }
+);
+queueTicketSchema.index(
   { publicTicketCode: 1 },
   {
     unique: true,
