@@ -21,6 +21,13 @@ function areLikelySameStation(sourceName, dbName) {
   return a.includes(b) || b.includes(a);
 }
 
+function isPlaceholderAddress(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return true;
+  if (text === "address not listed") return true;
+  return text.startsWith("approx location");
+}
+
 async function findNearbyCanonicalStation(station) {
   const lat = Number(station?.latitude);
   const lon = Number(station?.longitude);
@@ -71,9 +78,10 @@ async function attachBackendStationIds(stations) {
       }
 
       if (!doc) {
+        const incomingAddress = String(station?.address || "").trim();
         doc = await Station.create({
           name: String(station?.name || "Fuel Station").trim(),
-          address: String(station?.address || "Address not listed").trim(),
+          address: incomingAddress || "Address not listed",
           contact: String(station?.contact || "").trim(),
           externalSource: "osm",
           externalSourceId: sourceId,
@@ -82,16 +90,30 @@ async function attachBackendStationIds(stations) {
           location: { type: "Point", coordinates: [lon, lat] }
         });
       } else {
+        const incomingAddress = String(station?.address || "").trim();
         doc.name = String(station?.name || doc.name || "Fuel Station").trim();
-        doc.address = String(station?.address || doc.address || "Address not listed").trim();
+        if (!isPlaceholderAddress(incomingAddress)) {
+          doc.address = incomingAddress;
+        } else if (!String(doc.address || "").trim()) {
+          doc.address = incomingAddress || "Address not listed";
+        }
         doc.contact = String(station?.contact || doc.contact || "").trim();
         doc.location = { type: "Point", coordinates: [lon, lat] };
         doc.isActive = true;
         await doc.save();
       }
 
+      const docCoords = Array.isArray(doc?.location?.coordinates) ? doc.location.coordinates : [];
+      const docLon = Number(docCoords[0]);
+      const docLat = Number(docCoords[1]);
+
       return {
         ...station,
+        name: String(doc?.name || station?.name || "Fuel Station"),
+        address: String(doc?.address || station?.address || "Address not listed"),
+        contact: String(doc?.contact || station?.contact || ""),
+        latitude: Number.isFinite(docLat) ? docLat : lat,
+        longitude: Number.isFinite(docLon) ? docLon : lon,
         stationId: String(doc?._id || "")
       };
     })
