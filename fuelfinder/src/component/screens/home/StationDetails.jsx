@@ -133,6 +133,7 @@ export default function StationDetails({ route }) {
   const [loading, setLoading] = useState(false);
   const [paymentPhase, setPaymentPhase] = useState("idle");
   const [liveQueueCount, setLiveQueueCount] = useState(null);
+  const [liveFuel, setLiveFuel] = useState(null);
   const [checkInSession, setCheckInSession] = useState(null);
   const [checkInStatusText, setCheckInStatusText] = useState("");
   const pollRef = useRef(null);
@@ -166,7 +167,12 @@ export default function StationDetails({ route }) {
     const queue = Number(
       liveQueueCount !== null && liveQueueCount !== undefined ? liveQueueCount : station?.queue_length || 0
     );
-    const fuelStatus = String(station?.fuel_status || "limited");
+    const fuelStatus = String(liveFuel?.fuelStatus || station?.fuel_status || "limited");
+    const fuelInventory = {
+      gasolineLiters: Number(liveFuel?.fuelInventory?.gasolineLiters ?? station?.fuelInventory?.gasolineLiters ?? 0),
+      dieselLiters: Number(liveFuel?.fuelInventory?.dieselLiters ?? station?.fuelInventory?.dieselLiters ?? 0),
+      otherLiters: Number(liveFuel?.fuelInventory?.otherLiters ?? station?.fuelInventory?.otherLiters ?? 0),
+    };
     return {
       name: station?.name || t.stationFallback,
       address: station?.address || t.address,
@@ -175,6 +181,7 @@ export default function StationDetails({ route }) {
       longitude: Number(station?.longitude),
       supportedFuels: formatSupportedFuels(station?.supportedFuels),
       fuelStatus,
+      fuelInventory,
       queueLength: queue,
       waitTime: getWaitEstimate(queue),
       reports: Array.isArray(station?.reports) ? station.reports : [],
@@ -187,7 +194,7 @@ export default function StationDetails({ route }) {
             ).toFixed(1)
           : "4.5",
     };
-  }, [liveQueueCount, station, t.address, t.contact, t.stationFallback]);
+  }, [liveFuel, liveQueueCount, station, t.address, t.contact, t.stationFallback]);
 
   useEffect(() => {
     return () => {
@@ -198,18 +205,32 @@ export default function StationDetails({ route }) {
   useEffect(() => {
     let active = true;
     if (!queueEnabled) return undefined;
-    (async () => {
+
+    const fetchLive = async () => {
       try {
         const queue = await getStationQueue(stationId);
         if (!active) return;
         setLiveQueueCount(Number(queue?.waitingCount || 0));
+        setLiveFuel({
+          fuelStatus: String(queue?.fuelStatus || ""),
+          fuelInventory: {
+            gasolineLiters: Number(queue?.fuelInventory?.gasolineLiters || 0),
+            dieselLiters: Number(queue?.fuelInventory?.dieselLiters || 0),
+            otherLiters: Number(queue?.fuelInventory?.otherLiters || 0),
+            updatedAt: queue?.fuelInventory?.updatedAt || null,
+          },
+        });
       } catch (_error) {
         if (!active) return;
         setLiveQueueCount(null);
       }
-    })();
+    };
+
+    fetchLive();
+    const id = setInterval(fetchLive, 10000);
     return () => {
       active = false;
+      clearInterval(id);
     };
   }, [queueEnabled, stationId]);
 
@@ -398,14 +419,14 @@ export default function StationDetails({ route }) {
   }, [myTicket, reservationId]);
 
   const getStatusStyle = () => {
-    if (detail.fuelStatus === "available") return styles.statusFull;
-    if (detail.fuelStatus === "limited") return styles.statusPartial;
+    if (detail.fuelStatus === "available" || detail.fuelStatus === "full") return styles.statusFull;
+    if (detail.fuelStatus === "limited" || detail.fuelStatus === "partial") return styles.statusPartial;
     return styles.statusEmpty;
   };
 
   const getStatusLabel = () => {
-    if (detail.fuelStatus === "available") return "available";
-    if (detail.fuelStatus === "limited") return "limited";
+    if (detail.fuelStatus === "available" || detail.fuelStatus === "full") return "available";
+    if (detail.fuelStatus === "limited" || detail.fuelStatus === "partial") return "limited";
     return "empty";
   };
 
@@ -426,6 +447,9 @@ export default function StationDetails({ route }) {
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>{t.fuelStatus}</Text>
         <Text style={[styles.statusValue, getStatusStyle()]}>{statusLabels[getStatusLabel()]}</Text>
+        <Text style={styles.metaText}>Gasoline left: {detail.fuelInventory.gasolineLiters.toFixed(2)} L</Text>
+        <Text style={styles.metaText}>Diesel left: {detail.fuelInventory.dieselLiters.toFixed(2)} L</Text>
+        <Text style={styles.metaText}>Other left: {detail.fuelInventory.otherLiters.toFixed(2)} L</Text>
         <Text style={styles.sectionTitle}>{t.queueWait}</Text>
         <Text style={styles.metaText}>{t.queueLength}: {detail.queueLength}</Text>
         <Text style={styles.metaText}>{t.estWait}: {detail.waitTime}</Text>
