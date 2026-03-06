@@ -328,6 +328,35 @@ async function consumeStationFuel(stationId, fuelType, requestedLiters) {
   return { ok: true, changed: true };
 }
 
+async function restoreStationFuel(stationId, fuelType, requestedLiters) {
+  const liters = Number(requestedLiters || 0);
+  if (!Number.isFinite(liters) || liters <= 0) return { ok: true, changed: false };
+  const station = await Station.findById(stationId);
+  if (!station) return { ok: false, changed: false };
+
+  const current = station.fuelInventory || {};
+  const next = {
+    gasolineLiters: Number(current.gasolineLiters || 0),
+    dieselLiters: Number(current.dieselLiters || 0),
+    otherLiters: Number(current.otherLiters || 0)
+  };
+  const type = String(fuelType || "").toLowerCase();
+  if (type === "gasoline") next.gasolineLiters += liters;
+  if (type === "diesel") next.dieselLiters += liters;
+  if (type === "other") next.otherLiters += liters;
+
+  station.fuelInventory = {
+    ...current,
+    ...next,
+    updatedAt: new Date(),
+    updatedByUserId: null
+  };
+  station.fuelStatus = deriveFuelStatusFromInventory(station.fuelInventory);
+  await station.save();
+  emitStationFuelUpdated(stationId, station.fuelInventory, station.fuelStatus);
+  return { ok: true, changed: true };
+}
+
 function toRadians(degrees) {
   return (degrees * Math.PI) / 180;
 }
