@@ -733,11 +733,26 @@ exports.startTelebirrCheckout = async (req, res) => {
 
     const ticket = await QueueTicket.findOne({
       _id: reservationId,
-      userId,
-      status: "pending_payment"
+      userId
     });
     if (!ticket) {
-      return res.status(404).json({ message: "Pending reservation not found." });
+      return res.status(404).json({ message: "Reservation not found." });
+    }
+    if (["waiting", "called", "served"].includes(String(ticket.status || ""))) {
+      return res.json({
+        reservationId: ticket._id,
+        reservationCode: ticket.publicTicketCode || "",
+        paymentProvider: ticket.paymentProvider || "telebirr",
+        merchantOrderId: ticket.paymentReference || "",
+        prepayId: ticket.paymentSessionId || "",
+        message: "Reservation already paid."
+      });
+    }
+    if (ticket.status !== "pending_payment") {
+      return res.status(409).json({
+        message: `Reservation is already ${ticket.status}.`,
+        status: ticket.status
+      });
     }
     if (ticket.paymentExpiresAt && ticket.paymentExpiresAt <= new Date()) {
       ticket.status = "expired";
@@ -843,7 +858,11 @@ exports.handleTelebirrWebhook = async (req, res) => {
 
     if (status === "failed" || status === "cancelled" || status === "canceled") {
       ticket.depositStatus = "pending";
-      if (ticket.paymentExpiresAt && ticket.paymentExpiresAt <= new Date()) {
+      if (
+        ticket.paymentExpiresAt &&
+        ticket.paymentExpiresAt <= new Date() &&
+        canTransitionStatus(ticket.status, "expired")
+      ) {
         ticket.status = "expired";
       }
       await ticket.save();
@@ -966,6 +985,10 @@ exports.leaveQueue = async (req, res) => {
     if (!ticket) return res.status(404).json({ message: "Active ticket not found." });
     const previousStatus = String(ticket.status || "");
 
+    if (!canTransitionStatus(ticket.status, "cancelled")) {
+      return res.status(409).json({ message: `Cannot cancel ticket from status ${ticket.status}.` });
+    }
+
     ticket.status = "cancelled";
     if (ticket.depositStatus === "authorized") {
       ticket.depositStatus = "refunded";
@@ -1005,7 +1028,7 @@ exports.nextInQueue = async (req, res) => {
       status: "called"
     }).sort({ calledAt: 1 });
 
-    if (currentCalled) {
+    if (currentCalled && canTransitionStatus(currentCalled.status, "served")) {
       currentCalled.status = "served";
       currentCalled.servedAt = new Date();
       await currentCalled.save();
@@ -1019,6 +1042,10 @@ exports.nextInQueue = async (req, res) => {
     if (!next) {
       emitQueueUpdated(stationId);
       return res.json({ message: "Queue is empty.", nextTicket: null });
+    }
+
+    if (!canTransitionStatus(next.status, "called")) {
+      return res.status(409).json({ message: `Cannot call ticket from status ${next.status}.` });
     }
 
     next.status = "called";
@@ -1286,7 +1313,15 @@ exports.verifyCheckIn = async (req, res) => {
       });
     }
     if (ticket.checkInStatus === "verified") {
-      return res.status(409).json({ message: "Ticket check-in already verified." });
+      return res.json({
+        ok: true,
+        ticketId: ticket._id,
+        reservationId: ticket._id,
+        reservationCode: ticket.publicTicketCode || "",
+        checkInStatus: ticket.checkInStatus,
+        verifiedAt: ticket.checkInVerifiedAt || null,
+        message: "Ticket check-in already verified."
+      });
     }
     if (ticket.checkInStatus !== "arrived") {
       return res.status(400).json({ message: "Check-in session not started. Start check-in first." });
@@ -1330,22 +1365,50 @@ exports.verifyCheckIn = async (req, res) => {
       return res.status(401).json({ message: "Invalid OTP/QR check-in proof." });
     }
 
-    ticket.checkInStatus = "verified";
-    ticket.checkInVerifiedAt = new Date();
-    ticket.verifiedByUserId = verifierUserId;
-    ticket.checkInOtpHash = "";
-    ticket.checkInOtpExpiresAt = null;
-    ticket.checkInOtpAttempts = 0;
-    ticket.checkInQrNonce = "";
-    await ticket.save();
+    const verifiedAt = new Date();
+    const updated = await QueueTicket.findOneAndUpdate(
+      {
+        _id: ticket._id,
+        status: { $in: ["waiting", "called"] },
+        checkInStatus: "arrived"
+      },
+      {
+        $set: {
+          checkInStatus: "verified",
+          checkInVerifiedAt: verifiedAt,
+          verifiedByUserId: verifierUserId,
+          checkInOtpHash: "",
+          checkInOtpExpiresAt: null,
+          checkInOtpAttempts: 0,
+          checkInQrNonce: ""
+        }
+      },
+      { new: true }
+    );
+
+    if (!updated) {
+      const fresh = await QueueTicket.findById(ticket._id).lean();
+      if (fresh && String(fresh.checkInStatus || "") === "verified") {
+        return res.json({
+          ok: true,
+          ticketId: fresh._id,
+          reservationId: fresh._id,
+          reservationCode: fresh.publicTicketCode || "",
+          checkInStatus: fresh.checkInStatus,
+          verifiedAt: fresh.checkInVerifiedAt || null,
+          message: "Ticket check-in already verified."
+        });
+      }
+      return res.status(409).json({ message: "Ticket state changed. Retry verification." });
+    }
 
     return res.json({
       ok: true,
-      ticketId: ticket._id,
-      reservationId: ticket._id,
-      reservationCode: ticket.publicTicketCode || "",
-      checkInStatus: ticket.checkInStatus,
-      verifiedAt: ticket.checkInVerifiedAt
+      ticketId: updated._id,
+      reservationId: updated._id,
+      reservationCode: updated.publicTicketCode || "",
+      checkInStatus: updated.checkInStatus,
+      verifiedAt: updated.checkInVerifiedAt
     });
   } catch (_error) {
     return res.status(500).json({ message: "Failed to verify station check-in." });

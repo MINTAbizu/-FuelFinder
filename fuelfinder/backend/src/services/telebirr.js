@@ -1,9 +1,11 @@
 const crypto = require("crypto");
+const fetch = require("node-fetch"); // make sure node-fetch is installed
 
 let cachedFabricToken = "";
 let cachedFabricTokenExpiresAt = 0;
 let lastWorkingBaseUrl = "";
 
+// ---------------------- Config ----------------------
 function getTelebirrConfig() {
   const fallbackBaseUrls = String(process.env.TELEBIRR_BASE_URL_FALLBACKS || "")
     .split(",")
@@ -16,9 +18,7 @@ function getTelebirrConfig() {
     fabricTokenPath: String(process.env.TELEBIRR_FABRIC_TOKEN_PATH || "/payment/v1/token").trim(),
     authTokenPath: String(process.env.TELEBIRR_AUTH_TOKEN_PATH || "/payment/v1/auth/authToken").trim(),
     preOrderPath: String(process.env.TELEBIRR_PRE_ORDER_PATH || "/payment/v1/merchant/preOrder").trim(),
-    fabricAppId: String(
-      process.env.TELEBIRR_FABRIC_APP_ID || process.env.TELEBIRR_X_APP_KEY || ""
-    ).trim(),
+    fabricAppId: String(process.env.TELEBIRR_FABRIC_APP_ID || process.env.TELEBIRR_X_APP_KEY || "").trim(),
     appSecret: String(process.env.TELEBIRR_APP_SECRET || "").trim(),
     merchantAppId: String(process.env.TELEBIRR_MERCHANT_APP_ID || "").trim(),
     merchantCode: String(process.env.TELEBIRR_MERCHANT_CODE || "").trim(),
@@ -34,19 +34,14 @@ function getTelebirrConfig() {
 }
 
 function ensureConfigured(config) {
-  if (
-    !config.baseUrl ||
-    !config.fabricAppId ||
-    !config.appSecret ||
-    !config.merchantAppId ||
-    !config.merchantCode ||
-    !config.privateKey ||
-    !config.callbackUrl
-  ) {
-    throw new Error("Telebirr is not configured. Set TELEBIRR_* environment variables.");
+  const required = ["baseUrl", "fabricAppId", "appSecret", "merchantAppId", "merchantCode", "privateKey", "callbackUrl"];
+  const missing = required.filter((k) => !config[k]);
+  if (missing.length) {
+    throw new Error(`Telebirr is not configured. Missing: ${missing.join(", ")}`);
   }
 }
 
+// ---------------------- Helpers ----------------------
 function createTimeStamp() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
@@ -65,7 +60,6 @@ function createNonceStr() {
 }
 
 function normalizePrivateKey(privateKey) {
-  // Supports both single-line \n escaped and full PEM values.
   return privateKey.includes("\\n") ? privateKey.replace(/\\n/g, "\n") : privateKey;
 }
 
@@ -124,13 +118,13 @@ function getBaseUrlCandidates(config) {
     if (!normalized || deduped.includes(normalized)) return;
     deduped.push(normalized);
   };
-
   add(lastWorkingBaseUrl);
   add(config.baseUrl);
-  (config.fallbackBaseUrls || []).forEach(add);
+  (config.fallbackUrls || []).forEach(add);
   return deduped;
 }
 
+// ---------------------- Network ----------------------
 function describeNetworkError(error) {
   const cause = error?.cause || {};
   const code = cause.code || error?.code || "UNKNOWN";
@@ -144,14 +138,7 @@ function describeNetworkError(error) {
 
 function shouldRetryNetworkError(error) {
   const text = describeNetworkError(error);
-  return (
-    text.includes("UND_ERR_CONNECT_TIMEOUT") ||
-    text.includes("ETIMEDOUT") ||
-    text.includes("ECONNRESET") ||
-    text.includes("ECONNREFUSED") ||
-    text.includes("ENOTFOUND") ||
-    text.includes("EAI_AGAIN")
-  );
+  return /UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/.test(text);
 }
 
 function sleep(ms) {
@@ -162,9 +149,12 @@ async function fetchWithRetry(url, options, retries, retryDelayMs) {
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
-      return await fetch(url, options);
+      console.log(`Fetching [attempt ${attempt + 1}] -> ${url}`);
+      const response = await fetch(url, options);
+      return response;
     } catch (error) {
       lastError = error;
+      console.error(`Network error at ${url}: ${describeNetworkError(error)}`);
       if (!shouldRetryNetworkError(error) || attempt >= retries) {
         throw error;
       }
@@ -174,6 +164,7 @@ async function fetchWithRetry(url, options, retries, retryDelayMs) {
   throw lastError;
 }
 
+// ---------------------- Fabric Token ----------------------
 async function applyFabricToken(forceRefresh = false) {
   const config = getTelebirrConfig();
   ensureConfigured(config);
@@ -181,6 +172,7 @@ async function applyFabricToken(forceRefresh = false) {
   const now = Date.now();
   const refreshSkewMs = 30 * 1000;
   if (!forceRefresh && cachedFabricToken && cachedFabricTokenExpiresAt - refreshSkewMs > now) {
+    console.log("Using cached fabric token");
     return cachedFabricToken;
   }
 
@@ -188,9 +180,8 @@ async function applyFabricToken(forceRefresh = false) {
   const baseUrls = getBaseUrlCandidates(config);
   for (const baseUrl of baseUrls) {
     const url = buildUrl(baseUrl, config.fabricTokenPath);
-    let response;
     try {
-      response = await fetchWithRetry(
+      const response = await fetchWithRetry(
         url,
         {
           method: "POST",
@@ -198,49 +189,51 @@ async function applyFabricToken(forceRefresh = false) {
             "Content-Type": "application/json",
             "X-APP-Key": config.fabricAppId
           },
-          body: JSON.stringify({
-            appSecret: config.appSecret
-          })
+          body: JSON.stringify({ appSecret: config.appSecret })
         },
         config.maxRetries,
         config.retryDelayMs
       );
+
+      if (!response.ok) {
+        const text = await response.text();
+        errors.push(`HTTP error at ${url}: ${response.status} ${text}`);
+        console.error(`HTTP error at ${url}: ${response.status} ${text}`);
+        continue;
+      }
+
+      const data = await response.json();
+      const token = String(data.token || "").trim();
+      if (!token) {
+        errors.push(`Invalid token response at ${url}: missing token`);
+        console.error(`Invalid token response at ${url}: missing token`);
+        continue;
+      }
+
+      cachedFabricToken = token;
+      cachedFabricTokenExpiresAt = parseFabricDate(data.expirationDate) || now + 5 * 60 * 1000;
+      lastWorkingBaseUrl = baseUrl;
+      console.log(`Successfully fetched fabric token from ${url}`);
+      return cachedFabricToken;
     } catch (error) {
-      errors.push(`network at ${url}: ${describeNetworkError(error)}`);
+      errors.push(`Network error at ${url}: ${describeNetworkError(error)}`);
+      console.error(`Network error at ${url}: ${describeNetworkError(error)}`);
       continue;
     }
-
-    if (!response.ok) {
-      const errText = await response.text();
-      errors.push(`http at ${url}: ${response.status} ${errText}`);
-      continue;
-    }
-
-    const data = await response.json();
-    const token = String(data.token || "").trim();
-    if (!token) {
-      errors.push(`invalid token response at ${url}: missing token`);
-      continue;
-    }
-
-    cachedFabricToken = token;
-    const expiresAt = parseFabricDate(data.expirationDate);
-    cachedFabricTokenExpiresAt = expiresAt || now + 5 * 60 * 1000;
-    lastWorkingBaseUrl = baseUrl;
-    return cachedFabricToken;
   }
 
-  throw new Error(`Telebirr fabric token failed across all base URLs. ${errors.join(" | ")}`);
+  throw new Error(`Telebirr fabric token failed across all base URLs. Details: ${errors.join(" | ")}`);
 }
 
+// ---------------------- Post with Fabric Token ----------------------
 async function postWithFabricToken(config, fabricToken, path, body) {
   const errors = [];
   const baseUrls = getBaseUrlCandidates(config);
+
   for (const baseUrl of baseUrls) {
     const url = buildUrl(baseUrl, path);
-    let response;
     try {
-      response = await fetchWithRetry(
+      const response = await fetchWithRetry(
         url,
         {
           method: "POST",
@@ -254,115 +247,32 @@ async function postWithFabricToken(config, fabricToken, path, body) {
         config.maxRetries,
         config.retryDelayMs
       );
+
+      if (!response.ok) {
+        const text = await response.text();
+        errors.push(`HTTP error at ${url}: ${response.status} ${text}`);
+        console.error(`HTTP error at ${url}: ${response.status} ${text}`);
+        continue;
+      }
+
+      lastWorkingBaseUrl = baseUrl;
+      console.log(`Request successful to ${url}`);
+      return response.json();
     } catch (error) {
-      errors.push(`network at ${url}: ${describeNetworkError(error)}`);
+      errors.push(`Network error at ${url}: ${describeNetworkError(error)}`);
+      console.error(`Network error at ${url}: ${describeNetworkError(error)}`);
       continue;
     }
-
-    if (!response.ok) {
-      const errText = await response.text();
-      errors.push(`http at ${url}: ${response.status} ${errText}`);
-      continue;
-    }
-
-    lastWorkingBaseUrl = baseUrl;
-    return response.json();
   }
 
-  throw new Error(`Telebirr request failed across all base URLs. ${errors.join(" | ")}`);
+  throw new Error(`Telebirr request failed across all base URLs. Details: ${errors.join(" | ")}`);
 }
 
-async function requestAuthToken(accessToken) {
-  const config = getTelebirrConfig();
-  ensureConfigured(config);
-  const fabricToken = await applyFabricToken();
-
-  const req = buildSignedRequest(config, "payment.authtoken", {
-    access_token: String(accessToken || "").trim(),
-    trade_type: "InApp",
-    appid: config.merchantAppId,
-    resource_type: "OpenId"
-  });
-
-  return postWithFabricToken(config, fabricToken, config.authTokenPath, req);
-}
-
-function createMerchantOrderId() {
-  return `${Date.now()}${Math.floor(Math.random() * 1000)}`;
-}
-
-function createRawRequest(config, prepayId) {
-  const map = {
-    appid: config.merchantAppId,
-    merch_code: config.merchantCode,
-    nonce_str: createNonceStr(),
-    prepay_id: prepayId,
-    timestamp: createTimeStamp()
-  };
-  const sign = signRequestObject(config, map);
-  return [
-    `appid=${map.appid}`,
-    `merch_code=${map.merch_code}`,
-    `nonce_str=${map.nonce_str}`,
-    `prepay_id=${map.prepay_id}`,
-    `timestamp=${map.timestamp}`,
-    `sign=${sign}`,
-    "sign_type=SHA256WithRSA"
-  ].join("&");
-}
-
-async function createTelebirrCheckout(payload) {
-  const config = getTelebirrConfig();
-  ensureConfigured(config);
-  const fabricToken = await applyFabricToken();
-
-  const merchantOrderId = payload.merchantOrderId || createMerchantOrderId();
-  const req = buildSignedRequest(config, "payment.preorder", {
-    notify_url: config.callbackUrl,
-    trade_type: "InApp",
-    appid: config.merchantAppId,
-    merch_code: config.merchantCode,
-    merch_order_id: merchantOrderId,
-    title: payload.title || config.subject,
-    total_amount: String(payload.amount),
-    trans_currency: payload.currency || "ETB",
-    timeout_express: payload.timeoutExpress || "120m",
-    business_type: payload.businessType || "BuyGoods",
-    payee_identifier: config.merchantCode,
-    payee_identifier_type: "04",
-    payee_type: "5000"
-  });
-
-  const data = await postWithFabricToken(config, fabricToken, config.preOrderPath, req);
-  const prepayId = String(data?.biz_content?.prepay_id || "").trim();
-
-  return {
-    merchantOrderId,
-    prepayId,
-    rawRequest: prepayId ? createRawRequest(config, prepayId) : "",
-    gatewayResponse: data
-  };
-}
-
-function verifyTelebirrWebhookSignature(rawBody, signatureHeader) {
-  const config = getTelebirrConfig();
-  if (!config.webhookSecret) return true;
-
-  const signature = String(signatureHeader || "").trim();
-  if (!signature) return false;
-
-  const expected = crypto
-    .createHmac("sha256", config.webhookSecret)
-    .update(rawBody || "", "utf8")
-    .digest("hex");
-
-  if (expected.length !== signature.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
-}
-
+// ---------------------- Exports ----------------------
 module.exports = {
   applyFabricToken,
-  requestAuthToken,
-  createTelebirrCheckout,
-  verifyTelebirrWebhookSignature
+  postWithFabricToken,
+  buildSignedRequest,
+  signRequestObject,
+  getTelebirrConfig
 };
