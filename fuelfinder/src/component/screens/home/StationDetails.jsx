@@ -48,6 +48,21 @@ function formatSupportedFuels(supportedFuels) {
   return values.join(", ");
 }
 
+function normalizeTicketPayload(ticket) {
+  if (!ticket) return null;
+  const position = Number(ticket.position || 0);
+  return {
+    ticketId: String(ticket.ticketId || ticket.reservationId || ""),
+    reservationCode: String(ticket.reservationCode || ""),
+    status: String(ticket.status || ""),
+    position,
+    etaMinutes: Number(ticket.etaMinutes ?? Math.max(0, position * 3)),
+    fuelType: String(ticket.fuelType || ""),
+    requestedLiters: Number(ticket.requestedLiters || 0),
+    estimatedAmount: Number(ticket.estimatedAmount || 0),
+  };
+}
+
 export default function StationDetails({ route }) {
   const { t: tr } = useLanguage();
   const t = useMemo(
@@ -234,12 +249,40 @@ export default function StationDetails({ route }) {
     };
   }, [queueEnabled, stationId]);
 
+  useEffect(() => {
+    let active = true;
+    if (!queueEnabled) return undefined;
+
+    const fetchMyLiveTicket = async () => {
+      try {
+        const ticket = await getMyQueueTicket(stationId);
+        if (!active) return;
+        setMyTicket(normalizeTicketPayload(ticket));
+        if (ticket?.reservationCode) {
+          setReservationCode(String(ticket.reservationCode || ""));
+        }
+      } catch (error) {
+        if (!active) return;
+        if (Number(error?.response?.status || 0) === 404) {
+          setMyTicket(null);
+        }
+      }
+    };
+
+    fetchMyLiveTicket();
+    const id = setInterval(fetchMyLiveTicket, 8000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [queueEnabled, stationId]);
+
   const refreshMyTicket = useCallback(async () => {
     if (!queueEnabled) return;
     setLoading(true);
     try {
       const ticket = await getMyQueueTicket(stationId);
-      setMyTicket(ticket);
+      setMyTicket(normalizeTicketPayload(ticket));
       setReservationCode(String(ticket?.reservationCode || ""));
       setMessage(t.activeTicketLoaded);
     } catch (error) {
@@ -484,6 +527,21 @@ export default function StationDetails({ route }) {
               <Text style={styles.queueMiniLabel}>{t.estWait}</Text>
               <Text style={styles.queueMiniValue}>{detail.waitTime} min</Text>
             </View>
+          </View>
+          <View style={styles.myQueueBox}>
+            <Text style={styles.myQueueTitle}>My Queue (Realtime)</Text>
+            <Text style={styles.myQueueText}>
+              Status: {String(myTicket?.status || "no active ticket")}
+            </Text>
+            <Text style={styles.myQueueText}>
+              My Position: {Number(myTicket?.position || 0)}
+            </Text>
+            <Text style={styles.myQueueText}>
+              People Ahead: {Math.max(0, Number(myTicket?.position || 0) - 1)}
+            </Text>
+            <Text style={styles.myQueueText}>
+              Ticket: {String(myTicket?.reservationCode || "-")}
+            </Text>
           </View>
         </View>
       </View>
@@ -771,6 +829,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "900",
     color: "#1E40AF",
+  },
+  myQueueBox: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    backgroundColor: "#ECFDF5",
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  myQueueTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#065F46",
+    marginBottom: 4,
+  },
+  myQueueText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#065F46",
+    marginBottom: 2,
   },
   ratingHeadline: { fontSize: 13, fontWeight: "800", color: "#1D4ED8", marginBottom: 6 },
   listItem: {

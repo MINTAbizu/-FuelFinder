@@ -8,8 +8,10 @@ import {
   Text,
   TextInput,
   View,
+  ScrollView
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../context/AuthContext";
 import { useLanguage } from "../../context/LanguageContext";
 import { API_BASE_URL } from "../../services/api";
@@ -48,74 +50,254 @@ export default function LoginScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
-        style={styles.container}
+        style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <Text style={styles.title}>{t("auth.login.title")}</Text>
-        <Text style={styles.subtitle}>{t("auth.login.subtitle")}</Text>
 
-        <TextInput
-          placeholder={t("auth.login.email")}
-          value={email}
-          onChangeText={setEmail}
-          style={styles.input}
-          autoCapitalize="none"
-          keyboardType="email-address"
-        />
-        <TextInput
-          placeholder={t("auth.login.password")}
-          value={password}
-          onChangeText={setPassword}
-          style={styles.input}
-          secureTextEntry
-        />
+        <ScrollView showsVerticalScrollIndicator={false}>
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+          {/* HEADER */}
+          <View style={styles.header}>
+            <Pressable style={styles.backBtn}>
+              <Ionicons name="arrow-back" size={20} color="#000"/>
+            </Pressable>
 
-        <Pressable style={styles.primaryBtn} onPress={onLogin} disabled={loading}>
-          {loading ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Text style={styles.primaryBtnText}>{t("auth.login.button")}</Text>
-          )}
-        </Pressable>
+            <Pressable style={styles.profileBtn}>
+              <Ionicons name="person-outline" size={22} color="#000"/>
+            </Pressable>
 
-        <View style={styles.row}>
-          <Text style={styles.helper}>{t("auth.login.newHere")}</Text>
-          <Pressable onPress={() => navigation.navigate("Register")}>
-            <Text style={styles.link}> {t("auth.login.createAccount")}</Text>
-          </Pressable>
-        </View>
+            <Text style={styles.hello}>Hello</Text>
+            <Text style={styles.welcome}>Welcome Back!</Text>
+          </View>
+
+          {/* LOGIN CARD */}
+          <View style={styles.card}>
+
+            <Text style={styles.cardTitle}>Login Account</Text>
+            <Text style={styles.cardSubtitle}>
+              Sign in to continue and access your personalized experience.
+            </Text>
+
+            <Text style={styles.label}>Email Address</Text>
+            <TextInput
+              placeholder="Your Email Address"
+              value={email}
+              onChangeText={setEmail}
+              style={styles.input}
+              autoCapitalize="none"
+              keyboardType="email-address"
+            />
+
+            <Text style={styles.label}>Password</Text>
+            <TextInput
+              placeholder="********"
+              value={password}
+              onChangeText={setPassword}
+              style={styles.input}
+              secureTextEntry
+            />
+
+            {/* OPTIONS */}
+            <View style={styles.optionRow}>
+              <View style={styles.saveRow}>
+                <View style={styles.checkbox}/>
+                <Text style={styles.saveText}>Save Password</Text>
+              </View>
+
+              <Pressable>
+                <Text style={styles.forgot}>Forgot Password?</Text>
+              </Pressable>
+            </View>
+
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+
+            {/* LOGIN BUTTON */}
+            <Pressable style={styles.loginBtn} onPress={onLogin} disabled={loading}>
+              {loading ? (
+                <ActivityIndicator color="#000"/>
+              ) : (
+                <Text style={styles.loginText}>Login Account</Text>
+              )}
+            </Pressable>
+
+            {/* DIVIDER */}
+            <View style={styles.dividerRow}>
+              <View style={styles.line}/>
+              <Text style={styles.or}>or</Text>
+              <View style={styles.line}/>
+            </View>
+
+            {/* CREATE ACCOUNT */}
+            <Pressable
+              style={styles.createBtn}
+              onPress={() => navigation.navigate("Register")}
+            >
+              <Text style={styles.createText}>Create New Account</Text>
+            </Pressable>
+
+          </View>
+
+        </ScrollView>
+
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#F4F7FB" },
-  container: { flex: 1, padding: 18, justifyContent: "center" },
-  title: { fontSize: 28, fontWeight: "900", color: "#0F172A", marginBottom: 4 },
-  subtitle: { color: "#64748B", marginBottom: 20, fontWeight: "600" },
-  input: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    marginBottom: 10,
-  },
-  error: { color: "#B91C1C", marginBottom: 10, fontWeight: "600" },
-  primaryBtn: {
-    marginTop: 2,
-    height: 46,
-    borderRadius: 12,
-    backgroundColor: "#0F766E",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  primaryBtnText: { color: "#fff", fontWeight: "800", fontSize: 14 },
-  row: { flexDirection: "row", justifyContent: "center", marginTop: 12 },
-  helper: { color: "#475569", fontWeight: "600" },
-  link: { color: "#1D4ED8", fontWeight: "800" },
+
+safeArea:{
+flex:1,
+backgroundColor:"#FFC107"
+},
+
+header:{
+padding:20,
+paddingBottom:30
+},
+
+backBtn:{
+width:40,
+height:40,
+backgroundColor:"#fff",
+borderRadius:10,
+alignItems:"center",
+justifyContent:"center",
+marginBottom:10
+},
+
+profileBtn:{
+position:"absolute",
+right:20,
+top:20,
+width:40,
+height:40,
+backgroundColor:"#fff",
+borderRadius:20,
+alignItems:"center",
+justifyContent:"center"
+},
+
+hello:{
+fontSize:34,
+fontWeight:"900",
+marginTop:10
+},
+
+welcome:{
+fontSize:16,
+color:"#333"
+},
+
+card:{
+backgroundColor:"#fff",
+borderTopLeftRadius:35,
+borderTopRightRadius:35,
+padding:25,
+minHeight:600
+},
+
+cardTitle:{
+fontSize:20,
+fontWeight:"800",
+marginBottom:5
+},
+
+cardSubtitle:{
+color:"#777",
+fontSize:13,
+marginBottom:20
+},
+
+label:{
+fontSize:13,
+color:"#777"
+},
+
+input:{
+borderBottomWidth:1,
+borderBottomColor:"#ddd",
+paddingVertical:10,
+marginBottom:15
+},
+
+optionRow:{
+flexDirection:"row",
+justifyContent:"space-between",
+alignItems:"center",
+marginBottom:20
+},
+
+saveRow:{
+flexDirection:"row",
+alignItems:"center"
+},
+
+checkbox:{
+width:16,
+height:16,
+borderWidth:1,
+borderColor:"#FFC107",
+marginRight:6
+},
+
+saveText:{
+fontSize:13,
+color:"#777"
+},
+
+forgot:{
+fontSize:13,
+color:"#FFC107",
+fontWeight:"600"
+},
+
+loginBtn:{
+backgroundColor:"#FFC107",
+padding:14,
+borderRadius:30,
+alignItems:"center",
+marginBottom:20
+},
+
+loginText:{
+fontWeight:"700",
+fontSize:15
+},
+
+dividerRow:{
+flexDirection:"row",
+alignItems:"center",
+marginBottom:20
+},
+
+line:{
+flex:1,
+height:1,
+backgroundColor:"#ddd"
+},
+
+or:{
+marginHorizontal:10,
+color:"#777"
+},
+
+createBtn:{
+borderWidth:1,
+borderColor:"#FFC107",
+borderRadius:25,
+padding:14,
+alignItems:"center"
+},
+
+createText:{
+color:"#FFC107",
+fontWeight:"700"
+},
+
+error:{
+color:"red",
+marginBottom:10
+}
+
 });
