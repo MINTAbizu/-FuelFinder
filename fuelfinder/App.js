@@ -31,6 +31,21 @@ const RootStack = createNativeStackNavigator();
 const HomeStack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
+import * as Sentry from "@sentry/react-native";
+// Unlike Sentry on other platforms, you do not need to import anything to use tracing on React Native
+Sentry.init({
+  dsn: process.env.DSN,
+  // We recommend adjusting this value in production, or using tracesSampler
+  // for finer control
+  tracesSampleRate: 1.0,
+});
+
+
+
+
+
+
+
 function LoadingScreen() {
   const { t } = useLanguage();
   return (

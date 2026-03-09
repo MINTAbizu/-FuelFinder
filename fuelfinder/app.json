@@ -1,10 +1,11 @@
-﻿{
+{
   "expo": {
     "name": "fuelfinder",
     "slug": "fuelfinder",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
+    "scheme": "fuelfinder",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -12,19 +13,21 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mintesenotbizuayehw.fuelfinder"
     },
     "android": {
+      "package": "com.mintesenotbizuayehw.fuelfinder",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "package": "com.mintesenotbizuayehw.fuelfinder",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
       ]
     },
     "web": {
@@ -38,11 +41,25 @@
         {
           "locationWhenInUsePermission": "Allow FuelFinder to access your location to find nearby fuel stations."
         }
-      ]
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "fuelfinder",
+          "project": "fuelfinder"
+        }
+      ],
+      "@sentry/react-native"
     ],
     "extra": {
       "eas": {
         "projectId": "1d441dd4-571d-4889-8cea-be49ef6dbe27"
+      },
+      "sentry": {
+        "dsn": "https://e80bcf5574ef345c2c5f51cd7e53bcb6@o4510905935003648.ingest.us.sentry.io/4511011593846784",
+        "environment": "production",
+        "org": "fuelfinder",
+        "project": "fuelfinder"
       }
     }
   }

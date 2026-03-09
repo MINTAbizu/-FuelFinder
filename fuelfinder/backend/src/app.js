@@ -7,6 +7,7 @@ const authRoutes = require("./routes/authRoutes");
 const queueRoutes = require("./routes/queueRoutes");
 const mapRoutes = require("./routes/mapRoutes");
 const adminRoutes = require("./routes/adminRoutes");
+const queueRoutesgpt = require("./routes/queueRoutess");
 
 const app = express();
 const isProduction = process.env.NODE_ENV === "production";
@@ -51,6 +52,8 @@ app.use("/auth", authRoutes);
 app.use("/queue", queueRoutes);
 app.use("/map", mapRoutes);
 app.use("/admin", adminRoutes);
+app.use("/api/queues", queueRoutesgpt);
+
 
 app.use((_req, res) => {
   res.status(404).json({ message: "Route not found." });
