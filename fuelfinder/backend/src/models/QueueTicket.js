@@ -41,7 +41,7 @@ const queueTicketSchema = new mongoose.Schema(
     paymentReference: { type: String, default: "" },
     paymentProvider: {
       type: String,
-      enum: ["", "telebirr"],
+      enum: ["", "telebirr", "chapa"],
       default: ""
     },
     paymentSessionId: { type: String, default: "" },

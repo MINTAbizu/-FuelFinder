@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const chapaService = require("../services/chapa.service");
 const QueueTicket = require("../models/QueueTicket");
+const PaymentTransaction = require("../models/PaymentTransaction");
 const Station = require("../models/Station");
 const { getIO } = require("../socket");
 
@@ -22,6 +23,11 @@ function buildCallbackUrl() {
   const baseUrl = String(process.env.BASE_URL || "").trim().replace(/\/+$/, "");
   if (!baseUrl) return "";
   return `${baseUrl}/api/payments/callback`;
+}
+
+function buildTxRef(reservationId) {
+  const suffix = String(reservationId || "").slice(-6).toUpperCase();
+  return `FF-${suffix}-${Date.now()}`;
 }
 
 function emitQueueUpdated(stationId) {
@@ -104,7 +110,7 @@ exports.initialize = async (req, res) => {
 
     requireEnv("CHAPA_SECRET_KEY");
 
-    const amount = Number(req.body.amount);
+    const reservationId = String(req.body.reservationId || req.body.ticketId || "").trim();
     const email = String(req.body.email || "").trim();
     const firstName = String(req.body.first_name || "").trim();
     const lastName = String(req.body.last_name || "").trim();
@@ -112,8 +118,8 @@ exports.initialize = async (req, res) => {
     const returnUrl = String(req.body.return_url || process.env.CHAPA_RETURN_URL || "").trim();
     const callbackUrl = buildCallbackUrl();
 
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ message: "amount must be a positive number." });
+    if (!isObjectId(reservationId)) {
+      return res.status(400).json({ message: "reservationId is required." });
     }
     if (!email) {
       return res.status(400).json({ message: "email is required." });
@@ -125,7 +131,41 @@ exports.initialize = async (req, res) => {
       return res.status(500).json({ message: "BASE_URL is not configured." });
     }
 
-    const tx_ref = String(req.body.tx_ref || "").trim() || `tx-${Date.now()}`;
+    const ticket = await QueueTicket.findById(reservationId);
+    if (!ticket) {
+      return res.status(404).json({ message: "Reservation not found." });
+    }
+    if (req.user && String(ticket.userId) !== String(req.user.id)) {
+      return res.status(403).json({ message: "Forbidden: reservation does not belong to this user." });
+    }
+    if (ticket.status !== "pending_payment") {
+      return res.status(409).json({
+        message: `Reservation is already ${ticket.status}.`,
+        status: ticket.status
+      });
+    }
+    if (ticket.paymentExpiresAt && ticket.paymentExpiresAt <= new Date()) {
+      ticket.status = "expired";
+      await ticket.save();
+      return res.status(410).json({ message: "Reservation payment window expired." });
+    }
+
+    const amount = Number(ticket.depositAmount > 0 ? ticket.depositAmount : ticket.estimatedAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ message: "Invalid amount for reservation." });
+    }
+
+    const existing = await PaymentTransaction.findOne({
+      provider: "chapa",
+      reservationId: ticket._id,
+      status: { $in: ["initialized", "pending"] }
+    }).sort({ createdAt: -1 });
+
+    if (existing && existing.rawInitResponse) {
+      return res.json(existing.rawInitResponse);
+    }
+
+    const tx_ref = String(req.body.tx_ref || "").trim() || buildTxRef(reservationId);
     const metadata = req.body.metadata || req.body.meta || {};
 
     const paymentData = {
@@ -137,10 +177,51 @@ exports.initialize = async (req, res) => {
       tx_ref,
       callback_url: callbackUrl,
       return_url: returnUrl || undefined,
-      meta: metadata && typeof metadata === "object" ? metadata : undefined
+      meta: {
+        ...(metadata && typeof metadata === "object" ? metadata : {}),
+        reservationId: String(ticket._id),
+        userId: String(ticket.userId),
+        stationId: String(ticket.stationId)
+      }
     };
 
-    const response = await chapaService.initializePayment(paymentData);
+    let payment = await PaymentTransaction.findOne({ provider: "chapa", txRef: tx_ref });
+    if (!payment) {
+      payment = await PaymentTransaction.create({
+        provider: "chapa",
+        txRef: tx_ref,
+        reservationId: ticket._id,
+        userId: ticket.userId,
+        stationId: ticket.stationId,
+        amount,
+        currency,
+        status: "initialized",
+        meta: paymentData.meta
+      });
+    }
+
+    let response;
+    try {
+      response = await chapaService.initializePayment(paymentData);
+    } catch (error) {
+      payment.status = "failed";
+      payment.rawInitResponse = error.response?.data || { message: error.message };
+      await payment.save();
+      throw error;
+    }
+
+    const responseStatus = String(response?.status || "").toLowerCase();
+    const responseData = response?.data || {};
+    payment.status = responseStatus || "initialized";
+    payment.rawInitResponse = response;
+    payment.checkoutUrl = String(responseData.checkout_url || responseData.checkoutUrl || "");
+    payment.reference = String(responseData.reference || responseData.tx_ref || "");
+    await payment.save();
+
+    ticket.paymentProvider = "chapa";
+    ticket.paymentReference = tx_ref;
+    ticket.paymentSessionId = payment.reference || "";
+    await ticket.save();
 
     res.json(response);
 
@@ -160,9 +241,23 @@ exports.verify = async (req, res) => {
 
   try {
 
+    requireEnv("CHAPA_SECRET_KEY");
+
     const tx_ref = req.params.tx_ref;
 
     const response = await chapaService.verifyPayment(tx_ref);
+
+    await PaymentTransaction.findOneAndUpdate(
+      { provider: "chapa", txRef: tx_ref },
+      {
+        $set: {
+          rawVerifyResponse: response,
+          status: String(response?.status || response?.data?.status || "").toLowerCase(),
+          verifiedAt: new Date()
+        }
+      },
+      { new: true }
+    );
 
     res.json(response);
 
@@ -178,6 +273,8 @@ exports.verify = async (req, res) => {
 
 exports.callback = async (req, res) => {
   try {
+    requireEnv("CHAPA_SECRET_KEY");
+
     const tx_ref =
       String(req.body?.tx_ref || req.query?.tx_ref || req.body?.reference || req.query?.reference || "").trim();
 
@@ -189,6 +286,17 @@ exports.callback = async (req, res) => {
 
     const status = String(response?.status || response?.data?.status || "").toLowerCase();
     if (status !== "success") {
+      await PaymentTransaction.findOneAndUpdate(
+        { provider: "chapa", txRef: tx_ref },
+        {
+          $set: {
+            rawVerifyResponse: response,
+            status: status || "pending",
+            verifiedAt: new Date()
+          }
+        },
+        { upsert: true }
+      );
       return res.json({ ok: true, status, message: "Payment not completed." });
     }
 
@@ -206,6 +314,24 @@ exports.callback = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({ message: "Reservation not found." });
     }
+
+    await PaymentTransaction.findOneAndUpdate(
+      { provider: "chapa", txRef: tx_ref },
+      {
+        $set: {
+          reservationId: ticket._id,
+          userId: ticket.userId,
+          stationId: ticket.stationId,
+          amount: Number(data.amount || data.amount_payable || 0) || ticket.depositAmount || ticket.estimatedAmount,
+          currency: String(data.currency || "ETB").toUpperCase(),
+          status: "success",
+          reference: String(data.reference || data.tx_ref || tx_ref || ""),
+          rawVerifyResponse: response,
+          verifiedAt: new Date()
+        }
+      },
+      { upsert: true }
+    );
 
     if (["waiting", "called", "served"].includes(String(ticket.status || ""))) {
       return res.json({
@@ -242,7 +368,8 @@ exports.callback = async (req, res) => {
     ticket.status = "waiting";
     ticket.position = queueCount + 1;
     ticket.paymentProvider = "chapa";
-    ticket.paymentReference = String(data.reference || data.tx_ref || tx_ref || "").trim();
+    ticket.paymentReference = String(data.tx_ref || tx_ref || "").trim();
+    ticket.paymentSessionId = String(data.reference || data.reference_id || "").trim();
     ticket.depositStatus = ticket.depositAmount > 0 ? "authorized" : "not_required";
     ticket.depositPaidAt = new Date();
     ticket.joinedAt = new Date();

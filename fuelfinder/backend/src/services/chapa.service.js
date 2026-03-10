@@ -1,31 +1,31 @@
 const axios = require("axios");
 
-exports.initializePayment = async (paymentData) => {
+const chapaClient = axios.create({
+  baseURL: "https://api.chapa.co/v1",
+  timeout: 15000
+});
 
-  const response = await axios.post(
-    "https://api.chapa.co/v1/transaction/initialize",
+function getChapaHeaders() {
+  return {
+    Authorization: `Bearer ${process.env.CHAPA_SECRET_KEY}`,
+    "Content-Type": "application/json"
+  };
+}
+
+exports.initializePayment = async (paymentData) => {
+  const response = await chapaClient.post(
+    "/transaction/initialize",
     paymentData,
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.CHAPA_SECRET_KEY}`,
-        "Content-Type": "application/json"
-      }
-    }
+    { headers: getChapaHeaders() }
   );
 
   return response.data;
 };
 
-
 exports.verifyPayment = async (tx_ref) => {
-
-  const response = await axios.get(
-    `https://api.chapa.co/v1/transaction/verify/${tx_ref}`,
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.CHAPA_SECRET_KEY}`
-      }
-    }
+  const response = await chapaClient.get(
+    `/transaction/verify/${tx_ref}`,
+    { headers: getChapaHeaders() }
   );
 
   return response.data;
