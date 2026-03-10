@@ -43,6 +43,10 @@ function getSplitMode() {
   return mode === "subaccount_share" ? "subaccount_share" : "platform_fee";
 }
 
+function getDefaultSubaccountId() {
+  return String(process.env.CHAPA_DEFAULT_SUBACCOUNT_ID || "").trim();
+}
+
 function verifyChapaWebhookSignature(req) {
   const secret = String(process.env.CHAPA_WEBHOOK_SECRET || "").trim();
   if (!secret) {
@@ -187,7 +191,7 @@ exports.initialize = async (req, res) => {
     if (!station) {
       return res.status(404).json({ message: "Station not found for this reservation." });
     }
-    const subaccountId = String(station.chapaSubaccountId || "").trim();
+    const subaccountId = String(station.chapaSubaccountId || "").trim() || getDefaultSubaccountId();
     if (!subaccountId) {
       return res.status(400).json({ message: "Station Chapa subaccount is not configured." });
     }
