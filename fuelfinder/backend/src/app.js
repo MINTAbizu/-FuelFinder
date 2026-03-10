@@ -44,6 +44,10 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "fuelfinder-backend" });
 });
 
+app.get("/payment-success", (_req, res) => {
+  res.status(200).send("Payment completed. You may return to the app.");
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/api/queue", queueRoutes);
 app.use("/api/map", mapRoutes);
