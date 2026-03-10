@@ -301,10 +301,16 @@ exports.initialize = async (req, res) => {
     res.json(response);
 
   } catch (error) {
-
+    const errorData = error?.response?.data || null;
+    const detail = typeof errorData === "object" ? JSON.stringify(errorData) : String(errorData || error?.message || "");
+    console.error("[Chapa:init]", {
+      message: error?.message,
+      detail
+    });
     res.status(500).json({
       message: "Payment initialization failed",
-      error: error.response?.data || error.message
+      error: errorData || error.message,
+      detail
     });
 
   }

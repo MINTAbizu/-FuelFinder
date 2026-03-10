@@ -409,7 +409,8 @@ export default function StationDetails({ route }) {
     } catch (error) {
       logReservationError("reserveAndInitiateChapa", error);
       setPaymentPhase("failed");
-      setMessage(error?.response?.data?.message || error?.message || t.failedStartPayment);
+      const detail = error?.response?.data?.detail;
+      setMessage(detail || error?.response?.data?.message || error?.message || t.failedStartPayment);
     } finally {
       setLoading(false);
     }
