@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Location from "expo-location";
+import * as WebBrowser from "expo-web-browser";
 import QRCode from "react-native-qrcode-svg";
 import { useLanguage } from "../../context/LanguageContext";
 import { useAuth } from "../../context/AuthContext";
@@ -11,7 +12,8 @@ import {
   leaveQueue,
   reserveQueueSlot,
   startStationCheckIn,
-  startChapaCheckout
+  startChapaCheckout,
+  verifyChapaPayment
 } from "../../services/queueService";
 
 const getWaitEstimate = (queueLength) => Math.max(2, Number(queueLength || 0) * 3);
@@ -143,6 +145,7 @@ export default function StationDetails({ route }) {
   const [requestedLiters, setRequestedLiters] = useState("10");
   const [reservationId, setReservationId] = useState("");
   const [reservationCode, setReservationCode] = useState("");
+  const [txRef, setTxRef] = useState("");
   const [myTicket, setMyTicket] = useState(null);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -340,7 +343,7 @@ export default function StationDetails({ route }) {
           setPaymentPhase("pending");
           setMessage(t.waitingPaymentConfirm);
         }
-      }, 4000);
+      }, 2000);
     },
     []
   );
@@ -393,16 +396,24 @@ export default function StationDetails({ route }) {
       });
 
       const checkoutUrl = chapaInit?.data?.checkout_url || chapaInit?.data?.checkoutUrl;
+      const nextTxRef =
+        chapaInit?.data?.tx_ref ||
+        chapaInit?.data?.reference ||
+        chapaInit?.meta?.tx_ref ||
+        "";
+      if (nextTxRef) setTxRef(String(nextTxRef));
       if (!checkoutUrl) {
         throw new Error("Chapa checkout URL not available.");
       }
 
-      const canOpen = await Linking.canOpenURL(checkoutUrl);
-      if (!canOpen) {
-        throw new Error("Cannot open Chapa checkout URL.");
+      await WebBrowser.openBrowserAsync(checkoutUrl);
+      if (nextTxRef) {
+        try {
+          await verifyChapaPayment(nextTxRef);
+        } catch (verifyError) {
+          logReservationError("verifyChapaPayment", verifyError);
+        }
       }
-
-      await Linking.openURL(checkoutUrl);
       setPaymentPhase("pending");
       setMessage(t.paymentInitiated);
       await pollReservation(nextReservationId, true);
@@ -423,11 +434,18 @@ export default function StationDetails({ route }) {
     }
     setLoading(true);
     try {
+      if (txRef) {
+        try {
+          await verifyChapaPayment(txRef);
+        } catch (verifyError) {
+          logReservationError("verifyChapaPayment", verifyError);
+        }
+      }
       await pollReservation(reservationId, true);
     } finally {
       setLoading(false);
     }
-  }, [pollReservation, reservationId]);
+  }, [pollReservation, reservationId, txRef]);
 
   const leaveMyQueue = useCallback(async () => {
     const ticketId = myTicket?.ticketId;
@@ -441,6 +459,7 @@ export default function StationDetails({ route }) {
       setMyTicket(null);
       setReservationId("");
       setReservationCode("");
+      setTxRef("");
       setPaymentPhase("idle");
       setMessage(t.leftQueue);
       if (pollRef.current) clearInterval(pollRef.current);

@@ -111,6 +111,111 @@ function deriveFuelStatusFromInventory(inventory) {
   return "full";
 }
 
+async function finalizeSuccessfulPayment({ tx_ref, response }) {
+  const data = response?.data || {};
+  const meta = data.meta || data.metadata || {};
+  const reservationId = String(
+    meta.reservationId || meta.ticketId || meta.reservation_id || ""
+  ).trim();
+
+  if (!isObjectId(reservationId)) {
+    return { ok: false, status: 400, message: "reservationId is missing from payment metadata." };
+  }
+
+  const ticket = await QueueTicket.findById(reservationId);
+  if (!ticket) {
+    return { ok: false, status: 404, message: "Reservation not found." };
+  }
+
+  const existingPayment = await PaymentTransaction.findOne({ provider: "chapa", txRef: tx_ref }).lean();
+  const platformFee = Number(
+    existingPayment?.platformFee ?? getPlatformFeeBirr()
+  );
+  const amountPaid = Number(
+    data.amount || data.amount_payable || ticket.depositAmount || ticket.estimatedAmount || 0
+  );
+  const stationPayout = Number((Math.max(0, amountPaid - platformFee)).toFixed(2));
+  const splitValue = Number(existingPayment?.splitValue ?? platformFee);
+
+  await PaymentTransaction.findOneAndUpdate(
+    { provider: "chapa", txRef: tx_ref },
+    {
+      $set: {
+        reservationId: ticket._id,
+        userId: ticket.userId,
+        stationId: ticket.stationId,
+        amount: amountPaid,
+        currency: String(data.currency || "ETB").toUpperCase(),
+        platformFee,
+        stationPayout,
+        splitType: existingPayment?.splitType || "flat",
+        splitValue,
+        subaccountId: existingPayment?.subaccountId || "",
+        status: "success",
+        reference: String(data.reference || data.tx_ref || tx_ref || ""),
+        rawVerifyResponse: response,
+        verifiedAt: new Date()
+      }
+    },
+    { upsert: true }
+  );
+
+  if (["waiting", "called", "served"].includes(String(ticket.status || ""))) {
+    return {
+      ok: true,
+      message: "Reservation already activated.",
+      reservationId: ticket._id,
+      status: ticket.status
+    };
+  }
+
+  if (ticket.status !== "pending_payment") {
+    return {
+      ok: false,
+      status: 409,
+      message: `Reservation is already ${ticket.status}.`,
+      reservationId: ticket._id,
+      currentStatus: ticket.status
+    };
+  }
+
+  if (ticket.paymentExpiresAt && ticket.paymentExpiresAt <= new Date()) {
+    ticket.status = "expired";
+    await ticket.save();
+    return { ok: false, status: 410, message: "Reservation payment window expired." };
+  }
+
+  const consume = await consumeStationFuel(ticket.stationId, ticket.fuelType, ticket.requestedLiters);
+  if (!consume.ok) {
+    return { ok: false, status: 409, message: "Not enough fuel left at this station for requested liters." };
+  }
+
+  const queueCount = await QueueTicket.countDocuments({
+    stationId: ticket.stationId,
+    status: "waiting"
+  });
+
+  ticket.status = "waiting";
+  ticket.position = queueCount + 1;
+  ticket.paymentProvider = "chapa";
+  ticket.paymentReference = String(data.tx_ref || tx_ref || "").trim();
+  ticket.paymentSessionId = String(data.reference || data.reference_id || "").trim();
+  ticket.depositStatus = ticket.depositAmount > 0 ? "authorized" : "not_required";
+  ticket.depositPaidAt = new Date();
+  ticket.joinedAt = new Date();
+  await ticket.save();
+
+  emitQueueUpdated(ticket.stationId);
+
+  return {
+    ok: true,
+    message: "Payment confirmed.",
+    reservationId: ticket._id,
+    status: ticket.status,
+    position: ticket.position
+  };
+}
+
 async function consumeStationFuel(stationId, fuelType, requestedLiters) {
   const liters = Number(requestedLiters || 0);
   if (!Number.isFinite(liters) || liters <= 0) {
@@ -296,7 +401,14 @@ exports.initialize = async (req, res) => {
     ticket.paymentSessionId = payment.reference || "";
     await ticket.save();
 
-    res.json(response);
+    res.json({
+      ...response,
+      meta: {
+        ...(response?.meta && typeof response.meta === "object" ? response.meta : {}),
+        tx_ref,
+        reservationId: String(ticket._id)
+      }
+    });
 
   } catch (error) {
     const errorData = error?.response?.data || null;
@@ -343,6 +455,19 @@ exports.verify = async (req, res) => {
       },
       { new: true }
     );
+
+    if (normalizedStatus === "success") {
+      const finalize = await finalizeSuccessfulPayment({ tx_ref, response });
+      if (!finalize.ok && finalize.status) {
+        return res.status(finalize.status).json({ message: finalize.message });
+      }
+      return res.json({
+        ...response,
+        ok: true,
+        reservationId: finalize.reservationId,
+        reservationStatus: finalize.status || finalize.currentStatus || "waiting"
+      });
+    }
 
     res.json(response);
 
@@ -392,105 +517,12 @@ exports.callback = async (req, res) => {
       return res.json({ ok: true, status: normalizedStatus, message: "Payment not completed." });
     }
 
-    const data = response?.data || {};
-    const meta = data.meta || data.metadata || {};
-    const reservationId = String(
-      meta.reservationId || meta.ticketId || meta.reservation_id || req.body?.reservationId || ""
-    ).trim();
-
-    if (!isObjectId(reservationId)) {
-      return res.status(400).json({ message: "reservationId is missing from payment metadata." });
+    const finalize = await finalizeSuccessfulPayment({ tx_ref, response });
+    if (!finalize.ok && finalize.status) {
+      return res.status(finalize.status).json({ message: finalize.message });
     }
 
-    const ticket = await QueueTicket.findById(reservationId);
-    if (!ticket) {
-      return res.status(404).json({ message: "Reservation not found." });
-    }
-
-    const existingPayment = await PaymentTransaction.findOne({ provider: "chapa", txRef: tx_ref }).lean();
-    const platformFee = Number(
-      existingPayment?.platformFee ?? getPlatformFeeBirr()
-    );
-    const amountPaid = Number(
-      data.amount || data.amount_payable || ticket.depositAmount || ticket.estimatedAmount || 0
-    );
-    const stationPayout = Number((Math.max(0, amountPaid - platformFee)).toFixed(2));
-    const splitValue = Number(existingPayment?.splitValue ?? platformFee);
-
-    await PaymentTransaction.findOneAndUpdate(
-      { provider: "chapa", txRef: tx_ref },
-      {
-        $set: {
-          reservationId: ticket._id,
-          userId: ticket.userId,
-          stationId: ticket.stationId,
-          amount: amountPaid,
-          currency: String(data.currency || "ETB").toUpperCase(),
-          platformFee,
-          stationPayout,
-          splitType: existingPayment?.splitType || "flat",
-          splitValue,
-          subaccountId: existingPayment?.subaccountId || "",
-          status: "success",
-          reference: String(data.reference || data.tx_ref || tx_ref || ""),
-          rawVerifyResponse: response,
-          verifiedAt: new Date()
-        }
-      },
-      { upsert: true }
-    );
-
-    if (["waiting", "called", "served"].includes(String(ticket.status || ""))) {
-      return res.json({
-        ok: true,
-        message: "Reservation already activated.",
-        reservationId: ticket._id,
-        status: ticket.status
-      });
-    }
-
-    if (ticket.status !== "pending_payment") {
-      return res.status(409).json({
-        message: `Reservation is already ${ticket.status}.`,
-        status: ticket.status
-      });
-    }
-
-    if (ticket.paymentExpiresAt && ticket.paymentExpiresAt <= new Date()) {
-      ticket.status = "expired";
-      await ticket.save();
-      return res.status(410).json({ message: "Reservation payment window expired." });
-    }
-
-    const consume = await consumeStationFuel(ticket.stationId, ticket.fuelType, ticket.requestedLiters);
-    if (!consume.ok) {
-      return res.status(409).json({ message: "Not enough fuel left at this station for requested liters." });
-    }
-
-    const queueCount = await QueueTicket.countDocuments({
-      stationId: ticket.stationId,
-      status: "waiting"
-    });
-
-    ticket.status = "waiting";
-    ticket.position = queueCount + 1;
-    ticket.paymentProvider = "chapa";
-    ticket.paymentReference = String(data.tx_ref || tx_ref || "").trim();
-    ticket.paymentSessionId = String(data.reference || data.reference_id || "").trim();
-    ticket.depositStatus = ticket.depositAmount > 0 ? "authorized" : "not_required";
-    ticket.depositPaidAt = new Date();
-    ticket.joinedAt = new Date();
-    await ticket.save();
-
-    emitQueueUpdated(ticket.stationId);
-
-    return res.json({
-      ok: true,
-      message: "Payment confirmed.",
-      reservationId: ticket._id,
-      status: ticket.status,
-      position: ticket.position
-    });
+    return res.json(finalize);
   } catch (error) {
     return res.status(500).json({
       message: "Payment callback verification failed",

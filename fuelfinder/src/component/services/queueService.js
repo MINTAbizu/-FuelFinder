@@ -14,6 +14,11 @@ export async function startChapaCheckout(payload) {
   return data;
 }
 
+export async function verifyChapaPayment(txRef) {
+  const { data } = await api.get(`/payments/verify/${txRef}`);
+  return data;
+}
+
 export async function exchangeTelebirrAuthToken(authToken) {
   const { data } = await api.post("/queue/payments/telebirr/auth-token", { authToken });
   return data;
