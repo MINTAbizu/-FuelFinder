@@ -114,9 +114,14 @@ function deriveFuelStatusFromInventory(inventory) {
 async function finalizeSuccessfulPayment({ tx_ref, response }) {
   const data = response?.data || {};
   const meta = data.meta || data.metadata || {};
-  const reservationId = String(
+  let reservationId = String(
     meta.reservationId || meta.ticketId || meta.reservation_id || ""
   ).trim();
+
+  let paymentRecord = await PaymentTransaction.findOne({ provider: "chapa", txRef: tx_ref }).lean();
+  if (!reservationId && paymentRecord?.reservationId) {
+    reservationId = String(paymentRecord.reservationId || "").trim();
+  }
 
   if (!isObjectId(reservationId)) {
     return { ok: false, status: 400, message: "reservationId is missing from payment metadata." };
@@ -127,15 +132,14 @@ async function finalizeSuccessfulPayment({ tx_ref, response }) {
     return { ok: false, status: 404, message: "Reservation not found." };
   }
 
-  const existingPayment = await PaymentTransaction.findOne({ provider: "chapa", txRef: tx_ref }).lean();
   const platformFee = Number(
-    existingPayment?.platformFee ?? getPlatformFeeBirr()
+    paymentRecord?.platformFee ?? getPlatformFeeBirr()
   );
   const amountPaid = Number(
     data.amount || data.amount_payable || ticket.depositAmount || ticket.estimatedAmount || 0
   );
   const stationPayout = Number((Math.max(0, amountPaid - platformFee)).toFixed(2));
-  const splitValue = Number(existingPayment?.splitValue ?? platformFee);
+  const splitValue = Number(paymentRecord?.splitValue ?? platformFee);
 
   await PaymentTransaction.findOneAndUpdate(
     { provider: "chapa", txRef: tx_ref },
@@ -148,9 +152,9 @@ async function finalizeSuccessfulPayment({ tx_ref, response }) {
         currency: String(data.currency || "ETB").toUpperCase(),
         platformFee,
         stationPayout,
-        splitType: existingPayment?.splitType || "flat",
+        splitType: paymentRecord?.splitType || "flat",
         splitValue,
-        subaccountId: existingPayment?.subaccountId || "",
+        subaccountId: paymentRecord?.subaccountId || "",
         status: "success",
         reference: String(data.reference || data.tx_ref || tx_ref || ""),
         rawVerifyResponse: response,
