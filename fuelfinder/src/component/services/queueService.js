@@ -9,6 +9,10 @@ export async function startTelebirrCheckout(reservationId) {
   const { data } = await api.post("/queue/payments/telebirr/initiate", { reservationId });
   return data;
 }
+export async function startchapaCheckout(reservationId) {
+  const { data } = await api.post("/payments/initialize", { reservationId });
+  return data;
+}
 
 export async function exchangeTelebirrAuthToken(authToken) {
   const { data } = await api.post("/queue/payments/telebirr/auth-token", { authToken });
