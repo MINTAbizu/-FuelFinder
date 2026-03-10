@@ -38,6 +38,7 @@ function buildStationResponse(station) {
       updatedAt: fuelInventory.updatedAt || null,
       updatedByUserId: fuelInventory.updatedByUserId ? String(fuelInventory.updatedByUserId) : null
     },
+    chapaSubaccountId: station.chapaSubaccountId || "",
     isActive: Boolean(station.isActive),
     organizationId: station.organizationId ? String(station.organizationId) : null,
     cityId: station.cityId ? String(station.cityId) : null,
@@ -144,6 +145,7 @@ exports.createStation = async (req, res) => {
       name,
       address,
       contact,
+      chapaSubaccountId: asText(req.body.chapaSubaccountId),
       fuelStatus,
       isActive: req.body.isActive !== undefined ? Boolean(req.body.isActive) : true,
       organizationId,
@@ -201,6 +203,9 @@ exports.updateStation = async (req, res) => {
     }
     if (req.body.contact !== undefined) {
       station.contact = asText(req.body.contact);
+    }
+    if (req.body.chapaSubaccountId !== undefined) {
+      station.chapaSubaccountId = asText(req.body.chapaSubaccountId);
     }
     if (req.body.fuelStatus !== undefined) {
       const fuelStatus = asText(req.body.fuelStatus);
