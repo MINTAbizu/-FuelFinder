@@ -54,6 +54,10 @@ function isOrgAdmin(req) {
   return String(req?.user?.role || "") === "org_admin";
 }
 
+function isSuperAdmin(req) {
+  return String(req?.user?.role || "") === "super_admin";
+}
+
 function getActorOrgId(req) {
   return String(req?.user?.organizationId || "").trim();
 }
@@ -123,6 +127,9 @@ exports.createStation = async (req, res) => {
     }
     if (!["full", "partial", "empty"].includes(fuelStatus)) {
       return res.status(400).json({ message: "fuelStatus must be one of: full, partial, empty." });
+    }
+    if (req.body.chapaSubaccountId !== undefined && !isSuperAdmin(req)) {
+      return res.status(403).json({ message: "Only super admin can set chapa subaccount id." });
     }
     if (isOrgAdmin(req)) {
       const actorOrgId = getActorOrgId(req);
@@ -205,6 +212,9 @@ exports.updateStation = async (req, res) => {
       station.contact = asText(req.body.contact);
     }
     if (req.body.chapaSubaccountId !== undefined) {
+      if (!isSuperAdmin(req)) {
+        return res.status(403).json({ message: "Only super admin can set chapa subaccount id." });
+      }
       station.chapaSubaccountId = asText(req.body.chapaSubaccountId);
     }
     if (req.body.fuelStatus !== undefined) {
