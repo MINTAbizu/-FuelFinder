@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const crypto = require("crypto");
 const chapaService = require("../services/chapa.service");
 const QueueTicket = require("../models/QueueTicket");
 const PaymentTransaction = require("../models/PaymentTransaction");
@@ -40,6 +41,38 @@ function getPlatformFeeBirr() {
 function getSplitMode() {
   const mode = String(process.env.CHAPA_SPLIT_MODE || "platform_fee").trim().toLowerCase();
   return mode === "subaccount_share" ? "subaccount_share" : "platform_fee";
+}
+
+function verifyChapaWebhookSignature(req) {
+  const secret = String(process.env.CHAPA_WEBHOOK_SECRET || "").trim();
+  if (!secret) {
+    const error = new Error("CHAPA_WEBHOOK_SECRET is not configured.");
+    error.status = 500;
+    throw error;
+  }
+
+  const signatureHeader = String(req.headers["chapa-signature"] || req.headers["Chapa-Signature"] || "").trim();
+  const payloadSignatureHeader = String(req.headers["x-chapa-signature"] || req.headers["X-Chapa-Signature"] || "").trim();
+  const rawBody = String(req.rawBody || "");
+
+  const signature = crypto.createHmac("sha256", secret).update(secret, "utf8").digest("hex");
+  const payloadSignature = crypto.createHmac("sha256", secret).update(rawBody, "utf8").digest("hex");
+
+  if (
+    signatureHeader &&
+    signatureHeader.length === signature.length &&
+    crypto.timingSafeEqual(Buffer.from(signatureHeader), Buffer.from(signature))
+  ) {
+    return true;
+  }
+  if (
+    payloadSignatureHeader &&
+    payloadSignatureHeader.length === payloadSignature.length &&
+    crypto.timingSafeEqual(Buffer.from(payloadSignatureHeader), Buffer.from(payloadSignature))
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function emitQueueUpdated(stationId) {
@@ -170,14 +203,15 @@ exports.initialize = async (req, res) => {
       return res.status(410).json({ message: "Reservation payment window expired." });
     }
 
-    const amount = Number(ticket.depositAmount > 0 ? ticket.depositAmount : ticket.estimatedAmount);
-    if (!Number.isFinite(amount) || amount <= 0) {
+    const baseAmount = Number(ticket.depositAmount > 0 ? ticket.depositAmount : ticket.estimatedAmount);
+    if (!Number.isFinite(baseAmount) || baseAmount <= 0) {
       return res.status(400).json({ message: "Invalid amount for reservation." });
     }
     const platformFee = getPlatformFeeBirr();
-    if (amount <= platformFee) {
+    if (baseAmount <= 0 || baseAmount + platformFee <= 0) {
       return res.status(400).json({ message: "Amount is not enough to cover platform fee." });
     }
+    const amount = Number((baseAmount + platformFee).toFixed(2));
     const stationPayout = Number((amount - platformFee).toFixed(2));
     const splitMode = getSplitMode();
     const splitValue = splitMode === "subaccount_share" ? stationPayout : platformFee;
@@ -321,6 +355,9 @@ exports.verify = async (req, res) => {
 exports.callback = async (req, res) => {
   try {
     requireEnv("CHAPA_SECRET_KEY");
+    if (!verifyChapaWebhookSignature(req)) {
+      return res.status(401).json({ message: "Invalid Chapa webhook signature." });
+    }
 
     const tx_ref =
       String(req.body?.tx_ref || req.query?.tx_ref || req.body?.reference || req.query?.reference || "").trim();

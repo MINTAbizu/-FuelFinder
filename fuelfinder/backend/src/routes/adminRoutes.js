@@ -5,6 +5,7 @@ const { validateAdminCreate } = require("../middleware/validateAdmin");
 const { auditAction } = require("../middleware/auditLog");
 const adminUserController = require("../controllers/adminUserController");
 const adminStationController = require("../controllers/adminStationController");
+const adminPaymentController = require("../controllers/adminPaymentController");
 
 const router = express.Router();
 
@@ -74,6 +75,12 @@ router.get(
   "/stations",
   requireRole(["super_admin", "org_admin"]),
   adminStationController.listStations
+);
+
+router.get(
+  "/payments",
+  requireRole(["super_admin", "org_admin"]),
+  adminPaymentController.listPayments
 );
 
 router.post(
