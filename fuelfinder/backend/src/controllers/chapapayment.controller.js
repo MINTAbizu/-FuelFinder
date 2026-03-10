@@ -38,14 +38,15 @@ function getPlatformFeeBirr() {
   return Number(value.toFixed(2));
 }
 
-function getSplitMode() {
-  const mode = String(process.env.CHAPA_SPLIT_MODE || "platform_fee").trim().toLowerCase();
-  return mode === "subaccount_share" ? "subaccount_share" : "platform_fee";
-}
+// Split payment helpers (disabled for non-business testing).
+// function getSplitMode() {
+//   const mode = String(process.env.CHAPA_SPLIT_MODE || "platform_fee").trim().toLowerCase();
+//   return mode === "subaccount_share" ? "subaccount_share" : "platform_fee";
+// }
 
-function getDefaultSubaccountId() {
-  return String(process.env.CHAPA_DEFAULT_SUBACCOUNT_ID || "").trim();
-}
+// function getDefaultSubaccountId() {
+//   return String(process.env.CHAPA_DEFAULT_SUBACCOUNT_ID || "").trim();
+// }
 
 function verifyChapaWebhookSignature(req) {
   const secret = String(process.env.CHAPA_WEBHOOK_SECRET || "").trim();
@@ -191,10 +192,6 @@ exports.initialize = async (req, res) => {
     if (!station) {
       return res.status(404).json({ message: "Station not found for this reservation." });
     }
-    const subaccountId = String(station.chapaSubaccountId || "").trim() || getDefaultSubaccountId();
-    if (!subaccountId) {
-      return res.status(400).json({ message: "Station Chapa subaccount is not configured." });
-    }
     if (ticket.status !== "pending_payment") {
       return res.status(409).json({
         message: `Reservation is already ${ticket.status}.`,
@@ -212,13 +209,9 @@ exports.initialize = async (req, res) => {
       return res.status(400).json({ message: "Invalid amount for reservation." });
     }
     const platformFee = getPlatformFeeBirr();
-    if (baseAmount <= 0 || baseAmount + platformFee <= 0) {
-      return res.status(400).json({ message: "Amount is not enough to cover platform fee." });
-    }
     const amount = Number((baseAmount + platformFee).toFixed(2));
     const stationPayout = Number((amount - platformFee).toFixed(2));
-    const splitMode = getSplitMode();
-    const splitValue = splitMode === "subaccount_share" ? stationPayout : platformFee;
+    const splitValue = platformFee;
 
     const existing = await PaymentTransaction.findOne({
       provider: "chapa",
@@ -242,13 +235,14 @@ exports.initialize = async (req, res) => {
       tx_ref,
       callback_url: callbackUrl,
       return_url: returnUrl || undefined,
-      subaccounts: [
-        {
-          id: subaccountId,
-          split_type: "flat",
-          split_value: splitValue
-        }
-      ],
+      // Split payments disabled for testing without business registration.
+      // subaccounts: [
+      //   {
+      //     id: subaccountId,
+      //     split_type: "flat",
+      //     split_value: splitValue
+      //   }
+      // ],
       meta: {
         ...(metadata && typeof metadata === "object" ? metadata : {}),
         reservationId: String(ticket._id),
@@ -273,7 +267,7 @@ exports.initialize = async (req, res) => {
         stationPayout,
         splitType: "flat",
         splitValue,
-        subaccountId,
+        subaccountId: "",
         status: "initialized",
         meta: paymentData.meta
       });
@@ -421,10 +415,7 @@ exports.callback = async (req, res) => {
       data.amount || data.amount_payable || ticket.depositAmount || ticket.estimatedAmount || 0
     );
     const stationPayout = Number((Math.max(0, amountPaid - platformFee)).toFixed(2));
-    const splitMode = getSplitMode();
-    const splitValue = Number(
-      existingPayment?.splitValue ?? (splitMode === "subaccount_share" ? stationPayout : platformFee)
-    );
+    const splitValue = Number(existingPayment?.splitValue ?? platformFee);
 
     await PaymentTransaction.findOneAndUpdate(
       { provider: "chapa", txRef: tx_ref },
