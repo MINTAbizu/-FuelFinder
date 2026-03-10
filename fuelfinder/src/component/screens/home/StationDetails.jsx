@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Location from "expo-location";
 import QRCode from "react-native-qrcode-svg";
 import { useLanguage } from "../../context/LanguageContext";
+import { useAuth } from "../../context/AuthContext";
 import {
   getMyQueueTicket,
   getReservationStatus,
@@ -10,8 +11,7 @@ import {
   leaveQueue,
   reserveQueueSlot,
   startStationCheckIn,
-  startTelebirrCheckout,
-  startchapaCheckout
+  startChapaCheckout
 } from "../../services/queueService";
 
 const getWaitEstimate = (queueLength) => Math.max(2, Number(queueLength || 0) * 3);
@@ -66,6 +66,7 @@ function normalizeTicketPayload(ticket) {
 
 export default function StationDetails({ route }) {
   const { t: tr } = useLanguage();
+  const { user } = useAuth();
   const t = useMemo(
     () => ({
       stationFallback: tr("stationDetails.stationFallback"),
@@ -142,8 +143,6 @@ export default function StationDetails({ route }) {
   const [requestedLiters, setRequestedLiters] = useState("10");
   const [reservationId, setReservationId] = useState("");
   const [reservationCode, setReservationCode] = useState("");
-  const [prepayId, setPrepayId] = useState("");
-  const [rawRequest, setRawRequest] = useState("");
   const [myTicket, setMyTicket] = useState(null);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -346,7 +345,7 @@ export default function StationDetails({ route }) {
     []
   );
 
-  const reserveAndInitiate = useCallback(async () => {
+  const reserveAndInitiateChapa = useCallback(async () => {
     if (!queueEnabled) {
       Alert.alert(t.stationIdMissingTitle, t.stationIdMissingBody);
       return;
@@ -362,6 +361,7 @@ export default function StationDetails({ route }) {
         setLoading(false);
         return;
       }
+
       const reserve = await reserveQueueSlot({
         stationId,
         requestedBand,
@@ -376,20 +376,44 @@ export default function StationDetails({ route }) {
       setReservationCode(nextReservationCode);
       setPaymentPhase("initiating");
 
-      const initiate = await startTelebirrCheckout(nextReservationId);
-      setPrepayId(initiate?.prepayId || "");
-      setRawRequest(initiate?.rawRequest || "");
+      const userEmail = String(user?.email || "").trim();
+      if (!userEmail) {
+        throw new Error("Email is required for Chapa payment.");
+      }
+
+      const nameParts = String(user?.name || "Customer").trim().split(/\s+/).filter(Boolean);
+      const firstName = nameParts[0] || "Customer";
+      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "User";
+
+      const chapaInit = await startChapaCheckout({
+        reservationId: nextReservationId,
+        email: userEmail,
+        first_name: firstName,
+        last_name: lastName
+      });
+
+      const checkoutUrl = chapaInit?.data?.checkout_url || chapaInit?.data?.checkoutUrl;
+      if (!checkoutUrl) {
+        throw new Error("Chapa checkout URL not available.");
+      }
+
+      const canOpen = await Linking.canOpenURL(checkoutUrl);
+      if (!canOpen) {
+        throw new Error("Cannot open Chapa checkout URL.");
+      }
+
+      await Linking.openURL(checkoutUrl);
       setPaymentPhase("pending");
       setMessage(t.paymentInitiated);
       await pollReservation(nextReservationId, true);
     } catch (error) {
-      logReservationError("reserveAndInitiate", error);
+      logReservationError("reserveAndInitiateChapa", error);
       setPaymentPhase("failed");
-      setMessage(error?.response?.data?.message || t.failedStartPayment);
+      setMessage(error?.response?.data?.message || error?.message || t.failedStartPayment);
     } finally {
       setLoading(false);
     }
-  }, [fuelType, litersValue, pollReservation, queueEnabled, requestedBand, selectedUnitPrice, stationId]);
+  }, [fuelType, litersValue, queueEnabled, requestedBand, selectedUnitPrice, stationId, user]);
 
   const checkReservationNow = useCallback(async () => {
     if (!reservationId) {
@@ -416,8 +440,6 @@ export default function StationDetails({ route }) {
       setMyTicket(null);
       setReservationId("");
       setReservationCode("");
-      setPrepayId("");
-      setRawRequest("");
       setPaymentPhase("idle");
       setMessage(t.leftQueue);
       if (pollRef.current) clearInterval(pollRef.current);
@@ -596,44 +618,49 @@ export default function StationDetails({ route }) {
         <Text style={styles.metaText}>{t.currentPrice} ({fuelType}): {selectedUnitPrice.toFixed(2)} ETB/L</Text>
         <Text style={styles.estimateText}>{t.estimatedTotal}: {estimatedAmount.toFixed(2)} ETB</Text>
 
-        <Pressable
-          style={[styles.actionButton, styles.primaryButton, (!queueEnabled || loading) && styles.disabled]}
-          onPress={reserveAndInitiate}
-          disabled={!queueEnabled || loading}
-        >
-          <Text style={styles.primaryButtonText}>{t.reservePayBtn}</Text>
-        </Pressable>
+        <View style={styles.buttonGrid}>
+          <Pressable
+            style={[
+              styles.actionButton,
+              styles.chapaButton,
+              styles.gridButton,
+              (!queueEnabled || loading) && styles.disabled
+            ]}
+            onPress={reserveAndInitiateChapa}
+            disabled={!queueEnabled || loading}
+          >
+            <Text style={styles.primaryButtonText}>Pay with Chapa</Text>
+          </Pressable>
 
-        <Pressable
-          style={[styles.actionButton, styles.secondaryButton, loading && styles.disabled]}
-          onPress={checkReservationNow}
-          disabled={loading || !reservationId}
-        >
-          <Text style={styles.secondaryButtonText}>{t.checkPaymentBtn}</Text>
-        </Pressable>
+          <Pressable
+            style={[styles.actionButton, styles.secondaryButton, styles.gridButton, loading && styles.disabled]}
+            onPress={checkReservationNow}
+            disabled={loading || !reservationId}
+          >
+            <Text style={styles.secondaryButtonText}>{t.checkPaymentBtn}</Text>
+          </Pressable>
 
-        <Pressable
-          style={[styles.actionButton, styles.infoButton, loading && styles.disabled]}
-          onPress={refreshMyTicket}
-          disabled={loading}
-        >
-          <Text style={styles.primaryButtonText}>{t.refreshTicketBtn}</Text>
-        </Pressable>
+          <Pressable
+            style={[styles.actionButton, styles.infoButton, styles.gridButton, loading && styles.disabled]}
+            onPress={refreshMyTicket}
+            disabled={loading}
+          >
+            <Text style={styles.primaryButtonText}>{t.refreshTicketBtn}</Text>
+          </Pressable>
 
-        <Pressable
-          style={[styles.actionButton, styles.dangerButton, loading && styles.disabled]}
-          onPress={leaveMyQueue}
-          disabled={loading}
-        >
-          <Text style={styles.primaryButtonText}>{t.leaveQueueBtn}</Text>
-        </Pressable>
+          <Pressable
+            style={[styles.actionButton, styles.dangerButton, styles.gridButton, loading && styles.disabled]}
+            onPress={leaveMyQueue}
+            disabled={loading}
+          >
+            <Text style={styles.primaryButtonText}>{t.leaveQueueBtn}</Text>
+          </Pressable>
+        </View>
 
         {loading ? <ActivityIndicator size="small" color="#0F766E" style={styles.loader} /> : null}
         <Text style={styles.metaText}>phase: {paymentPhase}</Text>
         <Text style={styles.metaText}>reservationId: {reservationId || "-"}</Text>
         <Text style={styles.metaText}>reservationCode: {reservationCode || "-"}</Text>
-        <Text style={styles.metaText}>prepayId: {prepayId || "-"}</Text>
-        <Text style={styles.metaText}>rawRequest: {rawRequest || "-"}</Text>
         {message ? <Text style={styles.infoText}>{message}</Text> : null}
 
         {myTicket ? (
@@ -870,10 +897,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 8,
   },
+  buttonGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  gridButton: {
+    width: "48%",
+  },
   primaryButton: { backgroundColor: "#0F766E" },
   secondaryButton: { backgroundColor: "#DBEAFE", borderWidth: 1, borderColor: "#1D4ED8" },
   infoButton: { backgroundColor: "#0EA5E9" },
   dangerButton: { backgroundColor: "#B91C1C" },
+  chapaButton: { backgroundColor: "#F59E0B" },
   primaryButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
   secondaryButtonText: { color: "#1D4ED8", fontSize: 13, fontWeight: "800" },
   disabled: { opacity: 0.55 },

@@ -30,6 +30,18 @@ function buildTxRef(reservationId) {
   return `FF-${suffix}-${Date.now()}`;
 }
 
+function getPlatformFeeBirr() {
+  const raw = String(process.env.CHAPA_PLATFORM_FEE_BIRR || "2").trim();
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return 2;
+  return Number(value.toFixed(2));
+}
+
+function getSplitMode() {
+  const mode = String(process.env.CHAPA_SPLIT_MODE || "platform_fee").trim().toLowerCase();
+  return mode === "subaccount_share" ? "subaccount_share" : "platform_fee";
+}
+
 function emitQueueUpdated(stationId) {
   const io = getIO();
   if (!io) return;
@@ -138,6 +150,14 @@ exports.initialize = async (req, res) => {
     if (req.user && String(ticket.userId) !== String(req.user.id)) {
       return res.status(403).json({ message: "Forbidden: reservation does not belong to this user." });
     }
+    const station = await Station.findById(ticket.stationId).select("_id chapaSubaccountId").lean();
+    if (!station) {
+      return res.status(404).json({ message: "Station not found for this reservation." });
+    }
+    const subaccountId = String(station.chapaSubaccountId || "").trim();
+    if (!subaccountId) {
+      return res.status(400).json({ message: "Station Chapa subaccount is not configured." });
+    }
     if (ticket.status !== "pending_payment") {
       return res.status(409).json({
         message: `Reservation is already ${ticket.status}.`,
@@ -154,6 +174,13 @@ exports.initialize = async (req, res) => {
     if (!Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({ message: "Invalid amount for reservation." });
     }
+    const platformFee = getPlatformFeeBirr();
+    if (amount <= platformFee) {
+      return res.status(400).json({ message: "Amount is not enough to cover platform fee." });
+    }
+    const stationPayout = Number((amount - platformFee).toFixed(2));
+    const splitMode = getSplitMode();
+    const splitValue = splitMode === "subaccount_share" ? stationPayout : platformFee;
 
     const existing = await PaymentTransaction.findOne({
       provider: "chapa",
@@ -177,11 +204,20 @@ exports.initialize = async (req, res) => {
       tx_ref,
       callback_url: callbackUrl,
       return_url: returnUrl || undefined,
+      subaccounts: [
+        {
+          id: subaccountId,
+          split_type: "flat",
+          split_value: splitValue
+        }
+      ],
       meta: {
         ...(metadata && typeof metadata === "object" ? metadata : {}),
         reservationId: String(ticket._id),
         userId: String(ticket.userId),
-        stationId: String(ticket.stationId)
+        stationId: String(ticket.stationId),
+        platformFee,
+        stationPayout
       }
     };
 
@@ -195,6 +231,11 @@ exports.initialize = async (req, res) => {
         stationId: ticket.stationId,
         amount,
         currency,
+        platformFee,
+        stationPayout,
+        splitType: "flat",
+        splitValue,
+        subaccountId,
         status: "initialized",
         meta: paymentData.meta
       });
@@ -247,12 +288,18 @@ exports.verify = async (req, res) => {
 
     const response = await chapaService.verifyPayment(tx_ref);
 
+    const status = String(response?.status || response?.data?.status || "").toLowerCase();
+    const normalizedStatus = ["success", "failed", "cancelled", "expired", "pending"]
+      .includes(status)
+      ? status
+      : "pending";
+
     await PaymentTransaction.findOneAndUpdate(
       { provider: "chapa", txRef: tx_ref },
       {
         $set: {
           rawVerifyResponse: response,
-          status: String(response?.status || response?.data?.status || "").toLowerCase(),
+          status: normalizedStatus,
           verifiedAt: new Date()
         }
       },
@@ -285,19 +332,23 @@ exports.callback = async (req, res) => {
     const response = await chapaService.verifyPayment(tx_ref);
 
     const status = String(response?.status || response?.data?.status || "").toLowerCase();
-    if (status !== "success") {
+    const normalizedStatus = ["success", "failed", "cancelled", "expired", "pending"]
+      .includes(status)
+      ? status
+      : "pending";
+    if (normalizedStatus !== "success") {
       await PaymentTransaction.findOneAndUpdate(
         { provider: "chapa", txRef: tx_ref },
         {
           $set: {
             rawVerifyResponse: response,
-            status: status || "pending",
+            status: normalizedStatus,
             verifiedAt: new Date()
           }
         },
         { upsert: true }
       );
-      return res.json({ ok: true, status, message: "Payment not completed." });
+      return res.json({ ok: true, status: normalizedStatus, message: "Payment not completed." });
     }
 
     const data = response?.data || {};
@@ -315,6 +366,19 @@ exports.callback = async (req, res) => {
       return res.status(404).json({ message: "Reservation not found." });
     }
 
+    const existingPayment = await PaymentTransaction.findOne({ provider: "chapa", txRef: tx_ref }).lean();
+    const platformFee = Number(
+      existingPayment?.platformFee ?? getPlatformFeeBirr()
+    );
+    const amountPaid = Number(
+      data.amount || data.amount_payable || ticket.depositAmount || ticket.estimatedAmount || 0
+    );
+    const stationPayout = Number((Math.max(0, amountPaid - platformFee)).toFixed(2));
+    const splitMode = getSplitMode();
+    const splitValue = Number(
+      existingPayment?.splitValue ?? (splitMode === "subaccount_share" ? stationPayout : platformFee)
+    );
+
     await PaymentTransaction.findOneAndUpdate(
       { provider: "chapa", txRef: tx_ref },
       {
@@ -322,8 +386,13 @@ exports.callback = async (req, res) => {
           reservationId: ticket._id,
           userId: ticket.userId,
           stationId: ticket.stationId,
-          amount: Number(data.amount || data.amount_payable || 0) || ticket.depositAmount || ticket.estimatedAmount,
+          amount: amountPaid,
           currency: String(data.currency || "ETB").toUpperCase(),
+          platformFee,
+          stationPayout,
+          splitType: existingPayment?.splitType || "flat",
+          splitValue,
+          subaccountId: existingPayment?.subaccountId || "",
           status: "success",
           reference: String(data.reference || data.tx_ref || tx_ref || ""),
           rawVerifyResponse: response,

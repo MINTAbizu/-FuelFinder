@@ -9,6 +9,11 @@ const paymentTransactionSchema = new mongoose.Schema(
     stationId: { type: mongoose.Schema.Types.ObjectId, ref: "Station", default: null },
     amount: { type: Number, default: 0 },
     currency: { type: String, default: "ETB" },
+    platformFee: { type: Number, default: 0 },
+    stationPayout: { type: Number, default: 0 },
+    splitType: { type: String, default: "" },
+    splitValue: { type: Number, default: 0 },
+    subaccountId: { type: String, default: "" },
     status: {
       type: String,
       enum: ["initialized", "pending", "success", "failed", "cancelled", "expired"],
