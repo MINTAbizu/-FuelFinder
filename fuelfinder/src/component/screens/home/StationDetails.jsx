@@ -63,6 +63,7 @@ function normalizeTicketPayload(ticket) {
     fuelType: String(ticket.fuelType || ""),
     requestedLiters: Number(ticket.requestedLiters || 0),
     estimatedAmount: Number(ticket.estimatedAmount || 0),
+    expiresAt: ticket.expiresAt || null,
   };
 }
 
@@ -214,6 +215,16 @@ export default function StationDetails({ route }) {
     };
   }, [liveFuel, liveQueueCount, station, t.address, t.contact, t.stationFallback]);
 
+  const normalizedFuelStatus = String(detail.fuelStatus || "").toLowerCase();
+  const isFuelAvailable = normalizedFuelStatus === "available" || normalizedFuelStatus === "full";
+  const isFuelLimited = normalizedFuelStatus === "limited" || normalizedFuelStatus === "partial";
+  const isFuelEmpty = normalizedFuelStatus === "empty";
+  const disableLeaveAfterPaid =
+    Boolean(myTicket) &&
+    ["waiting", "called"].includes(String(myTicket?.status || "")) &&
+    isFuelAvailable &&
+    paymentPhase === "verified";
+
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -358,6 +369,30 @@ export default function StationDetails({ route }) {
     setMessage("");
     setPaymentPhase("reserving");
     try {
+      if (isFuelEmpty) {
+        Alert.alert("Station has no fuel", "This station is marked empty. Try another station.");
+        setPaymentPhase("idle");
+        setLoading(false);
+        return;
+      }
+      if (isFuelLimited) {
+        const proceed = await new Promise((resolve) => {
+          Alert.alert(
+            "Limited fuel",
+            "This station has limited fuel. Do you want to continue payment?",
+            [
+              { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+              { text: "Continue", onPress: () => resolve(true) }
+            ]
+          );
+        });
+        if (!proceed) {
+          setPaymentPhase("idle");
+          setLoading(false);
+          return;
+        }
+      }
+
       if (!Number.isFinite(litersValue) || litersValue <= 0) {
         Alert.alert(t.invalidLitersTitle, t.invalidLitersBody);
         setPaymentPhase("idle");
@@ -425,7 +460,17 @@ export default function StationDetails({ route }) {
     } finally {
       setLoading(false);
     }
-  }, [fuelType, litersValue, queueEnabled, requestedBand, selectedUnitPrice, stationId, user]);
+  }, [
+    fuelType,
+    isFuelEmpty,
+    isFuelLimited,
+    litersValue,
+    queueEnabled,
+    requestedBand,
+    selectedUnitPrice,
+    stationId,
+    user
+  ]);
 
   const checkReservationNow = useCallback(async () => {
     if (!reservationId) {
@@ -671,7 +716,7 @@ export default function StationDetails({ route }) {
           <Pressable
             style={[styles.actionButton, styles.dangerButton, styles.gridButton, loading && styles.disabled]}
             onPress={leaveMyQueue}
-            disabled={loading}
+            disabled={loading || disableLeaveAfterPaid}
           >
             <Text style={styles.primaryButtonText}>{t.leaveQueueBtn}</Text>
           </Pressable>
@@ -682,6 +727,11 @@ export default function StationDetails({ route }) {
         <Text style={styles.metaText}>reservationId: {reservationId || "-"}</Text>
         <Text style={styles.metaText}>reservationCode: {reservationCode || "-"}</Text>
         {message ? <Text style={styles.infoText}>{message}</Text> : null}
+        {disableLeaveAfterPaid ? (
+          <Text style={styles.noticeText}>
+            Leave queue is disabled after payment for available stations.
+          </Text>
+        ) : null}
 
         {myTicket ? (
           <View style={styles.ticketCard}>
@@ -936,6 +986,7 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.55 },
   loader: { marginTop: 4, marginBottom: 4 },
   infoText: { fontSize: 12, color: "#0F766E", fontWeight: "700", marginBottom: 6 },
+  noticeText: { fontSize: 12, color: "#92400E", fontWeight: "700", marginBottom: 6 },
   errorText: { fontSize: 12, color: "#B91C1C", fontWeight: "700", marginBottom: 8 },
   optionsRow: { flexDirection: "row", flexWrap: "wrap", marginBottom: 8 },
   optionButton: {

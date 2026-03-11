@@ -12,6 +12,7 @@ const {
 const ACTIVE_STATUSES = ["pending_payment", "waiting", "called"];
 const AVERAGE_MINUTES_PER_CAR = 3;
 const PAYMENT_WINDOW_MINUTES = 10;
+const WAITING_WINDOW_MINUTES = Number(process.env.WAITING_WINDOW_MINUTES || 120);
 const CALL_WINDOW_MINUTES = 5;
 const CHECKIN_RADIUS_METERS = 250;
 const CHECKIN_MAX_ACCURACY_METERS = 120;
@@ -189,6 +190,19 @@ async function expireStaleTickets(stationId) {
   await QueueTicket.updateMany(
     {
       ...filter,
+      status: "waiting",
+      expiresAt: { $lte: now }
+    },
+    {
+      $set: {
+        status: "expired"
+      }
+    }
+  );
+
+  await QueueTicket.updateMany(
+    {
+      ...filter,
       status: "called",
       expiresAt: { $lte: now }
     },
@@ -243,6 +257,13 @@ function deriveFuelStatusFromInventory(inventory) {
   if (total <= 0) return "empty";
   if (total <= 300) return "partial";
   return "full";
+}
+
+function getWaitingExpiresAt() {
+  const minutes = Number.isFinite(WAITING_WINDOW_MINUTES) && WAITING_WINDOW_MINUTES > 0
+    ? WAITING_WINDOW_MINUTES
+    : 120;
+  return new Date(Date.now() + minutes * 60 * 1000);
 }
 
 async function getStationFuelSnapshot(stationId) {
@@ -466,6 +487,7 @@ async function activatePaidTicket(ticket, paymentReference, paymentSessionId) {
   ticket.depositStatus = ticket.depositAmount > 0 ? "authorized" : "not_required";
   ticket.depositPaidAt = new Date();
   ticket.joinedAt = new Date();
+  ticket.expiresAt = getWaitingExpiresAt();
   await ticket.save();
 
   emitQueueUpdated(ticket.stationId);
@@ -613,6 +635,8 @@ exports.joinQueue = async (req, res) => {
       position,
       depositStatus: "not_required"
     });
+    ticket.expiresAt = getWaitingExpiresAt();
+    await ticket.save();
 
     const etaMinutes = position * AVERAGE_MINUTES_PER_CAR;
     emitQueueUpdated(stationId);
@@ -623,7 +647,8 @@ exports.joinQueue = async (req, res) => {
       stationId,
       position,
       status: ticket.status,
-      etaMinutes
+      etaMinutes,
+      expiresAt: ticket.expiresAt
     });
   } catch (error) {
     if (isDuplicateActiveTicketError(error)) {
@@ -681,7 +706,8 @@ exports.confirmReservationPayment = async (req, res) => {
         position: ticket.position,
         etaMinutes,
         depositStatus: ticket.depositStatus,
-        message: "Reservation already paid."
+        message: "Reservation already paid.",
+        expiresAt: ticket.expiresAt
       });
     }
     if (ticket.status !== "pending_payment") {
@@ -715,7 +741,8 @@ exports.confirmReservationPayment = async (req, res) => {
       status: ticket.status,
       position: ticket.position,
       etaMinutes,
-      depositStatus: ticket.depositStatus
+      depositStatus: ticket.depositStatus,
+      expiresAt: ticket.expiresAt
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to confirm payment." });
@@ -918,7 +945,8 @@ exports.getMyReservationStatus = async (req, res) => {
       estimatedAmount: freshTicket.estimatedAmount,
       depositStatus: freshTicket.depositStatus,
       paymentExpiresAt: freshTicket.paymentExpiresAt,
-      depositPaidAt: freshTicket.depositPaidAt
+      depositPaidAt: freshTicket.depositPaidAt,
+      expiresAt: freshTicket.expiresAt
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load reservation status." });
@@ -961,7 +989,8 @@ exports.getMyTicket = async (req, res) => {
       depositAmount: ticket.depositAmount,
       depositCurrency: ticket.depositCurrency,
       depositStatus: ticket.depositStatus,
-      paymentExpiresAt: ticket.paymentExpiresAt
+      paymentExpiresAt: ticket.paymentExpiresAt,
+      expiresAt: ticket.expiresAt
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load ticket." });
@@ -1096,7 +1125,7 @@ exports.getStationQueue = async (req, res) => {
       status: "waiting"
     })
       .sort({ position: 1 })
-      .select("userId position joinedAt publicTicketCode")
+      .select("userId position joinedAt expiresAt publicTicketCode")
       .lean();
 
     const called = await QueueTicket.findOne({

@@ -38,6 +38,13 @@ function getPlatformFeeBirr() {
   return Number(value.toFixed(2));
 }
 
+function getWaitingExpiresAt() {
+  const raw = String(process.env.WAITING_WINDOW_MINUTES || "120").trim();
+  const minutes = Number(raw);
+  const safeMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 120;
+  return new Date(Date.now() + safeMinutes * 60 * 1000);
+}
+
 // Split payment helpers (disabled for non-business testing).
 // function getSplitMode() {
 //   const mode = String(process.env.CHAPA_SPLIT_MODE || "platform_fee").trim().toLowerCase();
@@ -203,11 +210,12 @@ async function finalizeSuccessfulPayment({ tx_ref, response }) {
   ticket.position = queueCount + 1;
   ticket.paymentProvider = "chapa";
   ticket.paymentReference = String(data.tx_ref || tx_ref || "").trim();
-  ticket.paymentSessionId = String(data.reference || data.reference_id || "").trim();
-  ticket.depositStatus = ticket.depositAmount > 0 ? "authorized" : "not_required";
-  ticket.depositPaidAt = new Date();
-  ticket.joinedAt = new Date();
-  await ticket.save();
+    ticket.paymentSessionId = String(data.reference || data.reference_id || "").trim();
+    ticket.depositStatus = ticket.depositAmount > 0 ? "authorized" : "not_required";
+    ticket.depositPaidAt = new Date();
+    ticket.joinedAt = new Date();
+    ticket.expiresAt = getWaitingExpiresAt();
+    await ticket.save();
 
   emitQueueUpdated(ticket.stationId);
 
