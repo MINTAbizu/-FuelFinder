@@ -1195,16 +1195,20 @@ exports.startCheckIn = async (req, res) => {
     const userLat = Number(lat);
     const userLon = Number(lon);
     const userAccuracy = Number(accuracy || 0);
+    const bypassGeo =
+      String(process.env.CHECKIN_ALLOW_OUTSIDE_RADIUS || "").trim().toLowerCase() === "true" ||
+      (String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production" &&
+        String(process.env.CHECKIN_STRICT || "").trim().toLowerCase() !== "true");
     if (!Number.isFinite(userLat) || !Number.isFinite(userLon)) {
       return res.status(400).json({ message: "lat and lon are required numeric values." });
     }
-    if (Number.isFinite(userAccuracy) && userAccuracy > CHECKIN_MAX_ACCURACY_METERS) {
+    if (!bypassGeo && Number.isFinite(userAccuracy) && userAccuracy > CHECKIN_MAX_ACCURACY_METERS) {
       return res.status(400).json({ message: "Location accuracy is too low for check-in. Move to open sky and retry." });
     }
 
     const [stationLon, stationLat] = station.location.coordinates;
     const distanceMeters = haversineDistanceMeters(userLat, userLon, Number(stationLat), Number(stationLon));
-    if (distanceMeters > CHECKIN_RADIUS_METERS) {
+    if (!bypassGeo && distanceMeters > CHECKIN_RADIUS_METERS) {
       ticket.checkInStatus = "rejected";
       await ticket.save();
       return res.status(403).json({
@@ -1245,7 +1249,13 @@ exports.startCheckIn = async (req, res) => {
       checkInStatus: ticket.checkInStatus,
       expiresAt: otpExpiresAt,
       otpCode,
-      qrToken
+      qrToken,
+      distanceMeters: Math.round(distanceMeters),
+      allowedRadiusMeters: CHECKIN_RADIUS_METERS,
+      geoBypass: bypassGeo,
+      geoWarning: bypassGeo && distanceMeters > CHECKIN_RADIUS_METERS
+        ? "Check-in radius bypassed for development."
+        : ""
     });
   } catch (_error) {
     return res.status(500).json({ message: "Failed to start station check-in." });
