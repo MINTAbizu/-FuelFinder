@@ -11,13 +11,15 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://fuelfinder-2.onrender.com"
+        "EXPO_PUBLIC_API_BASE_URL": "https://fuelfinder-2.onrender.com",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://fuelfinder-2.onrender.com"
+        "EXPO_PUBLIC_API_BASE_URL": "https://fuelfinder-2.onrender.com",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     }
   },
