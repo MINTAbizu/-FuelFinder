@@ -67,6 +67,13 @@ function normalizeTicketPayload(ticket) {
   };
 }
 
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString();
+}
+
 export default function StationDetails({ route }) {
   const { t: tr } = useLanguage();
   const { user } = useAuth();
