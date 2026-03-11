@@ -34,3 +34,8 @@ export async function resendPhoneOtp(payload) {
   const { data } = await api.post("/auth/phone/resend", payload);
   return data;
 }
+
+export async function loginWithGoogle(idToken) {
+  const { data } = await api.post("/auth/google", { idToken });
+  return data;
+}

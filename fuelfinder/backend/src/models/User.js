@@ -10,6 +10,8 @@ const userSchema = new mongoose.Schema(
     phoneVerificationAttempts: { type: Number, default: 0 },
     phoneVerificationLastSentAt: { type: Date, default: null },
     email: { type: String, required: true, trim: true, lowercase: true, unique: true },
+    authProvider: { type: String, enum: ["local", "google"], default: "local" },
+    googleSub: { type: String, default: "" },
     passwordHash: { type: String, required: true },
     refreshTokenHash: { type: String, default: "" },
     isBlocked: { type: Boolean, default: false },

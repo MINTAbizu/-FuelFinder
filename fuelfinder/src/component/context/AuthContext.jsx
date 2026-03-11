@@ -9,6 +9,7 @@ import {
   refreshUserToken,
   registerUser,
   resendPhoneOtp,
+  loginWithGoogle,
   verifyPhoneOtp,
 } from "../services/authService";
 
@@ -93,6 +94,7 @@ export function AuthProvider({ children }) {
           original.url?.includes("/auth/login") ||
           original.url?.includes("/auth/register") ||
           original.url?.includes("/auth/refresh") ||
+          original.url?.includes("/auth/google") ||
           original.url?.includes("/auth/phone/verify") ||
           original.url?.includes("/auth/phone/resend");
         if (isAuthMutation) {
@@ -222,6 +224,22 @@ export function AuthProvider({ children }) {
     await clearSession();
   }, [clearSession]);
 
+  const signInWithGoogle = useCallback(
+    async ({ idToken }) => {
+      const data = await loginWithGoogle(idToken);
+      if (data?.verificationRequired) {
+        return data;
+      }
+      await persistSession(
+        data.user,
+        data.tokens.accessToken,
+        data.tokens.refreshToken
+      );
+      return data;
+    },
+    [persistSession]
+  );
+
   const value = useMemo(
     () => ({
       user,
@@ -235,6 +253,7 @@ export function AuthProvider({ children }) {
       signOut,
       confirmPhoneOtp,
       resendPhoneVerification,
+      signInWithGoogle,
     }),
     [
       user,
@@ -247,6 +266,7 @@ export function AuthProvider({ children }) {
       signOut,
       confirmPhoneOtp,
       resendPhoneVerification,
+      signInWithGoogle,
     ]
   );
 

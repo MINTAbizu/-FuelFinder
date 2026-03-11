@@ -1,4 +1,6 @@
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
+const { OAuth2Client } = require("google-auth-library");
 const User = require("../models/User");
 const { sendSms } = require("../services/smsService");
 const { setDevOtp, getDevOtp } = require("../utils/devOtpStore");
@@ -30,7 +32,8 @@ function buildAuthPayload(user) {
     email: user.email,
     name: user.name,
     role: user.role || "customer",
-    organizationId: user.organizationId ? String(user.organizationId) : ""
+    organizationId: user.organizationId ? String(user.organizationId) : "",
+    authProvider: user.authProvider || "local"
   };
 }
 
@@ -41,6 +44,7 @@ function buildUserResponse(user) {
     email: user.email,
     phone: user.phone || "",
     phoneVerified: Boolean(user.phoneVerified),
+    authProvider: user.authProvider || "local",
     isBlocked: Boolean(user.isBlocked),
     role: user.role || "customer",
     organizationId: user.organizationId || null,
@@ -113,6 +117,30 @@ async function issuePhoneVerification(user, { enforceCooldown = false } = {}) {
     expiresAt: otpExpiresAt,
     resendCooldownSeconds: PHONE_OTP_RESEND_COOLDOWN_SECONDS
   };
+}
+
+function getGoogleAudiences() {
+  const raw =
+    String(process.env.GOOGLE_CLIENT_IDS || "").trim() ||
+    String(process.env.GOOGLE_CLIENT_ID || "").trim();
+  const audiences = raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (!audiences.length) {
+    throw new Error("Missing GOOGLE_CLIENT_IDS for Google login.");
+  }
+  return audiences;
+}
+
+function pickGoogleProfileName(payload) {
+  const givenName = String(payload.given_name || "").trim();
+  const familyName = String(payload.family_name || "").trim();
+  const fullName = String(payload.name || "").trim();
+  if (fullName) return fullName;
+  if (givenName && familyName) return `${givenName} ${familyName}`;
+  return givenName || familyName || "FuelFinder User";
 }
 
 async function issueTokenPair(user) {
@@ -467,5 +495,87 @@ exports.devGetPhoneOtp = async (req, res) => {
     });
   } catch (_error) {
     return res.status(500).json({ message: "Failed to load dev OTP." });
+  }
+};
+
+exports.googleAuth = async (req, res) => {
+  try {
+    const idToken = String(req.body.idToken || "").trim();
+    const audiences = getGoogleAudiences();
+    const client = new OAuth2Client(audiences[0]);
+
+    const ticket = await client.verifyIdToken({
+      idToken,
+      audience: audiences
+    });
+
+    const payload = ticket.getPayload() || {};
+    const email = normalizeEmail(payload.email || "");
+    const emailVerified = Boolean(payload.email_verified);
+    const googleSub = String(payload.sub || "").trim();
+
+    if (!email || !emailVerified || !googleSub) {
+      return res.status(401).json({ message: "Google account not verified." });
+    }
+
+    let user = await User.findOne({ email });
+    if (user && user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+
+    if (!user) {
+      const name = pickGoogleProfileName(payload);
+      const randomPassword = crypto.randomBytes(32).toString("hex");
+      const passwordHash = await bcrypt.hash(randomPassword, SALT_ROUNDS);
+      user = await User.create({
+        name,
+        email,
+        phone: "",
+        phoneVerified: false,
+        passwordHash,
+        role: "customer",
+        authProvider: "google",
+        googleSub
+      });
+    } else {
+      let shouldSave = false;
+      if (!user.googleSub || user.googleSub !== googleSub) {
+        user.googleSub = googleSub;
+        shouldSave = true;
+      }
+      if (!user.authProvider || user.authProvider === "local") {
+        // Keep local users intact; only tag provider if unset.
+        if (!user.authProvider) {
+          user.authProvider = "local";
+          shouldSave = true;
+        }
+      } else if (user.authProvider !== "google") {
+        user.authProvider = "google";
+        shouldSave = true;
+      }
+      if (shouldSave) await user.save();
+    }
+
+    const requiresPhoneVerification =
+      String(user.role || "customer") === "customer" && !user.phoneVerified && Boolean(user.phone);
+    if (requiresPhoneVerification) {
+      const verification = await issuePhoneVerification(user, { enforceCooldown: false });
+      return res.json({
+        verificationRequired: true,
+        verificationToken: verification.verificationToken,
+        expiresAt: verification.expiresAt,
+        resendCooldownSeconds: verification.resendCooldownSeconds,
+        user: buildUserResponse(user),
+        message: "Phone number not verified."
+      });
+    }
+
+    const { accessToken, refreshToken } = await issueTokenPair(user);
+    return res.json({
+      user: buildUserResponse(user),
+      tokens: { accessToken, refreshToken }
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Google authentication failed." });
   }
 };

@@ -87,6 +87,16 @@ exports.validateRefresh = (req, res, next) => {
   return next();
 };
 
+exports.validateGoogleAuth = (req, res, next) => {
+  const idToken = normalize(req.body.idToken);
+  if (!idToken) {
+    return sendValidationError(res, "idToken is required.");
+  }
+
+  req.body.idToken = idToken;
+  return next();
+};
+
 exports.validateBootstrapSuperAdmin = (req, res, next) => {
   const name = normalize(req.body.name);
   const phone = normalize(req.body.phone);

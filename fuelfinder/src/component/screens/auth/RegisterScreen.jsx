@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,12 +13,16 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as WebBrowser from "expo-web-browser";
+import * as Google from "expo-auth-session/providers/google";
 import { useAuth } from "../../context/AuthContext";
 import { useLanguage } from "../../context/LanguageContext";
 import { API_BASE_URL } from "../../services/api";
 
+WebBrowser.maybeCompleteAuthSession();
+
 export default function RegisterScreen({ navigation }) {
-  const { signUp } = useAuth();
+  const { signUp, signInWithGoogle } = useAuth();
   const { language, changeLanguage, supportedLanguages, t } = useLanguage();
 
   const [name, setName] = useState("");
@@ -27,6 +31,53 @@ export default function RegisterScreen({ navigation }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const googleConfig = useMemo(
+    () => ({
+      expoClientId: process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID,
+      iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+      androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+      webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+      scopes: ["profile", "email"],
+      responseType: "id_token",
+    }),
+    []
+  );
+
+  const [request, response, promptAsync] = Google.useAuthRequest(googleConfig);
+
+  useEffect(() => {
+    if (response?.type !== "success") return;
+    const idToken = response.params?.id_token;
+    if (!idToken) {
+      setError("Google sign-in failed. Missing id token.");
+      return;
+    }
+    (async () => {
+      setGoogleLoading(true);
+      setError("");
+      try {
+        const result = await signInWithGoogle({ idToken });
+        if (result?.verificationRequired) {
+          navigation.navigate("VerifyPhone", {
+            verificationToken: result.verificationToken,
+            phone: result?.user?.phone || "",
+            email: result?.user?.email || "",
+          });
+        }
+      } catch (err) {
+        const backendMessage = err?.response?.data?.message;
+        if (backendMessage) {
+          setError(backendMessage);
+        } else {
+          setError(`${t("auth.register.cannotConnect")} (${API_BASE_URL}).`);
+        }
+      } finally {
+        setGoogleLoading(false);
+      }
+    })();
+  }, [navigation, response, signInWithGoogle, t]);
 
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
   const [languageQuery, setLanguageQuery] = useState("");
@@ -63,6 +114,19 @@ export default function RegisterScreen({ navigation }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const onGoogleRegister = async () => {
+    setError("");
+    if (!request) {
+      setError("Google sign-in is not ready. Check your client IDs.");
+      return;
+    }
+
+    const useProxy =
+      __DEV__ &&
+      String(process.env.EXPO_PUBLIC_GOOGLE_USE_PROXY || "true").toLowerCase() === "true";
+    await promptAsync({ useProxy });
   };
 
   // Language Picker
@@ -286,6 +350,18 @@ export default function RegisterScreen({ navigation }) {
             >
               <Text style={styles.createText}>Already have account? Login</Text>
             </Pressable>
+
+            <Pressable
+              style={styles.googleBtn}
+              onPress={onGoogleRegister}
+              disabled={googleLoading}
+            >
+              {googleLoading ? (
+                <ActivityIndicator color="#000" />
+              ) : (
+                <Text style={styles.googleText}>Continue with Google</Text>
+              )}
+            </Pressable>
           </View>
 
         </ScrollView>
@@ -347,4 +423,15 @@ const styles = StyleSheet.create({
   langRowLeft: { flex: 1 },
   langRowTitle: { fontWeight: "900", color: "#0F172A" },
   langRowSub: { marginTop: 2, color: "#64748B", fontWeight: "700", fontSize: 12 },
+
+  googleBtn: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 25,
+    padding: 14,
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+  },
+  googleText: { color: "#111827", fontWeight: "700" },
 });
