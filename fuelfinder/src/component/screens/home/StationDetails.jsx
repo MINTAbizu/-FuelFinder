@@ -748,6 +748,7 @@ export default function StationDetails({ route }) {
             <Text style={styles.metaText}>status: {String(myTicket.status || "-")}</Text>
             <Text style={styles.metaText}>position: {String(myTicket.position ?? "-")}</Text>
             <Text style={styles.metaText}>etaMinutes: {String(myTicket.etaMinutes ?? "-")}</Text>
+            <Text style={styles.metaText}>expiresAt: {formatDateTime(myTicket.expiresAt)}</Text>
             <Text style={styles.metaText}>fuelType: {String(myTicket.fuelType || fuelType)}</Text>
             <Text style={styles.metaText}>requestedLiters: {String(myTicket.requestedLiters ?? "-")}</Text>
             <Text style={styles.metaText}>estimatedAmount: {String(myTicket.estimatedAmount ?? "-")} ETB</Text>
