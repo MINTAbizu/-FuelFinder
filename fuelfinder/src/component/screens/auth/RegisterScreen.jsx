@@ -33,19 +33,26 @@ export default function RegisterScreen({ navigation }) {
 
   const onRegister = async () => {
     setError("");
-    if (!name.trim() || !email.trim() || !password) {
+    if (!name.trim() || !email.trim() || !password || !phone.trim()) {
       setError(t("auth.register.requiredError"));
       return;
     }
 
     setLoading(true);
     try {
-      await signUp({
+      const result = await signUp({
         name: name.trim(),
         email: email.trim(),
         phone: phone.trim(),
         password,
       });
+      if (result?.verificationRequired) {
+        navigation.navigate("VerifyPhone", {
+          verificationToken: result.verificationToken,
+          phone: result?.user?.phone || phone.trim(),
+          email: email.trim(),
+        });
+      }
     } catch (err) {
       const backendMessage = err?.response?.data?.message;
       if (backendMessage) {

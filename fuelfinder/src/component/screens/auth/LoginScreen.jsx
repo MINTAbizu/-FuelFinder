@@ -34,7 +34,14 @@ export default function LoginScreen({ navigation }) {
 
     setLoading(true);
     try {
-      await signIn({ email: email.trim(), password });
+      const result = await signIn({ email: email.trim(), password });
+      if (result?.verificationRequired) {
+        navigation.navigate("VerifyPhone", {
+          verificationToken: result.verificationToken,
+          phone: result?.user?.phone || "",
+          email: email.trim(),
+        });
+      }
     } catch (err) {
       const backendMessage = err?.response?.data?.message;
       if (backendMessage) {

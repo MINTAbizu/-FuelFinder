@@ -4,6 +4,11 @@ const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     phone: { type: String, trim: true, default: "" },
+    phoneVerified: { type: Boolean, default: false },
+    phoneVerificationHash: { type: String, default: "" },
+    phoneVerificationExpiresAt: { type: Date, default: null, index: true },
+    phoneVerificationAttempts: { type: Number, default: 0 },
+    phoneVerificationLastSentAt: { type: Date, default: null },
     email: { type: String, required: true, trim: true, lowercase: true, unique: true },
     passwordHash: { type: String, required: true },
     refreshTokenHash: { type: String, default: "" },

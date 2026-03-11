@@ -1,5 +1,15 @@
 const bcrypt = require("bcryptjs");
 const User = require("../models/User");
+const { sendSms } = require("../services/smsService");
+const { setDevOtp, getDevOtp } = require("../utils/devOtpStore");
+const {
+  OTP_TTL_SECONDS,
+  generateOtpCode,
+  hashOtpCode,
+  verifyOtpHash,
+  signPhoneOtpToken,
+  verifyPhoneOtpToken
+} = require("../utils/phoneOtp");
 const {
   signAccessToken,
   signRefreshToken,
@@ -7,6 +17,8 @@ const {
 } = require("../utils/tokens");
 
 const SALT_ROUNDS = 12;
+const PHONE_OTP_MAX_ATTEMPTS = Number(process.env.PHONE_OTP_MAX_ATTEMPTS || 5);
+const PHONE_OTP_RESEND_COOLDOWN_SECONDS = Number(process.env.PHONE_OTP_RESEND_COOLDOWN_SECONDS || 60);
 
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -28,6 +40,7 @@ function buildUserResponse(user) {
     name: user.name,
     email: user.email,
     phone: user.phone || "",
+    phoneVerified: Boolean(user.phoneVerified),
     isBlocked: Boolean(user.isBlocked),
     role: user.role || "customer",
     organizationId: user.organizationId || null,
@@ -35,6 +48,70 @@ function buildUserResponse(user) {
     stationIds: user.stationIds || [],
     branchIds: user.branchIds || [],
     createdAt: user.createdAt
+  };
+}
+
+function buildPhoneVerificationMessage(code) {
+  const minutes = Math.max(1, Math.ceil(OTP_TTL_SECONDS / 60));
+  return `Your FuelFinder verification code is ${code}. It expires in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+}
+
+function getPhoneOtpCooldownRemainingSeconds(user) {
+  const lastSentAt = user.phoneVerificationLastSentAt;
+  if (!lastSentAt) return 0;
+  const elapsedMs = Date.now() - new Date(lastSentAt).getTime();
+  const remainingMs = PHONE_OTP_RESEND_COOLDOWN_SECONDS * 1000 - elapsedMs;
+  return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
+}
+
+async function issuePhoneVerification(user, { enforceCooldown = false } = {}) {
+  const now = new Date();
+  const cooldownRemaining = getPhoneOtpCooldownRemainingSeconds(user);
+  const hasActiveOtp =
+    user.phoneVerificationExpiresAt &&
+    new Date(user.phoneVerificationExpiresAt) > now &&
+    String(user.phoneVerificationHash || "");
+
+  if (enforceCooldown && cooldownRemaining > 0) {
+    const error = new Error("Please wait before requesting another verification code.");
+    error.status = 429;
+    error.retryAfterSeconds = cooldownRemaining;
+    throw error;
+  }
+
+  if (!enforceCooldown && cooldownRemaining > 0 && hasActiveOtp) {
+    return {
+      verificationToken: signPhoneOtpToken({
+        sub: String(user._id),
+        phone: String(user.phone || ""),
+        purpose: "phone_verification"
+      }),
+      expiresAt: user.phoneVerificationExpiresAt,
+      resendCooldownSeconds: cooldownRemaining,
+      reused: true
+    };
+  }
+
+  const otpCode = generateOtpCode();
+  const otpHash = hashOtpCode(otpCode);
+  const otpExpiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
+
+  user.phoneVerificationHash = otpHash;
+  user.phoneVerificationExpiresAt = otpExpiresAt;
+  user.phoneVerificationAttempts = 0;
+  user.phoneVerificationLastSentAt = now;
+  await sendSms(String(user.phone || ""), buildPhoneVerificationMessage(otpCode));
+  setDevOtp(user._id, otpCode, otpExpiresAt);
+  await user.save();
+
+  return {
+    verificationToken: signPhoneOtpToken({
+      sub: String(user._id),
+      phone: String(user.phone || ""),
+      purpose: "phone_verification"
+    }),
+    expiresAt: otpExpiresAt,
+    resendCooldownSeconds: PHONE_OTP_RESEND_COOLDOWN_SECONDS
   };
 }
 
@@ -72,14 +149,23 @@ exports.register = async (req, res) => {
       phone,
       email,
       passwordHash,
-      role: "customer"
+      role: "customer",
+      phoneVerified: false
     });
-    const { accessToken, refreshToken } = await issueTokenPair(user);
 
-    return res.status(201).json({
-      user: buildUserResponse(user),
-      tokens: { accessToken, refreshToken }
-    });
+    try {
+      const verification = await issuePhoneVerification(user, { enforceCooldown: false });
+      return res.status(201).json({
+        verificationRequired: true,
+        verificationToken: verification.verificationToken,
+        expiresAt: verification.expiresAt,
+        resendCooldownSeconds: verification.resendCooldownSeconds,
+        user: buildUserResponse(user)
+      });
+    } catch (sendErr) {
+      await User.deleteOne({ _id: user._id });
+      throw sendErr;
+    }
   } catch (error) {
     return res.status(500).json({ message: "Registration failed." });
   }
@@ -152,6 +238,20 @@ exports.login = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials." });
     }
 
+    const requiresPhoneVerification =
+      String(user.role || "customer") === "customer" && !user.phoneVerified && Boolean(user.phone);
+    if (requiresPhoneVerification) {
+      const verification = await issuePhoneVerification(user, { enforceCooldown: false });
+      return res.json({
+        verificationRequired: true,
+        verificationToken: verification.verificationToken,
+        expiresAt: verification.expiresAt,
+        resendCooldownSeconds: verification.resendCooldownSeconds,
+        user: buildUserResponse(user),
+        message: "Phone number not verified."
+      });
+    }
+
     const { accessToken, refreshToken } = await issueTokenPair(user);
 
     return res.json({
@@ -214,5 +314,158 @@ exports.me = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load profile." });
+  }
+};
+
+exports.verifyPhone = async (req, res) => {
+  try {
+    const verificationToken = String(req.body.verificationToken || "").trim();
+    const otpCode = String(req.body.otpCode || "").trim();
+    let payload;
+
+    try {
+      payload = verifyPhoneOtpToken(verificationToken);
+    } catch (_err) {
+      return res.status(401).json({ message: "Invalid or expired verification token." });
+    }
+
+    const userId = String(payload?.sub || "");
+    if (!userId) {
+      return res.status(401).json({ message: "Invalid verification token payload." });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+    if (String(user.phone || "") !== String(payload.phone || "")) {
+      return res.status(401).json({ message: "Verification token does not match phone." });
+    }
+    if (user.phoneVerified) {
+      const tokens = await issueTokenPair(user);
+      return res.json({
+        user: buildUserResponse(user),
+        tokens
+      });
+    }
+
+    if (!user.phoneVerificationExpiresAt || user.phoneVerificationExpiresAt <= new Date()) {
+      return res.status(410).json({ message: "Verification code expired. Request a new one." });
+    }
+    if (user.phoneVerificationAttempts >= PHONE_OTP_MAX_ATTEMPTS) {
+      return res.status(429).json({ message: "Maximum OTP attempts reached. Request a new code." });
+    }
+
+    const isValid = verifyOtpHash(user.phoneVerificationHash, otpCode);
+    if (!isValid) {
+      user.phoneVerificationAttempts = Number(user.phoneVerificationAttempts || 0) + 1;
+      await user.save();
+      return res.status(401).json({ message: "Invalid verification code." });
+    }
+
+    user.phoneVerified = true;
+    user.phoneVerificationHash = "";
+    user.phoneVerificationExpiresAt = null;
+    user.phoneVerificationAttempts = 0;
+    user.phoneVerificationLastSentAt = null;
+    await user.save();
+
+    const { accessToken, refreshToken } = await issueTokenPair(user);
+    return res.json({
+      user: buildUserResponse(user),
+      tokens: { accessToken, refreshToken }
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to verify phone number." });
+  }
+};
+
+exports.resendPhoneOtp = async (req, res) => {
+  try {
+    const verificationToken = String(req.body.verificationToken || "").trim();
+    let payload;
+
+    try {
+      payload = verifyPhoneOtpToken(verificationToken);
+    } catch (_err) {
+      return res.status(401).json({ message: "Invalid or expired verification token." });
+    }
+
+    const userId = String(payload?.sub || "");
+    if (!userId) {
+      return res.status(401).json({ message: "Invalid verification token payload." });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+    if (String(user.phone || "") !== String(payload.phone || "")) {
+      return res.status(401).json({ message: "Verification token does not match phone." });
+    }
+    if (user.phoneVerified) {
+      return res.status(409).json({ message: "Phone number already verified." });
+    }
+
+    const verification = await issuePhoneVerification(user, { enforceCooldown: true });
+    return res.json({
+      verificationRequired: true,
+      verificationToken: verification.verificationToken,
+      expiresAt: verification.expiresAt,
+      resendCooldownSeconds: verification.resendCooldownSeconds,
+      message: "Verification code sent."
+    });
+  } catch (error) {
+    if (error?.status === 429) {
+      return res.status(429).json({
+        message: String(error.message || "Please wait before requesting another verification code."),
+        retryAfterSeconds: Number(error.retryAfterSeconds || 0)
+      });
+    }
+    return res.status(500).json({ message: "Failed to resend verification code." });
+  }
+};
+
+exports.devGetPhoneOtp = async (req, res) => {
+  const allowDevEndpoint =
+    String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production" &&
+    String(process.env.PHONE_OTP_DEV_ENDPOINT || "").trim().toLowerCase() === "true";
+
+  if (!allowDevEndpoint) {
+    return res.status(404).json({ message: "Not found." });
+  }
+
+  try {
+    const verificationToken = String(req.body.verificationToken || "").trim();
+    let payload;
+
+    try {
+      payload = verifyPhoneOtpToken(verificationToken);
+    } catch (_err) {
+      return res.status(401).json({ message: "Invalid or expired verification token." });
+    }
+
+    const userId = String(payload?.sub || "");
+    if (!userId) {
+      return res.status(401).json({ message: "Invalid verification token payload." });
+    }
+
+    const entry = getDevOtp(userId);
+    if (!entry) {
+      return res.status(404).json({ message: "No OTP available for this user." });
+    }
+
+    return res.json({
+      otpCode: entry.otpCode,
+      expiresAt: entry.expiresAt || null
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to load dev OTP." });
   }
 };

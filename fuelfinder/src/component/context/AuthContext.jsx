@@ -8,6 +8,8 @@ import {
   logoutUser,
   refreshUserToken,
   registerUser,
+  resendPhoneOtp,
+  verifyPhoneOtp,
 } from "../services/authService";
 
 const AuthContext = createContext(null);
@@ -90,7 +92,9 @@ export function AuthProvider({ children }) {
         const isAuthMutation =
           original.url?.includes("/auth/login") ||
           original.url?.includes("/auth/register") ||
-          original.url?.includes("/auth/refresh");
+          original.url?.includes("/auth/refresh") ||
+          original.url?.includes("/auth/phone/verify") ||
+          original.url?.includes("/auth/phone/resend");
         if (isAuthMutation) {
           return Promise.reject(error);
         }
@@ -162,12 +166,15 @@ export function AuthProvider({ children }) {
   const signUp = useCallback(
     async ({ name, email, phone, password }) => {
       const data = await registerUser({ name, email, phone, password });
+      if (data?.verificationRequired) {
+        return data;
+      }
       await persistSession(
         data.user,
         data.tokens.accessToken,
         data.tokens.refreshToken
       );
-      return data.user;
+      return data;
     },
     [persistSession]
   );
@@ -175,15 +182,36 @@ export function AuthProvider({ children }) {
   const signIn = useCallback(
     async ({ email, password }) => {
       const data = await loginUser({ email, password });
+      if (data?.verificationRequired) {
+        return data;
+      }
       await persistSession(
         data.user,
         data.tokens.accessToken,
         data.tokens.refreshToken
       );
-      return data.user;
+      return data;
     },
     [persistSession]
   );
+
+  const confirmPhoneOtp = useCallback(
+    async ({ verificationToken, otpCode }) => {
+      const data = await verifyPhoneOtp({ verificationToken, otpCode });
+      await persistSession(
+        data.user,
+        data.tokens.accessToken,
+        data.tokens.refreshToken
+      );
+      return data;
+    },
+    [persistSession]
+  );
+
+  const resendPhoneVerification = useCallback(async ({ verificationToken }) => {
+    const data = await resendPhoneOtp({ verificationToken });
+    return data;
+  }, []);
 
   const signOut = useCallback(async () => {
     try {
@@ -205,6 +233,8 @@ export function AuthProvider({ children }) {
       signUp,
       signIn,
       signOut,
+      confirmPhoneOtp,
+      resendPhoneVerification,
     }),
     [
       user,
@@ -215,6 +245,8 @@ export function AuthProvider({ children }) {
       signUp,
       signIn,
       signOut,
+      confirmPhoneOtp,
+      resendPhoneVerification,
     ]
   );
 

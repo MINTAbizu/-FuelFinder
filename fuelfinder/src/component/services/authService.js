@@ -24,3 +24,13 @@ export async function logoutUser() {
   const { data } = await api.post("/auth/logout");
   return data;
 }
+
+export async function verifyPhoneOtp(payload) {
+  const { data } = await api.post("/auth/phone/verify", payload);
+  return data;
+}
+
+export async function resendPhoneOtp(payload) {
+  const { data } = await api.post("/auth/phone/resend", payload);
+  return data;
+}

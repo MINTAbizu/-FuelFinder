@@ -90,6 +90,7 @@ export default function HomeScreen({ navigation }) {
   const loadedRef = useRef(false);
 
   const [location, setLocation] = useState(null);
+  const [hasLocationPermission, setHasLocationPermission] = useState(false);
   const [mapCenter, setMapCenter] = useState({
     latitude: DEFAULT_REGION.latitude,
     longitude: DEFAULT_REGION.longitude,
@@ -115,10 +116,12 @@ export default function HomeScreen({ navigation }) {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== "granted") {
+          if (mounted) setHasLocationPermission(false);
           if (mounted) setLocationError(t("homeScreen.location.denied"));
           return;
         }
 
+        if (mounted) setHasLocationPermission(true);
         const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         if (mounted) setLocation(current.coords);
 
@@ -127,7 +130,10 @@ export default function HomeScreen({ navigation }) {
           (pos) => mounted && setLocation(pos.coords)
         );
       } catch (_error) {
-        if (mounted) setLocationError(t("homeScreen.location.fail"));
+        if (mounted) {
+          setHasLocationPermission(false);
+          setLocationError(t("homeScreen.location.fail"));
+        }
       }
     })();
 
@@ -331,7 +337,7 @@ export default function HomeScreen({ navigation }) {
                       }
                     : DEFAULT_REGION
                 }
-                showsUserLocation
+                showsUserLocation={hasLocationPermission}
                 onRegionChangeComplete={(region) => setMapCenter({ latitude: region.latitude, longitude: region.longitude })}
               >
                 {routeCoords.length ? <Polyline coordinates={routeCoords} strokeWidth={5} strokeColor="#2563EB" /> : null}

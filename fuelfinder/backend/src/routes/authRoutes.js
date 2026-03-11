@@ -6,7 +6,9 @@ const {
   validateRegister,
   validateLogin,
   validateRefresh,
-  validateBootstrapSuperAdmin
+  validateBootstrapSuperAdmin,
+  validatePhoneVerification,
+  validatePhoneResend
 } = require("../middleware/validateAuth");
 
 const router = express.Router();
@@ -22,5 +24,8 @@ router.post("/login", authLimiter, validateLogin, authController.login);
 router.post("/refresh", authLimiter, validateRefresh, authController.refresh);
 router.post("/logout", auth, authController.logout);
 router.get("/me", auth, authController.me);
+router.post("/phone/verify", authLimiter, validatePhoneVerification, authController.verifyPhone);
+router.post("/phone/resend", authLimiter, validatePhoneResend, authController.resendPhoneOtp);
+router.post("/phone/dev-otp", authLimiter, validatePhoneResend, authController.devGetPhoneOtp);
 
 module.exports = router;

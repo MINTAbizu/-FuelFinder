@@ -524,3 +524,60 @@ Here’s a **30/60/90‑day plan** sized for **1 developer**, focused on drivers
    - Analytics export (CSV).
 
 If you want, I can map this into exact **screens + API routes** you already have and create a **task backlog** for the next 2 weeks.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+cd fuelfinder/backend
+
+$env:OWNER_EMAIL="owner@station.com"
+$env:OWNER_PASSWORD="StrongPassword123"
+$env:OWNER_NAME="Station Owner"
+$env:OWNER_ROLE="station_manager"
+
+$env:OWNER_CREATE_STATION="true"
+$env:OWNER_STATION_NAME="Mintes Fuel Hub"
+$env:OWNER_STATION_ADDRESS="Bole, Addis Ababa"
+$env:OWNER_STATION_LAT="8.9806"
+$env:OWNER_STATION_LON="38.7578"
+
+npm run owner:bootstrap
+
+
+
+
+
+
+
+
+cd fuelfinder/backend
+
+$env:OWNER_EMAIL="owner@station.com"
+$env:OWNER_PASSWORD="StrongPassword123"
+$env:OWNER_NAME="Station Owner"
+$env:OWNER_ROLE="station_manager"
+$env:OWNER_STATION_ID="PUT_EXISTING_STATION_OBJECT_ID_HERE"
+
+npm run owner:bootstrap

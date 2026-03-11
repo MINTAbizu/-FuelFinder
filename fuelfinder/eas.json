@@ -12,6 +12,7 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://fuelfinder-2.onrender.com",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://02a7eb91a9c78c543aed5bbc9b03098a@o4510905935003648.ingest.us.sentry.io/4511024541270016",
         "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     },
@@ -19,6 +20,7 @@
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://fuelfinder-2.onrender.com",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://02a7eb91a9c78c543aed5bbc9b03098a@o4510905935003648.ingest.us.sentry.io/4511024541270016",
         "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     }

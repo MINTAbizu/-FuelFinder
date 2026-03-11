@@ -23,6 +23,7 @@ import HomeScreen from "./src/component/screens/home/HomeScreen";
 import StationDetails from "./src/component/screens/home/StationDetails";
 import LoginScreen from "./src/component/screens/auth/LoginScreen";
 import RegisterScreen from "./src/component/screens/auth/RegisterScreen";
+import PhoneVerifyScreen from "./src/component/screens/auth/PhoneVerifyScreen";
 import { AuthProvider, useAuth } from "./src/component/context/AuthContext";
 import { LanguageProvider, useLanguage } from "./src/component/context/LanguageContext";
 
@@ -33,8 +34,9 @@ const Tab = createBottomTabNavigator();
 
 import * as Sentry from "@sentry/react-native";
 // Unlike Sentry on other platforms, you do not need to import anything to use tracing on React Native
+const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN || process.env.DSN || "";
 Sentry.init({
-  dsn: process.env.DSN,
+  dsn: sentryDsn,
   // We recommend adjusting this value in production, or using tracesSampler
   // for finer control
   tracesSampleRate: 1.0,
@@ -708,6 +710,7 @@ function AuthStack() {
     <RootStack.Navigator screenOptions={{ headerShown: false }}>
       <RootStack.Screen name="Login" component={LoginScreen} />
       <RootStack.Screen name="Register" component={RegisterScreen} />
+      <RootStack.Screen name="VerifyPhone" component={PhoneVerifyScreen} />
     </RootStack.Navigator>
   );
 }
