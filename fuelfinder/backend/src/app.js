@@ -8,6 +8,7 @@ const queueRoutes = require("./routes/queueRoutes");
 const mapRoutes = require("./routes/mapRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const chapaPaymentRoutes = require("./routes/chapapayment.routes");
+const ownerRoutes = require("./routes/ownerRoutes");
 
 const app = express();
 const isProduction = process.env.NODE_ENV === "production";
@@ -52,10 +53,12 @@ app.use("/api/auth", authRoutes);
 app.use("/api/queue", queueRoutes);
 app.use("/api/map", mapRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/owner", ownerRoutes);
 app.use("/auth", authRoutes);
 app.use("/queue", queueRoutes);
 app.use("/map", mapRoutes);
 app.use("/admin", adminRoutes);
+app.use("/owner", ownerRoutes);
 app.use("/api/payments", chapaPaymentRoutes);
 
 

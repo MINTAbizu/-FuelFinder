@@ -1,4 +1,14 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  callNextInQueue,
+  getOwnerStation,
+  getStationQueue,
+  listOwnerStations,
+  loadSession,
+  login,
+  logout,
+  updateFuelStock
+} from "./api.js";
 
 const sections = [
   { id: "overview", label: "Overview" },
@@ -10,26 +20,214 @@ const sections = [
   { id: "settings", label: "Settings" }
 ];
 
-const mockMetrics = [
-  { label: "Avg wait time", value: "7.5 min" },
-  { label: "Active queue", value: "18 drivers" },
-  { label: "Fuel in stock", value: "Premium + Diesel" },
-  { label: "Today check-ins", value: "146" }
-];
+const roleLabels = {
+  staff: "Station Staff",
+  station_manager: "Station Manager",
+  city_manager: "City Manager",
+  org_admin: "Org Owner",
+  super_admin: "Super Admin"
+};
 
-const mockAlerts = [
-  { title: "Diesel below threshold", meta: "ETA to stock-out: 4h" },
-  { title: "Queue spike", meta: "45% above typical 5pm load" },
-  { title: "Promo ending", meta: "Happy Hour discount ends in 2h" }
-];
+function formatMinutes(minutes) {
+  if (!Number.isFinite(minutes)) return "—";
+  if (minutes < 1) return "<1 min";
+  if (minutes < 60) return `${Math.round(minutes)} min`;
+  const hours = Math.floor(minutes / 60);
+  const remaining = Math.round(minutes % 60);
+  return remaining ? `${hours}h ${remaining}m` : `${hours}h`;
+}
+
+function buildEstimate(waitingCount) {
+  const avgMinutesPerCar = 3;
+  return waitingCount * avgMinutesPerCar;
+}
 
 export default function App() {
   const [active, setActive] = useState("overview");
+  const [session, setSession] = useState(() => loadSession());
+  const [authError, setAuthError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [stations, setStations] = useState([]);
+  const [stationId, setStationId] = useState("");
+  const [station, setStation] = useState(null);
+  const [queueSnapshot, setQueueSnapshot] = useState(null);
+  const [fuelForm, setFuelForm] = useState({
+    gasolineLiters: "",
+    dieselLiters: "",
+    otherLiters: ""
+  });
+  const [statusMessage, setStatusMessage] = useState("");
 
   const sectionTitle = useMemo(() => {
     const section = sections.find((item) => item.id === active);
     return section ? section.label : "Overview";
   }, [active]);
+
+  const derivedMetrics = useMemo(() => {
+    const waitingCount = Number(queueSnapshot?.waitingCount || 0);
+    const estimatedWait = buildEstimate(waitingCount);
+    const fuelStatus = station?.fuelStatus || queueSnapshot?.fuelStatus || "partial";
+    return [
+      { label: "Avg wait time", value: formatMinutes(estimatedWait) },
+      { label: "Active queue", value: `${waitingCount} drivers` },
+      {
+        label: "Fuel status",
+        value: fuelStatus === "full" ? "All tanks healthy" : fuelStatus === "empty" ? "Out of stock" : "Partial stock"
+      },
+      { label: "Pending payments", value: `${Number(queueSnapshot?.pendingCount || 0)}` }
+    ];
+  }, [queueSnapshot, station]);
+
+  useEffect(() => {
+    if (!session?.tokens?.accessToken) return;
+
+    const loadStations = async () => {
+      setIsLoading(true);
+      setStatusMessage("");
+      try {
+        const data = await listOwnerStations();
+        const list = data?.stations || [];
+        setStations(list);
+        if (list.length && !stationId) {
+          setStationId(String(list[0].id || list[0]._id || ""));
+        }
+      } catch (error) {
+        setStatusMessage(error.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadStations();
+  }, [session?.tokens?.accessToken]);
+
+  useEffect(() => {
+    if (!session?.tokens?.accessToken || !stationId) return;
+    let isActive = true;
+
+    const loadStationData = async () => {
+      setIsLoading(true);
+      try {
+        const [stationData, queueData] = await Promise.all([
+          getOwnerStation(stationId),
+          getStationQueue(stationId)
+        ]);
+        if (!isActive) return;
+        const resolvedStation = stationData?.station || stationData;
+        setStation(resolvedStation);
+        setQueueSnapshot(queueData);
+      } catch (error) {
+        if (!isActive) return;
+        setStatusMessage(error.message);
+      } finally {
+        if (isActive) setIsLoading(false);
+      }
+    };
+
+    loadStationData();
+    const interval = setInterval(loadStationData, 30000);
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+    };
+  }, [session, stationId]);
+
+  useEffect(() => {
+    if (!station?.fuelInventory) return;
+    setFuelForm({
+      gasolineLiters: station.fuelInventory.gasolineLiters ?? "",
+      dieselLiters: station.fuelInventory.dieselLiters ?? "",
+      otherLiters: station.fuelInventory.otherLiters ?? ""
+    });
+  }, [station]);
+
+  const handleLogin = async (event) => {
+    event.preventDefault();
+    setAuthError("");
+    setIsLoading(true);
+    const form = new FormData(event.currentTarget);
+    const email = String(form.get("email") || "");
+    const password = String(form.get("password") || "");
+    try {
+      const nextSession = await login(email, password);
+      setSession(nextSession);
+    } catch (error) {
+      setAuthError(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    setSession(null);
+    setStations([]);
+    setStationId("");
+    setStation(null);
+    setQueueSnapshot(null);
+  };
+
+  const handleFuelUpdate = async () => {
+    if (!stationId) return;
+    setIsLoading(true);
+    setStatusMessage("");
+    try {
+      await updateFuelStock(stationId, {
+        gasolineLiters: Number(fuelForm.gasolineLiters),
+        dieselLiters: Number(fuelForm.dieselLiters),
+        otherLiters: Number(fuelForm.otherLiters)
+      });
+      const refreshedStation = await getOwnerStation(stationId);
+      setStation(refreshedStation?.station || refreshedStation);
+      setStatusMessage("Fuel stock updated.");
+    } catch (error) {
+      setStatusMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCallNext = async () => {
+    if (!stationId) return;
+    setIsLoading(true);
+    setStatusMessage("");
+    try {
+      await callNextInQueue(stationId);
+      const queueData = await getStationQueue(stationId);
+      setQueueSnapshot(queueData);
+      setStatusMessage("Next ticket called.");
+    } catch (error) {
+      setStatusMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (!session?.tokens?.accessToken) {
+    return (
+      <div className="login-shell">
+        <div className="login-card">
+          <h1>FuelFinder Owner Console</h1>
+          <p>Sign in to manage your station operations.</p>
+          <form onSubmit={handleLogin} className="login-form">
+            <label>
+              Email
+              <input name="email" type="email" placeholder="owner@station.com" required />
+            </label>
+            <label>
+              Password
+              <input name="password" type="password" placeholder="Your password" required />
+            </label>
+            {authError && <span className="error-text">{authError}</span>}
+            <button className="btn alt" type="submit" disabled={isLoading}>
+              {isLoading ? "Signing in..." : "Sign in"}
+            </button>
+          </form>
+          <small>Need access? Ask your admin to create an owner account.</small>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -50,8 +248,12 @@ export default function App() {
           ))}
         </nav>
         <div className="cta">
-          Ops tip: keep fuel status updates fresh to increase customer trust and
-          reduce wasted trips.
+          Signed in as <strong>{session?.user?.name || "Owner"}</strong>
+          <br />
+          <span>{roleLabels[session?.user?.role] || session?.user?.role}</span>
+          <button className="btn" onClick={handleLogout} style={{ marginTop: "12px" }}>
+            Sign out
+          </button>
         </div>
       </aside>
 
@@ -63,17 +265,30 @@ export default function App() {
           </div>
           <div className="station-chip">
             <strong>Station:</strong>
-            <span>Mintes Fuel Hub</span>
-            <span className="pill">Open</span>
+            <select
+              value={stationId}
+              onChange={(event) => setStationId(event.target.value)}
+            >
+              {stations.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name || `Station ${item.id}`}
+                </option>
+              ))}
+            </select>
+            <span className={`pill ${station?.isActive ? "" : "warn"}`}>
+              {station?.isActive ? "Open" : "Inactive"}
+            </span>
           </div>
         </div>
+
+        {statusMessage && <div className="status-banner">{statusMessage}</div>}
 
         {active === "overview" && (
           <div className="grid">
             <div className="card full">
               <h3>Today at a glance</h3>
               <div className="metrics">
-                {mockMetrics.map((metric) => (
+                {derivedMetrics.map((metric) => (
                   <div className="metric" key={metric.label}>
                     <span>{metric.label}</span>
                     <strong>{metric.value}</strong>
@@ -95,32 +310,39 @@ export default function App() {
                 </label>
                 <label>
                   Last updated
-                  <input type="text" value="3 minutes ago" readOnly />
+                  <input type="text" value={queueSnapshot?.fuelInventory?.updatedAt || "—"} readOnly />
                 </label>
                 <label>
                   Live queue length
-                  <input type="number" defaultValue={18} />
+                  <input type="number" value={queueSnapshot?.waitingCount || 0} readOnly />
                 </label>
                 <label>
-                  Avg wait (minutes)
-                  <input type="number" defaultValue={7} />
+                  Estimated wait
+                  <input type="text" value={formatMinutes(buildEstimate(queueSnapshot?.waitingCount || 0))} readOnly />
                 </label>
               </div>
-              <button className="btn alt">Update live status</button>
+              <button className="btn alt" disabled>
+                Queue controls coming soon
+              </button>
             </div>
 
             <div className="card narrow">
               <h3>Priority alerts</h3>
               <div className="list">
-                {mockAlerts.map((alert) => (
-                  <div className="list-item" key={alert.title}>
-                    <div>
-                      <strong>{alert.title}</strong>
-                      <span>{alert.meta}</span>
-                    </div>
-                    <span className="pill warn">Review</span>
+                <div className="list-item">
+                  <div>
+                    <strong>Diesel below threshold</strong>
+                    <span>18% remaining</span>
                   </div>
-                ))}
+                  <span className="pill warn">Review</span>
+                </div>
+                <div className="list-item">
+                  <div>
+                    <strong>Queue spike</strong>
+                    <span>{queueSnapshot?.waitingCount || 0} drivers waiting</span>
+                  </div>
+                  <span className="pill">Live</span>
+                </div>
               </div>
             </div>
           </div>
@@ -132,63 +354,64 @@ export default function App() {
               <h3>Queue controls</h3>
               <div className="form-row">
                 <label>
-                  Queue mode
-                  <select defaultValue="standard">
-                    <option value="standard">Standard</option>
-                    <option value="reservation">Reservation</option>
-                    <option value="priority">Priority only</option>
-                  </select>
-                </label>
-                <label>
-                  Max tickets per hour
-                  <input type="number" defaultValue={60} />
-                </label>
-                <label>
                   Current wait estimate
-                  <input type="number" defaultValue={8} />
+                  <input type="text" value={formatMinutes(buildEstimate(queueSnapshot?.waitingCount || 0))} readOnly />
                 </label>
                 <label>
-                  Walk-ins allowed
-                  <select defaultValue="yes">
-                    <option value="yes">Yes</option>
-                    <option value="no">No</option>
-                  </select>
+                  Waiting drivers
+                  <input type="number" value={queueSnapshot?.waitingCount || 0} readOnly />
+                </label>
+                <label>
+                  Pending payments
+                  <input type="number" value={queueSnapshot?.pendingCount || 0} readOnly />
+                </label>
+                <label>
+                  Called now
+                  <input type="text" value={queueSnapshot?.called?.reservationCode || "—"} readOnly />
                 </label>
               </div>
-              <button className="btn alt">Apply queue settings</button>
+              <button className="btn alt" onClick={handleCallNext} disabled={isLoading}>
+                Call next ticket
+              </button>
             </div>
             <div className="card narrow">
               <h3>Queue insights</h3>
               <div className="list">
                 <div className="list-item">
                   <div>
-                    <strong>Peak hour</strong>
-                    <span>5:00 PM - 6:00 PM</span>
+                    <strong>Avg wait</strong>
+                    <span>{formatMinutes(buildEstimate(queueSnapshot?.waitingCount || 0))}</span>
                   </div>
-                  <span className="pill">+32%</span>
+                  <span className="pill">Live</span>
                 </div>
                 <div className="list-item">
                   <div>
-                    <strong>No-show rate</strong>
-                    <span>Last 7 days</span>
+                    <strong>Next call</strong>
+                    <span>{queueSnapshot?.waiting?.[0]?.reservationCode || "None"}</span>
                   </div>
-                  <span className="pill warn">6%</span>
+                  <span className="pill warn">Queue</span>
                 </div>
               </div>
             </div>
             <div className="card full">
-              <h3>Ticket timeline</h3>
+              <h3>Waiting tickets</h3>
               <div className="list">
-                {["Ticket #1024 queued", "Ticket #1012 called", "Ticket #1009 served"].map(
-                  (item) => (
-                    <div className="list-item" key={item}>
-                      <div>
-                        <strong>{item}</strong>
-                        <span>Updated moments ago</span>
-                      </div>
-                      <button className="btn">View</button>
+                {(queueSnapshot?.waiting || []).slice(0, 6).map((ticket) => (
+                  <div className="list-item" key={ticket.reservationId}>
+                    <div>
+                      <strong>{ticket.reservationCode || "Ticket"}</strong>
+                      <span>Position {ticket.position}</span>
                     </div>
-                  )
+                    <button className="btn">View</button>
+                  </div>
+                ))}
+                {!queueSnapshot?.waiting?.length && (
+                  <div className="list-item">
+                    <div>
+                      <strong>No waiting tickets</strong>
+                      <span>Queue is clear.</span>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -201,35 +424,43 @@ export default function App() {
               <h3>Fuel availability</h3>
               <div className="form-row">
                 <label>
-                  Premium
-                  <select defaultValue="in-stock">
-                    <option value="in-stock">In stock</option>
-                    <option value="low">Low</option>
-                    <option value="out">Out</option>
-                  </select>
+                  Gasoline (liters)
+                  <input
+                    type="number"
+                    value={fuelForm.gasolineLiters}
+                    onChange={(event) =>
+                      setFuelForm((prev) => ({ ...prev, gasolineLiters: event.target.value }))
+                    }
+                  />
                 </label>
                 <label>
-                  Diesel
-                  <select defaultValue="low">
-                    <option value="in-stock">In stock</option>
-                    <option value="low">Low</option>
-                    <option value="out">Out</option>
-                  </select>
+                  Diesel (liters)
+                  <input
+                    type="number"
+                    value={fuelForm.dieselLiters}
+                    onChange={(event) =>
+                      setFuelForm((prev) => ({ ...prev, dieselLiters: event.target.value }))
+                    }
+                  />
                 </label>
                 <label>
-                  Regular
-                  <select defaultValue="in-stock">
-                    <option value="in-stock">In stock</option>
-                    <option value="low">Low</option>
-                    <option value="out">Out</option>
-                  </select>
+                  Other (liters)
+                  <input
+                    type="number"
+                    value={fuelForm.otherLiters}
+                    onChange={(event) =>
+                      setFuelForm((prev) => ({ ...prev, otherLiters: event.target.value }))
+                    }
+                  />
                 </label>
                 <label>
-                  Next delivery ETA
-                  <input type="text" defaultValue="Today, 6:30 PM" />
+                  Last updated
+                  <input type="text" value={station?.fuelInventory?.updatedAt || "—"} readOnly />
                 </label>
               </div>
-              <button className="btn alt">Update fuel status</button>
+              <button className="btn alt" onClick={handleFuelUpdate} disabled={isLoading}>
+                Update fuel stock
+              </button>
             </div>
             <div className="card narrow">
               <h3>Inventory alerts</h3>
@@ -237,14 +468,14 @@ export default function App() {
                 <div className="list-item">
                   <div>
                     <strong>Diesel tank</strong>
-                    <span>18% remaining</span>
+                    <span>{fuelForm.dieselLiters} liters remaining</span>
                   </div>
                   <span className="pill warn">Low</span>
                 </div>
                 <div className="list-item">
                   <div>
-                    <strong>Premium tank</strong>
-                    <span>45% remaining</span>
+                    <strong>Gasoline tank</strong>
+                    <span>{fuelForm.gasolineLiters} liters remaining</span>
                   </div>
                   <span className="pill">Stable</span>
                 </div>
@@ -258,15 +489,17 @@ export default function App() {
                   <input type="number" defaultValue={20} />
                 </label>
                 <label>
-                  Premium low threshold (%)
+                  Gasoline low threshold (%)
                   <input type="number" defaultValue={25} />
                 </label>
                 <label>
-                  Regular low threshold (%)
+                  Other low threshold (%)
                   <input type="number" defaultValue={30} />
                 </label>
               </div>
-              <button className="btn">Save thresholds</button>
+              <button className="btn" disabled>
+                Save thresholds (coming soon)
+              </button>
             </div>
           </div>
         )}
@@ -277,7 +510,7 @@ export default function App() {
               <h3>Price updates</h3>
               <div className="form-row">
                 <label>
-                  Premium price
+                  Gasoline price
                   <input type="number" step="0.01" defaultValue={3.79} />
                 </label>
                 <label>
@@ -285,7 +518,7 @@ export default function App() {
                   <input type="number" step="0.01" defaultValue={3.49} />
                 </label>
                 <label>
-                  Regular price
+                  Other price
                   <input type="number" step="0.01" defaultValue={3.29} />
                 </label>
                 <label>
@@ -293,7 +526,9 @@ export default function App() {
                   <input type="text" defaultValue="Immediate" />
                 </label>
               </div>
-              <button className="btn alt">Publish prices</button>
+              <button className="btn alt" disabled>
+                Pricing integration coming soon
+              </button>
             </div>
             <div className="card narrow">
               <h3>Active promos</h3>
@@ -303,14 +538,7 @@ export default function App() {
                     <strong>Happy Hour</strong>
                     <span>-$0.10 / liter · 4-6 PM</span>
                   </div>
-                  <span className="pill">Active</span>
-                </div>
-                <div className="list-item">
-                  <div>
-                    <strong>Queue Fast Pass</strong>
-                    <span>Priority tickets · 12 PM</span>
-                  </div>
-                  <span className="pill warn">Ends soon</span>
+                  <span className="pill">Draft</span>
                 </div>
               </div>
             </div>
@@ -338,7 +566,9 @@ export default function App() {
                 Promo description
                 <textarea placeholder="Displayed to drivers in the FuelFinder app." />
               </label>
-              <button className="btn">Schedule promo</button>
+              <button className="btn" disabled>
+                Promo tools coming soon
+              </button>
             </div>
           </div>
         )}
@@ -369,23 +599,25 @@ export default function App() {
             <div className="card narrow">
               <h3>Export</h3>
               <p className="section-title">Get CSV for partners</p>
-              <button className="btn alt">Download daily CSV</button>
-              <button className="btn">Download monthly CSV</button>
+              <button className="btn alt" disabled>
+                Download daily CSV
+              </button>
+              <button className="btn" disabled>
+                Download monthly CSV
+              </button>
             </div>
             <div className="card full">
               <h3>Customer feedback</h3>
               <div className="list">
-                {["Queue moved fast today!", "Staff were helpful", "Prices changed late"].map(
-                  (item) => (
-                    <div className="list-item" key={item}>
-                      <div>
-                        <strong>{item}</strong>
-                        <span>Submitted today</span>
-                      </div>
-                      <button className="btn">Reply</button>
+                {["Queue moved fast today!", "Staff were helpful", "Prices changed late"].map((item) => (
+                  <div className="list-item" key={item}>
+                    <div>
+                      <strong>{item}</strong>
+                      <span>Submitted today</span>
                     </div>
-                  )
-                )}
+                    <button className="btn">Reply</button>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -396,7 +628,7 @@ export default function App() {
             <div className="card wide">
               <h3>Staff roster</h3>
               <div className="list">
-                {["Eden Tesfaye", "Dagmawi K.", "Selam W."]?.map((name) => (
+                {["Eden Tesfaye", "Dagmawi K.", "Selam W."].map((name) => (
                   <div className="list-item" key={name}>
                     <div>
                       <strong>{name}</strong>
@@ -421,7 +653,9 @@ export default function App() {
                   <option value="cashier">Cashier</option>
                 </select>
               </label>
-              <button className="btn alt">Invite staff</button>
+              <button className="btn alt" disabled>
+                Invite staff (coming soon)
+              </button>
             </div>
             <div className="card full">
               <h3>Shift checklist</h3>
@@ -451,21 +685,24 @@ export default function App() {
               <div className="form-row">
                 <label>
                   Station name
-                  <input type="text" defaultValue="Mintes Fuel Hub" />
+                  <input type="text" defaultValue={station?.name || ""} />
                 </label>
                 <label>
-                  City
-                  <input type="text" defaultValue="Addis Ababa" />
+                  Address
+                  <input type="text" defaultValue={station?.address || ""} />
                 </label>
                 <label>
                   Manager contact
-                  <input type="text" defaultValue="+251 900 000 000" />
+                  <input type="text" defaultValue={station?.contact || ""} />
                 </label>
                 <label>
                   Support email
-                  <input type="text" defaultValue="owner@fuelfinder.com" />
+                  <input type="text" defaultValue={session?.user?.email || ""} />
                 </label>
               </div>
+              <button className="btn" disabled>
+                Update profile (coming soon)
+              </button>
             </div>
             <div className="card narrow">
               <h3>Notification rules</h3>
@@ -484,7 +721,9 @@ export default function App() {
                   <option value="off">Off</option>
                 </select>
               </label>
-              <button className="btn alt">Save settings</button>
+              <button className="btn alt" disabled>
+                Save settings (coming soon)
+              </button>
             </div>
             <div className="card full">
               <h3>Integrations</h3>
@@ -495,7 +734,9 @@ export default function App() {
                       <strong>{item}</strong>
                       <span>Connect to unlock automation</span>
                     </div>
-                    <button className="btn">Connect</button>
+                    <button className="btn" disabled>
+                      Connect
+                    </button>
                   </div>
                 ))}
               </div>
