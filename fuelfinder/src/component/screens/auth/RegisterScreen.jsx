@@ -14,10 +14,13 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
+import { makeRedirectUri } from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
+import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
 import { useAuth } from "../../context/AuthContext";
 import { useLanguage } from "../../context/LanguageContext";
 import { API_BASE_URL } from "../../services/api";
+import { firebaseAuth } from "../../services/firebase";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -33,19 +36,33 @@ export default function RegisterScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
-  const googleConfig = useMemo(
-    () => ({
-      expoClientId: process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID,
-      iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-      androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
-      webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+  const googleConfig = useMemo(() => {
+    const useProxy = true;
+    const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
+    const redirectUri = makeRedirectUri({
+      useProxy,
+      projectNameForProxy: "@mintesenotbizuayehw/fuelfinder",
+    });
+
+    return {
+      clientId: webClientId,
+      webClientId,
+      ...(useProxy
+        ? {}
+        : {
+            iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+            androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+          }),
       scopes: ["profile", "email"],
       responseType: "id_token",
-    }),
-    []
-  );
+      redirectUri,
+    };
+  }, []);
 
-  const [request, response, promptAsync] = Google.useAuthRequest(googleConfig);
+  const [request, response, promptAsync] = Google.useAuthRequest(googleConfig, {
+    useProxy: true,
+    projectNameForProxy: "@mintesenotbizuayehw/fuelfinder",
+  });
 
   useEffect(() => {
     if (response?.type !== "success") return;
@@ -58,7 +75,10 @@ export default function RegisterScreen({ navigation }) {
       setGoogleLoading(true);
       setError("");
       try {
-        const result = await signInWithGoogle({ idToken });
+        const credential = GoogleAuthProvider.credential(idToken);
+        const firebaseUser = await signInWithCredential(firebaseAuth, credential);
+        const firebaseIdToken = await firebaseUser.user.getIdToken();
+        const result = await signInWithGoogle({ idToken: firebaseIdToken });
         if (result?.verificationRequired) {
           navigation.navigate("VerifyPhone", {
             verificationToken: result.verificationToken,
@@ -126,7 +146,7 @@ export default function RegisterScreen({ navigation }) {
     const useProxy =
       __DEV__ &&
       String(process.env.EXPO_PUBLIC_GOOGLE_USE_PROXY || "true").toLowerCase() === "true";
-    await promptAsync({ useProxy });
+    await promptAsync({ useProxy: true });
   };
 
   // Language Picker

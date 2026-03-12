@@ -13,10 +13,13 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as WebBrowser from "expo-web-browser";
+import { makeRedirectUri } from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
+import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
 import { useAuth } from "../../context/AuthContext";
 import { useLanguage } from "../../context/LanguageContext";
 import { API_BASE_URL } from "../../services/api";
+import { firebaseAuth } from "../../services/firebase";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -30,19 +33,33 @@ export default function LoginScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
-  const googleConfig = useMemo(
-    () => ({
-      expoClientId: process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID,
-      iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-      androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
-      webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+  const googleConfig = useMemo(() => {
+    const useProxy = true;
+    const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
+    const redirectUri = makeRedirectUri({
+      useProxy,
+      projectNameForProxy: "@mintesenotbizuayehw/fuelfinder",
+    });
+
+    return {
+      clientId: webClientId,
+      webClientId,
+      ...(useProxy
+        ? {}
+        : {
+            iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+            androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+          }),
       scopes: ["profile", "email"],
       responseType: "id_token",
-    }),
-    []
-  );
+      redirectUri,
+    };
+  }, []);
 
-  const [request, response, promptAsync] = Google.useAuthRequest(googleConfig);
+  const [request, response, promptAsync] = Google.useAuthRequest(googleConfig, {
+    useProxy: true,
+    projectNameForProxy: "@mintesenotbizuayehw/fuelfinder",
+  });
 
   useEffect(() => {
     if (response?.type !== "success") return;
@@ -55,7 +72,10 @@ export default function LoginScreen({ navigation }) {
       setGoogleLoading(true);
       setError("");
       try {
-        const result = await signInWithGoogle({ idToken });
+        const credential = GoogleAuthProvider.credential(idToken);
+        const firebaseUser = await signInWithCredential(firebaseAuth, credential);
+        const firebaseIdToken = await firebaseUser.user.getIdToken();
+        const result = await signInWithGoogle({ idToken: firebaseIdToken });
         if (result?.verificationRequired) {
           navigation.navigate("VerifyPhone", {
             verificationToken: result.verificationToken,
@@ -115,7 +135,7 @@ export default function LoginScreen({ navigation }) {
     const useProxy =
       __DEV__ &&
       String(process.env.EXPO_PUBLIC_GOOGLE_USE_PROXY || "true").toLowerCase() === "true";
-    await promptAsync({ useProxy });
+    await promptAsync({ useProxy: true });
   };
 
   return (
@@ -399,3 +419,48 @@ fontWeight:"700"
 }
 
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// // Import the functions you need from the SDKs you need
+// import { initializeApp } from "firebase/app";
+// import { getAnalytics } from "firebase/analytics";
+// // TODO: Add SDKs for Firebase products that you want to use
+// // https://firebase.google.com/docs/web/setup#available-libraries
+
+// // Your web app's Firebase configuration
+// // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+// const firebaseConfig = {
+//   apiKey: "AIzaSyC7lj9UHImkMMDbJzq6cvC-i8Uo6HwLa68",
+//   authDomain: "fuelfinder-3f479.firebaseapp.com",
+//   projectId: "fuelfinder-3f479",
+//   storageBucket: "fuelfinder-3f479.firebasestorage.app",
+//   messagingSenderId: "398394457491",
+//   appId: "1:398394457491:web:920d8d1863fe4acb34fc66",
+//   measurementId: "G-ESPHGR6W1R"
+// };
+
+// // Initialize Firebase
+// const app = initializeApp(firebaseConfig);
+// const analytics = getAnalytics(app);
