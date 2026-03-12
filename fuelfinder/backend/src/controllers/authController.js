@@ -1,8 +1,8 @@
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
-const { OAuth2Client } = require("google-auth-library");
 const User = require("../models/User");
 const { sendSms } = require("../services/smsService");
+const { getFirebaseAuth } = require("../services/firebaseAdmin");
 const { setDevOtp, getDevOtp } = require("../utils/devOtpStore");
 const {
   OTP_TTL_SECONDS,
@@ -117,21 +117,6 @@ async function issuePhoneVerification(user, { enforceCooldown = false } = {}) {
     expiresAt: otpExpiresAt,
     resendCooldownSeconds: PHONE_OTP_RESEND_COOLDOWN_SECONDS
   };
-}
-
-function getGoogleAudiences() {
-  const raw =
-    String(process.env.GOOGLE_CLIENT_IDS || "").trim() ||
-    String(process.env.GOOGLE_CLIENT_ID || "").trim();
-  const audiences = raw
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  if (!audiences.length) {
-    throw new Error("Missing GOOGLE_CLIENT_IDS for Google login.");
-  }
-  return audiences;
 }
 
 function pickGoogleProfileName(payload) {
@@ -501,18 +486,11 @@ exports.devGetPhoneOtp = async (req, res) => {
 exports.googleAuth = async (req, res) => {
   try {
     const idToken = String(req.body.idToken || "").trim();
-    const audiences = getGoogleAudiences();
-    const client = new OAuth2Client(audiences[0]);
-
-    const ticket = await client.verifyIdToken({
-      idToken,
-      audience: audiences
-    });
-
-    const payload = ticket.getPayload() || {};
+    const firebaseAuth = getFirebaseAuth();
+    const payload = await firebaseAuth.verifyIdToken(idToken);
     const email = normalizeEmail(payload.email || "");
     const emailVerified = Boolean(payload.email_verified);
-    const googleSub = String(payload.sub || "").trim();
+    const googleSub = String(payload.uid || "").trim();
 
     if (!email || !emailVerified || !googleSub) {
       return res.status(401).json({ message: "Google account not verified." });
