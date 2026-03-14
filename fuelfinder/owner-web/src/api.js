@@ -104,7 +104,7 @@ export async function getStationQueue(stationId) {
 
 export async function updateFuelStock(stationId, payload) {
   return apiRequest(`/queue/station/${stationId}/fuel-stock`, {
-    method: "POST",
+    method: "PATCH",
     body: JSON.stringify(payload)
   });
 }
@@ -114,6 +114,52 @@ export async function callNextInQueue(stationId) {
     method: "POST",
     body: JSON.stringify({ stationId })
   });
+}
+
+export async function updateOwnerStation(stationId, payload) {
+  return apiRequest(`/owner/stations/${stationId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function listStationPayments(stationId, params = {}) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return apiRequest(`/owner/stations/${stationId}/payments${query ? `?${query}` : ""}`);
+}
+
+export async function listStationTeam(stationId) {
+  return apiRequest(`/owner/stations/${stationId}/team`);
+}
+
+export async function createStationTeamUser(stationId, payload) {
+  return apiRequest(`/owner/stations/${stationId}/team`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateStationTeamUser(stationId, userId, payload) {
+  return apiRequest(`/owner/stations/${stationId}/team/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function setStationTeamUserBlocked(stationId, userId, isBlocked) {
+  return apiRequest(`/owner/stations/${stationId}/team/${userId}/block`, {
+    method: "PATCH",
+    body: JSON.stringify({ isBlocked: Boolean(isBlocked) })
+  });
+}
+
+export async function forceLogoutStationTeamUser(stationId, userId) {
+  return apiRequest(`/owner/stations/${stationId}/team/${userId}/force-logout`, { method: "POST" });
 }
 
 export async function listAdminUsers() {

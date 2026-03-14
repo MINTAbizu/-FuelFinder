@@ -1,41 +1,49 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   callNextInQueue,
+  createStationTeamUser,
   createAdminUser,
   forceLogoutAdminUser,
+  forceLogoutStationTeamUser,
   getOwnerStation,
   getStationQueue,
   listAdminUsers,
   listOrganizationOptions,
   listOwnerStations,
+  listStationPayments,
+  listStationTeam,
   loadSession,
   login,
   logout,
   setAdminUserBlocked,
+  setStationTeamUserBlocked,
+  updateOwnerStation,
+  updateStationTeamUser,
   updateAdminUser,
   updateFuelStock
 } from "../api.js";
 
 const sections = [
-  { id: "overview", label: "Overview" },
-  { id: "queue", label: "Queue & Availability" },
-  { id: "inventory", label: "Inventory" },
-  { id: "pricing", label: "Pricing & Promos" },
+  { id: "overview", label: "Command Center" },
+  { id: "queue", label: "Queue" },
+  { id: "inventory", label: "Fuel & Stock" },
+  { id: "cashflow", label: "Cashflow" },
+  { id: "pricing", label: "Pricing" },
   { id: "reports", label: "Reports" },
-  { id: "staff", label: "Staff" },
-  { id: "settings", label: "Settings" }
+  { id: "staff", label: "Team" },
+  { id: "settings", label: "Station Settings" }
 ];
 
 const roleLabels = {
-  staff: "Station Staff",
-  station_manager: "Station Manager",
+  staff: "Staff",
+  station_manager: "Station CEO",
   city_manager: "City Manager",
   org_admin: "Org Owner",
   super_admin: "Super Admin"
 };
 
 function formatMinutes(minutes) {
-  if (!Number.isFinite(minutes)) return "—";
+  if (!Number.isFinite(minutes)) return "--";
   if (minutes < 1) return "<1 min";
   if (minutes < 60) return `${Math.round(minutes)} min`;
   const hours = Math.floor(minutes / 60);
@@ -64,7 +72,10 @@ export default function Dashboard() {
   });
   const [statusMessage, setStatusMessage] = useState("");
 
-  const isSuperAdmin = String(session?.user?.role || "") === "super_admin";
+  const actorRole = String(session?.user?.role || "");
+  const isSuperAdmin = actorRole === "super_admin";
+  const isStationExec = actorRole === "station_manager" || actorRole === "org_admin" || actorRole === "super_admin";
+  const isCeo = actorRole === "station_manager" || actorRole === "org_admin";
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
   const [adminUsersError, setAdminUsersError] = useState("");

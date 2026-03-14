@@ -91,3 +91,48 @@ exports.getMyStation = async (req, res) => {
     return res.status(500).json({ message: "Failed to load station." });
   }
 };
+
+exports.updateMyStation = async (req, res) => {
+  try {
+    const stationId = String(req.params.stationId || "").trim();
+    if (!mongoose.isValidObjectId(stationId)) {
+      return res.status(400).json({ message: "Invalid station id." });
+    }
+
+    const scopeQuery = resolveStationScopeQuery(req.user || {});
+    if (!scopeQuery) {
+      return res.status(403).json({ message: "No station scope assigned to this account." });
+    }
+
+    const station = await Station.findOne({ ...scopeQuery, _id: stationId });
+    if (!station) {
+      return res.status(404).json({ message: "Station not found for your account." });
+    }
+
+    if (req.body.name !== undefined) {
+      const nextName = String(req.body.name || "").trim();
+      if (!nextName) return res.status(400).json({ message: "name cannot be empty." });
+      station.name = nextName;
+    }
+    if (req.body.address !== undefined) {
+      const nextAddress = String(req.body.address || "").trim();
+      if (!nextAddress) return res.status(400).json({ message: "address cannot be empty." });
+      station.address = nextAddress;
+    }
+    if (req.body.contact !== undefined) {
+      station.contact = String(req.body.contact || "").trim();
+    }
+    if (req.body.isActive !== undefined) {
+      station.isActive = Boolean(req.body.isActive);
+    }
+
+    await station.save();
+
+    return res.json({
+      message: "Station updated.",
+      station: buildStationResponse(station)
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to update station." });
+  }
+};
