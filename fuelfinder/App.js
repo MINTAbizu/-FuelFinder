@@ -18,7 +18,7 @@ import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import HomeScreen from "./src/component/screens/home/HomeScreen";
 import StationDetails from "./src/component/screens/home/StationDetails";
 import LoginScreen from "./src/component/screens/auth/LoginScreen";
@@ -663,6 +663,8 @@ function HomeStackNavigator() {
 
 function AppTabs() {
   const { t } = useLanguage();
+  const insets = useSafeAreaInsets();
+  const tabBarHeight = 64 + insets.bottom;
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -670,9 +672,9 @@ function AppTabs() {
         tabBarActiveTintColor: "#0F766E",
         tabBarInactiveTintColor: "#64748B",
         tabBarStyle: {
-          height: 64,
+          height: tabBarHeight,
           paddingTop: 6,
-          paddingBottom: 8,
+          paddingBottom: 8 + insets.bottom,
           borderTopWidth: 1,
           borderTopColor: "#E2E8F0",
           backgroundColor: "#FFFFFF",

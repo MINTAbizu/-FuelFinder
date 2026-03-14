@@ -105,6 +105,39 @@ export async function callNextInQueue(stationId) {
   });
 }
 
+export async function listAdminUsers() {
+  return apiRequest("/admin/users");
+}
+
+export async function createAdminUser(payload) {
+  return apiRequest("/admin/users/create-admin", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateAdminUser(userId, payload) {
+  return apiRequest(`/admin/users/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function setAdminUserBlocked(userId, isBlocked) {
+  return apiRequest(`/admin/users/${userId}/block`, {
+    method: "PATCH",
+    body: JSON.stringify({ isBlocked: Boolean(isBlocked) })
+  });
+}
+
+export async function forceLogoutAdminUser(userId) {
+  return apiRequest(`/admin/users/${userId}/force-logout`, { method: "POST" });
+}
+
+export async function listOrganizationOptions() {
+  return apiRequest("/admin/organizations/options");
+}
+
 async function refreshToken(refreshTokenValue) {
   return apiRequest(
     "/auth/refresh",
@@ -115,4 +148,3 @@ async function refreshToken(refreshTokenValue) {
     { auth: false, retry: false }
   );
 }
-

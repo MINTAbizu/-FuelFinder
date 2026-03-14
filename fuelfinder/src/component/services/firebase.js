@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { getAuth, initializeAuth, inMemoryPersistence } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
@@ -11,4 +11,14 @@ const firebaseConfig = {
 };
 
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-export const firebaseAuth = getAuth(app);
+
+let auth;
+try {
+  auth = getAuth(app);
+} catch (_err) {
+  auth = initializeAuth(app, {
+    persistence: inMemoryPersistence,
+  });
+}
+
+export const firebaseAuth = auth;

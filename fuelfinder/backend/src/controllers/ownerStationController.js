@@ -29,6 +29,10 @@ function buildStationResponse(station) {
 }
 
 function resolveStationScopeQuery(user) {
+  if (String(user.role || "") === "super_admin") {
+    return {};
+  }
+
   const query = {};
   const stationIds = Array.isArray(user.stationIds)
     ? user.stationIds.map((value) => String(value))
@@ -87,4 +91,3 @@ exports.getMyStation = async (req, res) => {
     return res.status(500).json({ message: "Failed to load station." });
   }
 };
-
