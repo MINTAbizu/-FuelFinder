@@ -1,5 +1,8 @@
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, "") || "https://fuelfinder-2.onrender.com";
+const DEV_DEFAULT_API_BASE = "http://localhost:3000/api";
+const PROD_DEFAULT_API_BASE = "https://fuelfinder-2.onrender.com";
+const API_BASE = String(
+  import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? DEV_DEFAULT_API_BASE : PROD_DEFAULT_API_BASE)
+).replace(/\/+$/, "");
 
 const STORAGE_KEY = "ff_owner_session_v1";
 
@@ -31,10 +34,18 @@ async function apiRequest(path, options = {}, { auth = true, retry = true } = {}
     headers.Authorization = `Bearer ${session.tokens.accessToken}`;
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers
+    });
+  } catch (_error) {
+    const hint = import.meta.env.VITE_API_BASE_URL
+      ? `API base is ${API_BASE}.`
+      : `API base defaulted to ${API_BASE}. Set VITE_API_BASE_URL in owner-web/.env if needed (then restart dev server).`;
+    throw new Error(`Request failed (network/CORS). ${hint}`);
+  }
 
   if (response.status === 401 && auth && retry && session?.tokens?.refreshToken) {
     const refreshed = await refreshToken(session.tokens.refreshToken);
