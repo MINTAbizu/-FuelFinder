@@ -38,22 +38,37 @@ function getPlatformFeeBirr() {
   return Number(value.toFixed(2));
 }
 
+function buildStationSubaccountPayload(station, platformFee) {
+  const subaccountId = String(station?.chapaSubaccountId || "").trim();
+  if (!subaccountId) {
+    return {
+      enabled: false,
+      payload: null,
+      splitType: "",
+      splitValue: 0,
+      subaccountId: ""
+    };
+  }
+
+  return {
+    enabled: true,
+    payload: {
+      id: subaccountId,
+      split_type: "flat",
+      split_value: Number(platformFee || 0)
+    },
+    splitType: "flat",
+    splitValue: Number(platformFee || 0),
+    subaccountId
+  };
+}
+
 function getWaitingExpiresAt() {
   const raw = String(process.env.WAITING_WINDOW_MINUTES || "120").trim();
   const minutes = Number(raw);
   const safeMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 120;
   return new Date(Date.now() + safeMinutes * 60 * 1000);
 }
-
-// Split payment helpers (disabled for non-business testing).
-// function getSplitMode() {
-//   const mode = String(process.env.CHAPA_SPLIT_MODE || "platform_fee").trim().toLowerCase();
-//   return mode === "subaccount_share" ? "subaccount_share" : "platform_fee";
-// }
-
-// function getDefaultSubaccountId() {
-//   return String(process.env.CHAPA_DEFAULT_SUBACCOUNT_ID || "").trim();
-// }
 
 function verifyChapaWebhookSignature(req) {
   const secret = String(process.env.CHAPA_WEBHOOK_SECRET || "").trim();
@@ -328,7 +343,8 @@ exports.initialize = async (req, res) => {
     const platformFee = getPlatformFeeBirr();
     const amount = Number((baseAmount + platformFee).toFixed(2));
     const stationPayout = Number((amount - platformFee).toFixed(2));
-    const splitValue = platformFee;
+    const stationSplit = buildStationSubaccountPayload(station, platformFee);
+    const splitValue = stationSplit.enabled ? stationSplit.splitValue : platformFee;
 
     const existing = await PaymentTransaction.findOne({
       provider: "chapa",
@@ -352,19 +368,14 @@ exports.initialize = async (req, res) => {
       tx_ref,
       callback_url: callbackUrl,
       return_url: returnUrl || undefined,
-      // Split payments disabled for testing without business registration.
-      // subaccounts: [
-      //   {
-      //     id: subaccountId,
-      //     split_type: "flat",
-      //     split_value: splitValue
-      //   }
-      // ],
+      ...(stationSplit.payload ? { subaccounts: stationSplit.payload } : {}),
       meta: {
         ...(metadata && typeof metadata === "object" ? metadata : {}),
         reservationId: String(ticket._id),
         userId: String(ticket.userId),
         stationId: String(ticket.stationId),
+        stationUsesSubaccount: stationSplit.enabled,
+        stationSubaccountId: stationSplit.subaccountId,
         platformFee,
         stationPayout
       }
@@ -382,9 +393,9 @@ exports.initialize = async (req, res) => {
         currency,
         platformFee,
         stationPayout,
-        splitType: "flat",
+        splitType: stationSplit.splitType,
         splitValue,
-        subaccountId: "",
+        subaccountId: stationSplit.subaccountId,
         status: "initialized",
         meta: paymentData.meta
       });
@@ -418,7 +429,9 @@ exports.initialize = async (req, res) => {
       meta: {
         ...(response?.meta && typeof response.meta === "object" ? response.meta : {}),
         tx_ref,
-        reservationId: String(ticket._id)
+        reservationId: String(ticket._id),
+        stationUsesSubaccount: stationSplit.enabled,
+        stationSubaccountId: stationSplit.subaccountId
       }
     });
 
