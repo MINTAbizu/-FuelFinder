@@ -13,11 +13,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import * as Location from "expo-location";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLanguage } from "../../context/LanguageContext";
 import api from "../../services/api";
+import { loadSavedStations, toggleSavedStation } from "../../services/accountStorage";
 
 const DEFAULT_REGION = {
   latitude: 8.9806,
@@ -110,6 +113,28 @@ export default function HomeScreen({ navigation }) {
   const [routeCoords, setRouteCoords] = useState([]);
   const [routeSummary, setRouteSummary] = useState(null);
   const [activeRouteStationId, setActiveRouteStationId] = useState("");
+  const [savedStationIds, setSavedStationIds] = useState({});
+
+  const refreshSavedStations = useCallback(async () => {
+    try {
+      const nextSavedStations = await loadSavedStations();
+      setSavedStationIds(
+        nextSavedStations.reduce((accumulator, station) => {
+          accumulator[String(station.id || "")] = true;
+          return accumulator;
+        }, {})
+      );
+    } catch (_error) {
+      // Ignore local saved-station refresh failures and keep the screen usable.
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshSavedStations();
+      return undefined;
+    }, [refreshSavedStations])
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -309,6 +334,23 @@ export default function HomeScreen({ navigation }) {
     }));
   }, [stations, location, mapCenter, searchText, statusFilter, fuelFilter, sortBy, t]);
 
+  const onToggleSavedStation = useCallback(
+    async (station) => {
+      try {
+        const nextSavedStations = await toggleSavedStation(station);
+        setSavedStationIds(
+          nextSavedStations.reduce((accumulator, savedStation) => {
+            accumulator[String(savedStation.id || "")] = true;
+            return accumulator;
+          }, {})
+        );
+      } catch (_error) {
+        setStationsError(t("somethingWentWrong"));
+      }
+    },
+    [t]
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <FlatList
@@ -470,11 +512,35 @@ export default function HomeScreen({ navigation }) {
               ) : null}
               <View style={styles.headerRow}>
                 <Text style={styles.stationName}>{item.name}</Text>
-                <Pressable style={[styles.statusPill, { borderColor: markerColor(item.fuel_status) }]}>
-                  <Text style={[styles.statusText, { color: markerColor(item.fuel_status) }]}>
-                    {statusLabel(t, item.fuel_status)}
-                  </Text>
-                </Pressable>
+                <View style={styles.headerActions}>
+                  <Pressable
+                    style={[
+                      styles.saveStationButton,
+                      savedStationIds[String(item.id || "")] && styles.saveStationButtonActive,
+                    ]}
+                    onPress={(event) => {
+                      event.stopPropagation?.();
+                      onToggleSavedStation(item);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      savedStationIds[String(item.id || "")]
+                        ? t("unsaveStationLabel", { defaultValue: "Remove station from saved list" })
+                        : t("saveStationLabel", { defaultValue: "Save station" })
+                    }
+                  >
+                    <Ionicons
+                      name={savedStationIds[String(item.id || "")] ? "bookmark" : "bookmark-outline"}
+                      size={16}
+                      color={savedStationIds[String(item.id || "")] ? "#0F766E" : "#475569"}
+                    />
+                  </Pressable>
+                  <Pressable style={[styles.statusPill, { borderColor: markerColor(item.fuel_status) }]}>
+                    <Text style={[styles.statusText, { color: markerColor(item.fuel_status) }]}>
+                      {statusLabel(t, item.fuel_status)}
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
               <View style={styles.factsWrap}>
                 <View style={styles.factPill}>
@@ -611,6 +677,11 @@ const styles = StyleSheet.create({
   },
   topPickText: { color: "#C2410C", fontSize: 9, fontWeight: "800", letterSpacing: 0.2 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   stationName: {
     flex: 1,
     fontWeight: "800",
@@ -618,6 +689,20 @@ const styles = StyleSheet.create({
     marginBottom: 3,
     color: "#0F172A",
     marginRight: 8,
+  },
+  saveStationButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  saveStationButtonActive: {
+    backgroundColor: "#CCFBF1",
+    borderColor: "#5EEAD4",
   },
   statusPill: {
     borderWidth: 1,

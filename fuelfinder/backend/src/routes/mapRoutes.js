@@ -4,7 +4,7 @@ const mapController = require("../controllers/mapController");
 const router = express.Router();
 
 router.get("/nearby-fuel", mapController.getNearbyFuelStations);
+router.get("/stations/:stationId", mapController.getStationDetails);
 router.get("/route", mapController.getDrivingRoute);
 
 module.exports = router;
-

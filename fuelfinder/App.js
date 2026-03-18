@@ -37,6 +37,7 @@ import {
   saveVehicles,
   upsertVehicle,
 } from "./src/component/services/accountStorage";
+import * as Location from "expo-location";
 import { AuthProvider, useAuth } from "./src/component/context/AuthContext";
 import { LanguageProvider, useLanguage } from "./src/component/context/LanguageContext";
 
@@ -100,7 +101,15 @@ function getVehicleFuelLabel(t, fuelType) {
 }
 
 function ProfileScreen() {
-  const { user, signOut, replaceUser } = useAuth();
+  const {
+    user,
+    signOut,
+    replaceUser,
+    beginTwoFactorSetup,
+    confirmTwoFactorOtp,
+    resendTwoFactorCode,
+    turnOffTwoFactor,
+  } = useAuth();
   const { t, changeLanguage, language } = useLanguage();
   const qc = useQueryClient();
 
@@ -112,7 +121,6 @@ function ProfileScreen() {
       priceAlerts: "ff_pref_price_alerts",
       locationSharing: "ff_pref_location_sharing",
       biometricUnlock: "ff_pref_biometric_unlock",
-      twoFactor: "ff_pref_two_factor",
       dataSaver: "ff_pref_data_saver",
       autoRefreshPrices: "ff_pref_auto_refresh_prices",
       units: "ff_pref_units",
@@ -128,7 +136,6 @@ function ProfileScreen() {
     priceAlerts: true,
     locationSharing: true,
     biometricUnlock: false,
-    twoFactor: false,
     dataSaver: false,
     autoRefreshPrices: true,
     units: "metric", // metric | imperial
@@ -149,6 +156,10 @@ function ProfileScreen() {
     newPassword: "",
     confirmPassword: "",
   });
+  const [twoFactorToken, setTwoFactorToken] = React.useState("");
+  const [twoFactorCode, setTwoFactorCode] = React.useState("");
+  const [twoFactorCooldown, setTwoFactorCooldown] = React.useState(0);
+  const [twoFactorResending, setTwoFactorResending] = React.useState(false);
   const [vehicleEditorVisible, setVehicleEditorVisible] = React.useState(false);
   const [vehicleDraft, setVehicleDraft] = React.useState(() => createEmptyVehicleDraft());
 
@@ -178,7 +189,6 @@ function ProfileScreen() {
           priceAlerts: readBool(PREF_KEYS.priceAlerts, true),
           locationSharing: readBool(PREF_KEYS.locationSharing, true),
           biometricUnlock: readBool(PREF_KEYS.biometricUnlock, false),
-          twoFactor: readBool(PREF_KEYS.twoFactor, false),
           dataSaver: readBool(PREF_KEYS.dataSaver, false),
           autoRefreshPrices: readBool(PREF_KEYS.autoRefreshPrices, true),
           units: nextUnits === "imperial" ? "imperial" : "metric",
@@ -223,6 +233,14 @@ function ProfileScreen() {
       return undefined;
     }, [refreshAccountCollections])
   );
+
+  React.useEffect(() => {
+    if (twoFactorCooldown <= 0) return undefined;
+    const intervalId = setInterval(() => {
+      setTwoFactorCooldown((current) => (current > 1 ? current - 1 : 0));
+    }, 1000);
+    return () => clearInterval(intervalId);
+  }, [twoFactorCooldown]);
 
   const persistBool = React.useCallback(async (key, next) => {
     await AsyncStorage.setItem(key, next ? "1" : "0");
@@ -279,7 +297,6 @@ function ProfileScreen() {
           priceAlerts: true,
           locationSharing: true,
           biometricUnlock: false,
-          twoFactor: false,
           dataSaver: false,
           autoRefreshPrices: true,
           units: "metric",
@@ -299,6 +316,62 @@ function ProfileScreen() {
     });
   }, [confirmAction, signOut, t]);
 
+  const handleLocationSharingToggle = React.useCallback(async () => {
+    const nextValue = !prefs.locationSharing;
+    if (!nextValue) {
+      setPrefs((current) => ({ ...current, locationSharing: false }));
+      await persistBool(PREF_KEYS.locationSharing, false);
+      return;
+    }
+
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== "granted") {
+        Alert.alert(
+          t("locationPermissionTitle", { defaultValue: "Location permission needed" }),
+          t("locationPermissionBody", {
+            defaultValue: "Allow location access to keep nearby stations and routing accurate.",
+          }),
+          [
+            { text: t("cancel"), style: "cancel" },
+            {
+              text: t("openSettingsAction", { defaultValue: "Open settings" }),
+              onPress: () => Linking.openSettings?.(),
+            },
+          ]
+        );
+        return;
+      }
+
+      setPrefs((current) => ({ ...current, locationSharing: true }));
+      await persistBool(PREF_KEYS.locationSharing, true);
+    } catch (_error) {
+      Alert.alert(t("somethingWentWrong"));
+    }
+  }, [PREF_KEYS.locationSharing, persistBool, prefs.locationSharing, t]);
+
+  const handleBiometricToggle = React.useCallback(async () => {
+    if (prefs.biometricUnlock) {
+      setPrefs((current) => ({ ...current, biometricUnlock: false }));
+      await persistBool(PREF_KEYS.biometricUnlock, false);
+      return;
+    }
+
+    Alert.alert(
+      t("biometricSetupTitle", { defaultValue: "Biometric unlock needs a native module" }),
+      t("biometricSetupBody", {
+        defaultValue: "Add Expo Local Authentication to this app build before enabling Face ID or fingerprint unlock.",
+      }),
+      [
+        { text: t("cancel"), style: "cancel" },
+        {
+          text: t("openSettingsAction", { defaultValue: "Open settings" }),
+          onPress: () => Linking.openSettings?.(),
+        },
+      ]
+    );
+  }, [PREF_KEYS.biometricUnlock, persistBool, prefs.biometricUnlock, t]);
+
   const resetVehicleEditor = React.useCallback(() => {
     setVehicleEditorVisible(false);
     setVehicleDraft(createEmptyVehicleDraft(prefs.preferredFuel));
@@ -307,6 +380,10 @@ function ProfileScreen() {
   const closeAccountModal = React.useCallback(() => {
     setAccountModal("");
     setAccountBusy(false);
+    setTwoFactorToken("");
+    setTwoFactorCode("");
+    setTwoFactorCooldown(0);
+    setTwoFactorResending(false);
     setProfileForm({
       name: user?.name || "",
       email: user?.email || "",
@@ -319,6 +396,120 @@ function ProfileScreen() {
     });
     resetVehicleEditor();
   }, [resetVehicleEditor, user?.email, user?.name, user?.phone]);
+
+  const verifyTwoFactorSetup = React.useCallback(async () => {
+    if (!twoFactorCode.trim()) {
+      Alert.alert(
+        t("twoFactorCodeTitle", { defaultValue: "Security code required" }),
+        t("twoFactorCodeBody", { defaultValue: "Enter the 6-digit security code to continue." })
+      );
+      return;
+    }
+
+    setAccountBusy(true);
+    try {
+      const data = await confirmTwoFactorOtp({
+        verificationToken: twoFactorToken,
+        otpCode: twoFactorCode.trim(),
+      });
+      Alert.alert(
+        t("done"),
+        data?.message || t("twoFactorEnabledMessage", { defaultValue: "Two-factor authentication enabled." })
+      );
+      closeAccountModal();
+    } catch (error) {
+      Alert.alert(
+        t("twoFactorVerifyFailed", { defaultValue: "Could not verify security code" }),
+        error?.response?.data?.message || t("somethingWentWrong")
+      );
+    } finally {
+      setAccountBusy(false);
+    }
+  }, [closeAccountModal, confirmTwoFactorOtp, t, twoFactorCode, twoFactorToken]);
+
+  const resendTwoFactorSetup = React.useCallback(async () => {
+    if (!twoFactorToken) return;
+    setTwoFactorResending(true);
+    try {
+      const data = await resendTwoFactorCode({ verificationToken: twoFactorToken });
+      if (data?.verificationToken) {
+        setTwoFactorToken(data.verificationToken);
+      }
+      setTwoFactorCooldown(Number(data?.resendCooldownSeconds || 0));
+    } catch (error) {
+      Alert.alert(
+        t("twoFactorResendFailed", { defaultValue: "Could not resend code" }),
+        error?.response?.data?.message || t("somethingWentWrong")
+      );
+    } finally {
+      setTwoFactorResending(false);
+    }
+  }, [resendTwoFactorCode, t, twoFactorToken]);
+
+  const handleTwoFactorToggle = React.useCallback(async () => {
+    if (Boolean(user?.twoFactorEnabled)) {
+      confirmAction(
+        t("disableTwoFactorTitle", { defaultValue: "Disable two-factor authentication" }),
+        t("disableTwoFactorBody", {
+          defaultValue: "Your account will stop requiring SMS verification on secure sign-in.",
+        }),
+        async () => {
+          setAccountBusy(true);
+          try {
+            const data = await turnOffTwoFactor();
+            Alert.alert(
+              t("done"),
+              data?.message || t("twoFactorDisabledMessage", { defaultValue: "Two-factor authentication disabled." })
+            );
+          } catch (error) {
+            Alert.alert(
+              t("twoFactorDisableFailed", { defaultValue: "Could not disable two-factor authentication" }),
+              error?.response?.data?.message || t("somethingWentWrong")
+            );
+          } finally {
+            setAccountBusy(false);
+          }
+        }
+      );
+      return;
+    }
+
+    if (!user?.phone) {
+      Alert.alert(
+        t("twoFactorPhoneRequiredTitle", { defaultValue: "Phone number required" }),
+        t("twoFactorPhoneRequiredBody", {
+          defaultValue: "Add a phone number in Edit profile before enabling two-factor authentication.",
+        })
+      );
+      return;
+    }
+
+    if (!user?.phoneVerified) {
+      Alert.alert(
+        t("twoFactorPhoneVerifiedTitle", { defaultValue: "Verify your phone first" }),
+        t("twoFactorPhoneVerifiedBody", {
+          defaultValue: "Two-factor authentication requires a verified phone number.",
+        })
+      );
+      return;
+    }
+
+    setAccountBusy(true);
+    try {
+      const data = await beginTwoFactorSetup();
+      setTwoFactorToken(data?.verificationToken || "");
+      setTwoFactorCode("");
+      setTwoFactorCooldown(Number(data?.resendCooldownSeconds || 0));
+      setAccountModal("twoFactor");
+    } catch (error) {
+      Alert.alert(
+        t("twoFactorStartFailed", { defaultValue: "Could not start two-factor setup" }),
+        error?.response?.data?.message || t("somethingWentWrong")
+      );
+    } finally {
+      setAccountBusy(false);
+    }
+  }, [beginTwoFactorSetup, confirmAction, t, turnOffTwoFactor, user?.phone, user?.phoneVerified, user?.twoFactorEnabled]);
 
   const openAccountModal = React.useCallback(
     async (modalName) => {
@@ -677,6 +868,12 @@ function ProfileScreen() {
         defaultValue: "Store the vehicles you drive most often.",
       }),
     },
+    twoFactor: {
+      title: t("twoFactorAuth"),
+      subtitle: t("twoFactorSheetSubtitle", {
+        defaultValue: "Enter the SMS security code to finish enabling two-factor protection.",
+      }),
+    },
     savedStations: {
       title: t("savedStations"),
       subtitle: t("savedStationsSheetSubtitle", {
@@ -981,8 +1178,8 @@ function ProfileScreen() {
                   </Text>
                   <Text style={styles.vehicleMeta}>
                     {getVehicleFuelLabel(t, vehicle.fuelType)}
-                    {vehicle.plateNumber ? ` • ${vehicle.plateNumber}` : ""}
-                    {vehicle.tankCapacityLiters ? ` • ${vehicle.tankCapacityLiters}L` : ""}
+                    {vehicle.plateNumber ? ` | ${vehicle.plateNumber}` : ""}
+                    {vehicle.tankCapacityLiters ? ` | ${vehicle.tankCapacityLiters}L` : ""}
                   </Text>
                 </View>
                 {vehicle.isPrimary ? (
@@ -1015,6 +1212,70 @@ function ProfileScreen() {
               </View>
             </View>
           ))}
+        </View>
+      );
+    }
+
+    if (accountModal === "twoFactor") {
+      return (
+        <View style={styles.modalContent}>
+          <Text style={styles.modalHelperText}>
+            {t("twoFactorSetupHelper", {
+              defaultValue: "We sent a 6-digit security code to your verified phone number.",
+            })}
+          </Text>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>
+              {t("twoFactorCodeLabel", { defaultValue: "Security code" })}
+            </Text>
+            <TextInput
+              value={twoFactorCode}
+              onChangeText={setTwoFactorCode}
+              style={styles.textInput}
+              placeholder={t("twoFactorCodePlaceholder", { defaultValue: "123456" })}
+              placeholderTextColor="#94A3B8"
+              keyboardType="number-pad"
+              maxLength={6}
+            />
+          </View>
+
+          <View style={styles.modalActionRow}>
+            <Pressable style={styles.modalSecondaryButton} onPress={closeAccountModal}>
+              <Text style={styles.modalSecondaryButtonText}>{t("cancel")}</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.modalPrimaryButton, accountBusy && styles.modalButtonDisabled]}
+              onPress={verifyTwoFactorSetup}
+              disabled={accountBusy}
+            >
+              {accountBusy ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.modalPrimaryButtonText}>
+                  {t("verifySecurityCodeCta", { defaultValue: "Verify code" })}
+                </Text>
+              )}
+            </Pressable>
+          </View>
+
+          <Pressable
+            style={styles.inlineLinkButton}
+            onPress={resendTwoFactorSetup}
+            disabled={twoFactorResending || twoFactorCooldown > 0}
+          >
+            {twoFactorResending ? (
+              <ActivityIndicator size="small" color="#1D4ED8" />
+            ) : (
+              <Text style={styles.inlineLinkButtonText}>
+                {twoFactorCooldown > 0
+                  ? t("twoFactorResendCountdown", {
+                      defaultValue: `Resend in ${twoFactorCooldown}s`,
+                    })
+                  : t("twoFactorResendCta", { defaultValue: "Resend code" })}
+              </Text>
+            )}
+          </Pressable>
         </View>
       );
     }
@@ -1331,11 +1592,11 @@ function ProfileScreen() {
           icon="location-outline"
           title={t("locationSharing")}
           subtitle={t("locationSharingSubtitle")}
-          onPress={() => togglePref("locationSharing", PREF_KEYS.locationSharing)}
+          onPress={handleLocationSharingToggle}
           right={
             <Switch
               value={prefs.locationSharing}
-              onValueChange={() => togglePref("locationSharing", PREF_KEYS.locationSharing)}
+              onValueChange={handleLocationSharingToggle}
             />
           }
         />
@@ -1343,23 +1604,34 @@ function ProfileScreen() {
           icon="finger-print-outline"
           title={t("biometricUnlock")}
           subtitle={t("biometricUnlockSubtitle")}
-          onPress={() => togglePref("biometricUnlock", PREF_KEYS.biometricUnlock)}
+          onPress={handleBiometricToggle}
           right={
             <Switch
               value={prefs.biometricUnlock}
-              onValueChange={() => togglePref("biometricUnlock", PREF_KEYS.biometricUnlock)}
+              onValueChange={handleBiometricToggle}
             />
           }
         />
         <SettingRow
           icon="shield-checkmark-outline"
           title={t("twoFactorAuth")}
-          subtitle={t("twoFactorAuthSubtitle")}
-          onPress={() => togglePref("twoFactor", PREF_KEYS.twoFactor)}
+          subtitle={
+            user?.phoneVerified
+              ? t("twoFactorAuthSubtitle")
+              : t("twoFactorPhoneVerifiedBody", {
+                  defaultValue: "Two-factor authentication requires a verified phone number.",
+                })
+          }
+          valueText={
+            user?.twoFactorEnabled
+              ? t("twoFactorEnabledLabel", { defaultValue: "Enabled" })
+              : undefined
+          }
+          onPress={handleTwoFactorToggle}
           right={
             <Switch
-              value={prefs.twoFactor}
-              onValueChange={() => togglePref("twoFactor", PREF_KEYS.twoFactor)}
+              value={Boolean(user?.twoFactorEnabled)}
+              onValueChange={handleTwoFactorToggle}
             />
           }
         />
@@ -1870,6 +2142,310 @@ const styles = StyleSheet.create({
   },
   languageChipTextActive: {
     color: "#1D4ED8",
+  },
+  modalScreen: {
+    flex: 1,
+    backgroundColor: "#F8FAFC",
+  },
+  modalHeader: {
+    paddingTop: 18,
+    paddingBottom: 14,
+    paddingHorizontal: 16,
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  modalHeaderTextWrap: {
+    flex: 1,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+  modalSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#64748B",
+    fontWeight: "700",
+  },
+  modalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F1F5F9",
+  },
+  modalScroll: {
+    flex: 1,
+  },
+  modalScrollContent: {
+    padding: 16,
+    paddingBottom: 28,
+  },
+  modalContent: {
+    gap: 14,
+  },
+  inputGroup: {
+    gap: 6,
+  },
+  inputLabel: {
+    fontSize: 13,
+    color: "#0F172A",
+    fontWeight: "800",
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: "#0F172A",
+    fontWeight: "600",
+  },
+  textInputDisabled: {
+    backgroundColor: "#F1F5F9",
+    color: "#64748B",
+  },
+  inputHelper: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#64748B",
+    fontWeight: "600",
+  },
+  modalHelperText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#64748B",
+    fontWeight: "700",
+  },
+  modalActionRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 6,
+  },
+  modalPrimaryButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    backgroundColor: "#0F766E",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  modalPrimaryButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    fontSize: 14,
+  },
+  modalSecondaryButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  modalSecondaryButtonText: {
+    color: "#0F172A",
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  modalButtonDisabled: {
+    opacity: 0.7,
+  },
+  inlineActionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  inlineActionCount: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  modalGhostButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#CCFBF1",
+    borderWidth: 1,
+    borderColor: "#5EEAD4",
+  },
+  modalGhostButtonText: {
+    color: "#0F766E",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  editorCard: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 18,
+    padding: 14,
+    gap: 12,
+  },
+  editorTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+  chipRowCompact: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  switchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingVertical: 8,
+  },
+  switchTextWrap: {
+    flex: 1,
+    gap: 3,
+  },
+  switchTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  switchSubtitle: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#64748B",
+    fontWeight: "600",
+  },
+  emptyStateCard: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 18,
+    padding: 20,
+    alignItems: "center",
+    gap: 8,
+  },
+  emptyStateTitle: {
+    color: "#0F172A",
+    fontSize: 15,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  emptyStateSubtitle: {
+    color: "#64748B",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  vehicleCard: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 18,
+    padding: 14,
+    gap: 10,
+  },
+  vehicleHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  vehicleHeaderText: {
+    flex: 1,
+  },
+  vehicleTitle: {
+    color: "#0F172A",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  vehicleMeta: {
+    marginTop: 4,
+    color: "#64748B",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
+  },
+  primaryBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: "#DBEAFE",
+    borderWidth: 1,
+    borderColor: "#93C5FD",
+  },
+  primaryBadgeText: {
+    color: "#1D4ED8",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  cardActionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  inlineLinkButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+  },
+  inlineLinkButtonText: {
+    color: "#1D4ED8",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  inlineLinkButtonDanger: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+  },
+  inlineLinkButtonDangerText: {
+    color: "#B91C1C",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  savedStationCard: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 18,
+    padding: 14,
+    gap: 6,
+  },
+  savedStationTitle: {
+    color: "#0F172A",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  savedStationMeta: {
+    color: "#64748B",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
   },
   bottomSpacer: {
     height: 24,

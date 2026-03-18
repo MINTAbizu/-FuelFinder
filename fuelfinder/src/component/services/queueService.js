@@ -49,6 +49,11 @@ export async function getStationQueue(stationId) {
   return data;
 }
 
+export async function getPublicStationDetails(stationId) {
+  const { data } = await api.get(`/map/stations/${stationId}`);
+  return data?.station || data;
+}
+
 export async function startStationCheckIn(payload) {
   const { data } = await api.post("/queue/check-in/start", payload);
   return data;

@@ -17,7 +17,12 @@ import { useLanguage } from "../../context/LanguageContext";
 import { API_BASE_URL } from "../../services/api";
 
 export default function PhoneVerifyScreen({ navigation, route }) {
-  const { confirmPhoneOtp, resendPhoneVerification } = useAuth();
+  const {
+    confirmPhoneOtp,
+    resendPhoneVerification,
+    confirmTwoFactorOtp,
+    resendTwoFactorCode,
+  } = useAuth();
   const { t } = useLanguage();
 
   const [verificationToken, setVerificationToken] = useState(
@@ -25,6 +30,7 @@ export default function PhoneVerifyScreen({ navigation, route }) {
   );
   const phone = route?.params?.phone || "";
   const email = route?.params?.email || "";
+  const flowType = route?.params?.flowType || "phone_verification";
 
   const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
@@ -59,7 +65,11 @@ export default function PhoneVerifyScreen({ navigation, route }) {
 
     setLoading(true);
     try {
-      await confirmPhoneOtp({ verificationToken, otpCode: otp.trim() });
+      if (flowType === "two_factor") {
+        await confirmTwoFactorOtp({ verificationToken, otpCode: otp.trim() });
+      } else {
+        await confirmPhoneOtp({ verificationToken, otpCode: otp.trim() });
+      }
     } catch (err) {
       const backendMessage = err?.response?.data?.message;
       if (backendMessage) {
@@ -80,7 +90,10 @@ export default function PhoneVerifyScreen({ navigation, route }) {
     }
     setResending(true);
     try {
-      const data = await resendPhoneVerification({ verificationToken });
+      const data =
+        flowType === "two_factor"
+          ? await resendTwoFactorCode({ verificationToken })
+          : await resendPhoneVerification({ verificationToken });
       if (data?.verificationToken) {
         setVerificationToken(data.verificationToken);
       }
@@ -104,6 +117,7 @@ export default function PhoneVerifyScreen({ navigation, route }) {
   };
 
   const maskedTarget = phone || email || "";
+  const isTwoFactorFlow = flowType === "two_factor";
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -116,19 +130,31 @@ export default function PhoneVerifyScreen({ navigation, route }) {
             <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
               <Ionicons name="arrow-back" size={20} color="#000" />
             </Pressable>
-            <Text style={styles.hello}>Verify Phone</Text>
+            <Text style={styles.hello}>
+              {isTwoFactorFlow ? "Security Check" : "Verify Phone"}
+            </Text>
             <Text style={styles.welcome}>
-              {maskedTarget ? `We sent a code to ${maskedTarget}` : "Enter the code we sent to your phone."}
+              {maskedTarget
+                ? `We sent a code to ${maskedTarget}`
+                : isTwoFactorFlow
+                  ? "Enter the security code we sent to your phone."
+                  : "Enter the code we sent to your phone."}
             </Text>
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Enter Verification Code</Text>
+            <Text style={styles.cardTitle}>
+              {isTwoFactorFlow ? "Enter Security Code" : "Enter Verification Code"}
+            </Text>
             <Text style={styles.cardSubtitle}>
-              Use the 6-digit code to finish setting up your account.
+              {isTwoFactorFlow
+                ? "Use the 6-digit code to finish signing in securely."
+                : "Use the 6-digit code to finish setting up your account."}
             </Text>
 
-            <Text style={styles.label}>Verification Code</Text>
+            <Text style={styles.label}>
+              {isTwoFactorFlow ? "Security Code" : "Verification Code"}
+            </Text>
             <TextInput
               placeholder="123456"
               value={otp}
@@ -144,8 +170,8 @@ export default function PhoneVerifyScreen({ navigation, route }) {
               {loading ? (
                 <ActivityIndicator color="#000" />
               ) : (
-                <Text style={styles.loginText}>Verify</Text>
-              )}
+                  <Text style={styles.loginText}>{isTwoFactorFlow ? "Continue" : "Verify"}</Text>
+                )}
             </Pressable>
 
             <View style={styles.resendRow}>

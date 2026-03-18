@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const { fetchNearbyFuelStations, fetchDrivingRoute } = require("../services/mapService");
 const Station = require("../models/Station");
 const { normalizePaymentDetails } = require("../utils/stationPaymentDetails");
@@ -94,6 +95,32 @@ async function findNearbyCanonicalStation(station) {
   );
 }
 
+function buildClientStationPayload(doc, fallback = {}) {
+  const docCoords = Array.isArray(doc?.location?.coordinates) ? doc.location.coordinates : [];
+  const docLon = Number(docCoords[0]);
+  const docLat = Number(docCoords[1]);
+  const fallbackLat = Number(fallback?.latitude);
+  const fallbackLon = Number(fallback?.longitude);
+
+  return {
+    ...fallback,
+    name: String(doc?.name || fallback?.name || "Fuel Station"),
+    address: String(doc?.address || fallback?.address || "Address not listed"),
+    contact: String(doc?.contact || fallback?.contact || ""),
+    fuel_status: mapFuelStatusForClient(doc?.fuelStatus || fallback?.fuel_status || "partial"),
+    fuelInventory: {
+      gasolineLiters: Number(doc?.fuelInventory?.gasolineLiters || fallback?.fuelInventory?.gasolineLiters || 0),
+      dieselLiters: Number(doc?.fuelInventory?.dieselLiters || fallback?.fuelInventory?.dieselLiters || 0),
+      otherLiters: Number(doc?.fuelInventory?.otherLiters || fallback?.fuelInventory?.otherLiters || 0),
+      updatedAt: doc?.fuelInventory?.updatedAt || fallback?.fuelInventory?.updatedAt || null
+    },
+    paymentDetails: normalizePaymentDetails(doc?.paymentDetails),
+    latitude: Number.isFinite(docLat) ? docLat : (Number.isFinite(fallbackLat) ? fallbackLat : null),
+    longitude: Number.isFinite(docLon) ? docLon : (Number.isFinite(fallbackLon) ? fallbackLon : null),
+    stationId: String(doc?._id || fallback?.stationId || "")
+  };
+}
+
 async function attachBackendStationIds(stations) {
   const mapped = await Promise.all(
     (stations || []).map(async (station) => {
@@ -159,27 +186,11 @@ async function attachBackendStationIds(stations) {
         await doc.save();
       }
 
-      const docCoords = Array.isArray(doc?.location?.coordinates) ? doc.location.coordinates : [];
-      const docLon = Number(docCoords[0]);
-      const docLat = Number(docCoords[1]);
-
-      return {
+      return buildClientStationPayload(doc, {
         ...station,
-        name: String(doc?.name || station?.name || "Fuel Station"),
-        address: String(doc?.address || station?.address || "Address not listed"),
-        contact: String(doc?.contact || station?.contact || ""),
-        fuel_status: mapFuelStatusForClient(doc?.fuelStatus || station?.fuel_status || "partial"),
-        fuelInventory: {
-          gasolineLiters: Number(doc?.fuelInventory?.gasolineLiters || 0),
-          dieselLiters: Number(doc?.fuelInventory?.dieselLiters || 0),
-          otherLiters: Number(doc?.fuelInventory?.otherLiters || 0),
-          updatedAt: doc?.fuelInventory?.updatedAt || null
-        },
-        paymentDetails: normalizePaymentDetails(doc?.paymentDetails),
-        latitude: Number.isFinite(docLat) ? docLat : lat,
-        longitude: Number.isFinite(docLon) ? docLon : lon,
-        stationId: String(doc?._id || "")
-      };
+        latitude: lat,
+        longitude: lon
+      });
     })
   );
 
@@ -200,6 +211,26 @@ exports.getNearbyFuelStations = async (req, res) => {
     return res.json({ stations: withBackendIds });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load nearby fuel stations." });
+  }
+};
+
+exports.getStationDetails = async (req, res) => {
+  try {
+    const stationId = String(req.params.stationId || "").trim();
+    if (!mongoose.isValidObjectId(stationId)) {
+      return res.status(400).json({ message: "Invalid station id." });
+    }
+
+    const station = await Station.findById(stationId).lean();
+    if (!station) {
+      return res.status(404).json({ message: "Station not found." });
+    }
+
+    return res.json({
+      station: buildClientStationPayload(station)
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to load station details." });
   }
 };
 

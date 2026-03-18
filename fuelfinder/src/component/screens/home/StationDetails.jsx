@@ -7,6 +7,7 @@ import { useLanguage } from "../../context/LanguageContext";
 import { useAuth } from "../../context/AuthContext";
 import {
   getMyQueueTicket,
+  getPublicStationDetails,
   getReservationStatus,
   getStationQueue,
   leaveQueue,
@@ -171,6 +172,7 @@ export default function StationDetails({ route }) {
   const [paymentPhase, setPaymentPhase] = useState("idle");
   const [liveQueueCount, setLiveQueueCount] = useState(null);
   const [liveFuel, setLiveFuel] = useState(null);
+  const [stationMeta, setStationMeta] = useState(null);
   const [checkInSession, setCheckInSession] = useState(null);
   const [checkInStatusText, setCheckInStatusText] = useState("");
   const pollRef = useRef(null);
@@ -209,7 +211,7 @@ export default function StationDetails({ route }) {
     ? Number((estimatedAmount + platformFeeBirr).toFixed(2))
     : 0;
   const manualPaymentDetails = useMemo(() => {
-    const fromStation = station?.paymentDetails || {};
+    const fromStation = stationMeta?.paymentDetails || station?.paymentDetails || {};
     return {
       providerName: String(fromStation.providerName || "").trim(),
       accountName: String(fromStation.accountName || "").trim(),
@@ -217,7 +219,7 @@ export default function StationDetails({ route }) {
       phoneNumber: String(fromStation.phoneNumber || "").trim(),
       instructions: String(fromStation.instructions || "").trim(),
     };
-  }, [station]);
+  }, [station, stationMeta]);
   const hasManualPaymentDetails = useMemo(
     () => Object.values(manualPaymentDetails).some(Boolean),
     [manualPaymentDetails]
@@ -227,18 +229,33 @@ export default function StationDetails({ route }) {
     const queue = Number(
       liveQueueCount !== null && liveQueueCount !== undefined ? liveQueueCount : station?.queue_length || 0
     );
-    const fuelStatus = String(liveFuel?.fuelStatus || station?.fuel_status || "limited");
+    const fuelStatus = String(liveFuel?.fuelStatus || stationMeta?.fuel_status || station?.fuel_status || "limited");
     const fuelInventory = {
-      gasolineLiters: Number(liveFuel?.fuelInventory?.gasolineLiters ?? station?.fuelInventory?.gasolineLiters ?? 0),
-      dieselLiters: Number(liveFuel?.fuelInventory?.dieselLiters ?? station?.fuelInventory?.dieselLiters ?? 0),
-      otherLiters: Number(liveFuel?.fuelInventory?.otherLiters ?? station?.fuelInventory?.otherLiters ?? 0),
+      gasolineLiters: Number(
+        liveFuel?.fuelInventory?.gasolineLiters ??
+        stationMeta?.fuelInventory?.gasolineLiters ??
+        station?.fuelInventory?.gasolineLiters ??
+        0
+      ),
+      dieselLiters: Number(
+        liveFuel?.fuelInventory?.dieselLiters ??
+        stationMeta?.fuelInventory?.dieselLiters ??
+        station?.fuelInventory?.dieselLiters ??
+        0
+      ),
+      otherLiters: Number(
+        liveFuel?.fuelInventory?.otherLiters ??
+        stationMeta?.fuelInventory?.otherLiters ??
+        station?.fuelInventory?.otherLiters ??
+        0
+      ),
     };
     return {
-      name: station?.name || t.stationFallback,
-      address: station?.address || t.address,
-      contact: station?.contact || t.contact,
-      latitude: Number(station?.latitude),
-      longitude: Number(station?.longitude),
+      name: stationMeta?.name || station?.name || t.stationFallback,
+      address: stationMeta?.address || station?.address || t.address,
+      contact: stationMeta?.contact || station?.contact || t.contact,
+      latitude: Number(stationMeta?.latitude ?? station?.latitude),
+      longitude: Number(stationMeta?.longitude ?? station?.longitude),
       supportedFuels: formatSupportedFuels(station?.supportedFuels),
       fuelStatus,
       fuelInventory,
@@ -254,7 +271,7 @@ export default function StationDetails({ route }) {
             ).toFixed(1)
           : "4.5",
     };
-  }, [liveFuel, liveQueueCount, station, t.address, t.contact, t.stationFallback]);
+  }, [liveFuel, liveQueueCount, station, stationMeta, t.address, t.contact, t.stationFallback]);
 
   const normalizedFuelStatus = String(detail.fuelStatus || "").toLowerCase();
   const isFuelAvailable = normalizedFuelStatus === "available" || normalizedFuelStatus === "full";
@@ -271,6 +288,29 @@ export default function StationDetails({ route }) {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (!queueEnabled) return undefined;
+
+    const fetchStationMeta = async () => {
+      try {
+        const nextStation = await getPublicStationDetails(stationId);
+        if (!active) return;
+        setStationMeta(nextStation || null);
+      } catch (_error) {
+        if (!active) return;
+        setStationMeta(null);
+      }
+    };
+
+    fetchStationMeta();
+    const id = setInterval(fetchStationMeta, 15000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [queueEnabled, stationId]);
 
   useEffect(() => {
     let active = true;

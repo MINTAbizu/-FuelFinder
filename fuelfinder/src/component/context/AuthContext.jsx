@@ -3,13 +3,17 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import api, { setApiAccessToken } from "../services/api";
 import {
+  disableTwoFactorAuth,
   getMyProfile,
   loginUser,
   logoutUser,
   refreshUserToken,
   registerUser,
   resendPhoneOtp,
+  resendTwoFactorOtp,
   loginWithGoogle,
+  startTwoFactorSetup,
+  verifyTwoFactorOtp,
   verifyPhoneOtp,
 } from "../services/authService";
 
@@ -173,7 +177,7 @@ export function AuthProvider({ children }) {
   const signUp = useCallback(
     async ({ name, email, phone, password }) => {
       const data = await registerUser({ name, email, phone, password });
-      if (data?.verificationRequired) {
+      if (data?.verificationRequired || data?.twoFactorRequired) {
         return data;
       }
       await persistSession(
@@ -189,7 +193,7 @@ export function AuthProvider({ children }) {
   const signIn = useCallback(
     async ({ email, password }) => {
       const data = await loginUser({ email, password });
-      if (data?.verificationRequired) {
+      if (data?.verificationRequired || data?.twoFactorRequired) {
         return data;
       }
       await persistSession(
@@ -220,6 +224,41 @@ export function AuthProvider({ children }) {
     return data;
   }, []);
 
+  const confirmTwoFactorOtp = useCallback(
+    async ({ verificationToken, otpCode }) => {
+      const data = await verifyTwoFactorOtp({ verificationToken, otpCode });
+      if (data?.tokens?.accessToken && data?.tokens?.refreshToken && data?.user) {
+        await persistSession(
+          data.user,
+          data.tokens.accessToken,
+          data.tokens.refreshToken
+        );
+      } else if (data?.user) {
+        await replaceUser(data.user);
+      }
+      return data;
+    },
+    [persistSession, replaceUser]
+  );
+
+  const resendTwoFactorCode = useCallback(async ({ verificationToken }) => {
+    const data = await resendTwoFactorOtp({ verificationToken });
+    return data;
+  }, []);
+
+  const beginTwoFactorSetup = useCallback(async () => {
+    const data = await startTwoFactorSetup();
+    return data;
+  }, []);
+
+  const turnOffTwoFactor = useCallback(async () => {
+    const data = await disableTwoFactorAuth();
+    if (data?.user) {
+      await replaceUser(data.user);
+    }
+    return data;
+  }, [replaceUser]);
+
   const signOut = useCallback(async () => {
     try {
       await logoutUser();
@@ -232,7 +271,7 @@ export function AuthProvider({ children }) {
   const signInWithGoogle = useCallback(
     async ({ idToken }) => {
       const data = await loginWithGoogle(idToken);
-      if (data?.verificationRequired) {
+      if (data?.verificationRequired || data?.twoFactorRequired) {
         return data;
       }
       await persistSession(
@@ -259,6 +298,10 @@ export function AuthProvider({ children }) {
       replaceUser,
       confirmPhoneOtp,
       resendPhoneVerification,
+      confirmTwoFactorOtp,
+      resendTwoFactorCode,
+      beginTwoFactorSetup,
+      turnOffTwoFactor,
       signInWithGoogle,
     }),
     [
@@ -273,6 +316,10 @@ export function AuthProvider({ children }) {
       replaceUser,
       confirmPhoneOtp,
       resendPhoneVerification,
+      confirmTwoFactorOtp,
+      resendTwoFactorCode,
+      beginTwoFactorSetup,
+      turnOffTwoFactor,
       signInWithGoogle,
     ]
   );

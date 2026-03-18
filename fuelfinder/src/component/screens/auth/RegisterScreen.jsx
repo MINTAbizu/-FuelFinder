@@ -121,6 +121,17 @@ await signInWithCredential(firebaseAuth,credential);
   });
 
   }
+
+  if(result?.twoFactorRequired){
+
+  navigation.navigate("VerifyPhone",{
+  verificationToken:result.verificationToken,
+  phone:result?.user?.phone || "",
+  email:result?.user?.email || "",
+  flowType:"two_factor"
+  });
+
+  }
  
   }catch(err){
 

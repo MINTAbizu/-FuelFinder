@@ -114,6 +114,17 @@ email:result?.user?.email || ""
 
 }
 
+if(result?.twoFactorRequired){
+
+navigation.navigate("VerifyPhone",{
+verificationToken:result.verificationToken,
+phone:result?.user?.phone || "",
+email:result?.user?.email || "",
+flowType:"two_factor"
+});
+
+}
+
 }catch(err){
 
 const backendMessage = err?.response?.data?.message;
@@ -160,6 +171,17 @@ navigation.navigate("VerifyPhone",{
 verificationToken:result.verificationToken,
 phone:result?.user?.phone || "",
 email:email.trim()
+});
+
+}
+
+if(result?.twoFactorRequired){
+
+navigation.navigate("VerifyPhone",{
+verificationToken:result.verificationToken,
+phone:result?.user?.phone || "",
+email:email.trim(),
+flowType:"two_factor"
 });
 
 }

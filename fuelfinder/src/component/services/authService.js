@@ -35,6 +35,11 @@ export async function changeMyPassword(payload) {
   return data;
 }
 
+export async function startTwoFactorSetup() {
+  const { data } = await api.post("/auth/two-factor/start");
+  return data;
+}
+
 export async function verifyPhoneOtp(payload) {
   const { data } = await api.post("/auth/phone/verify", payload);
   return data;
@@ -42,6 +47,21 @@ export async function verifyPhoneOtp(payload) {
 
 export async function resendPhoneOtp(payload) {
   const { data } = await api.post("/auth/phone/resend", payload);
+  return data;
+}
+
+export async function verifyTwoFactorOtp(payload) {
+  const { data } = await api.post("/auth/two-factor/verify", payload);
+  return data;
+}
+
+export async function resendTwoFactorOtp(payload) {
+  const { data } = await api.post("/auth/two-factor/resend", payload);
+  return data;
+}
+
+export async function disableTwoFactorAuth() {
+  const { data } = await api.post("/auth/two-factor/disable");
   return data;
 }
 

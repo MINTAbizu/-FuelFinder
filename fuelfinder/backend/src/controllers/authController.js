@@ -48,6 +48,7 @@ function buildUserResponse(user) {
     email: user.email,
     phone: user.phone || "",
     phoneVerified: Boolean(user.phoneVerified),
+    twoFactorEnabled: Boolean(user.twoFactorEnabled),
     authProvider: user.authProvider || "local",
     isBlocked: Boolean(user.isBlocked),
     role: user.role || "customer",
@@ -64,12 +65,32 @@ function buildPhoneVerificationMessage(code) {
   return `Your FuelFinder verification code is ${code}. It expires in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
 }
 
+function buildTwoFactorMessage(code) {
+  const minutes = Math.max(1, Math.ceil(OTP_TTL_SECONDS / 60));
+  return `Your FuelFinder security code is ${code}. It expires in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+}
+
 function getPhoneOtpCooldownRemainingSeconds(user) {
   const lastSentAt = user.phoneVerificationLastSentAt;
   if (!lastSentAt) return 0;
   const elapsedMs = Date.now() - new Date(lastSentAt).getTime();
   const remainingMs = PHONE_OTP_RESEND_COOLDOWN_SECONDS * 1000 - elapsedMs;
   return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
+}
+
+function getTwoFactorOtpCooldownRemainingSeconds(user) {
+  const lastSentAt = user.twoFactorOtpLastSentAt;
+  if (!lastSentAt) return 0;
+  const elapsedMs = Date.now() - new Date(lastSentAt).getTime();
+  const remainingMs = PHONE_OTP_RESEND_COOLDOWN_SECONDS * 1000 - elapsedMs;
+  return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
+}
+
+function clearTwoFactorChallenge(user) {
+  user.twoFactorOtpHash = "";
+  user.twoFactorOtpExpiresAt = null;
+  user.twoFactorOtpAttempts = 0;
+  user.twoFactorOtpLastSentAt = null;
 }
 
 async function issuePhoneVerification(user, { enforceCooldown = false } = {}) {
@@ -120,6 +141,63 @@ async function issuePhoneVerification(user, { enforceCooldown = false } = {}) {
     }),
     expiresAt: otpExpiresAt,
     resendCooldownSeconds: PHONE_OTP_RESEND_COOLDOWN_SECONDS
+  };
+}
+
+async function issueTwoFactorChallenge(user, { purpose = "two_factor_login", enforceCooldown = false } = {}) {
+  const now = new Date();
+  const cooldownRemaining = getTwoFactorOtpCooldownRemainingSeconds(user);
+  const hasActiveOtp =
+    user.twoFactorOtpExpiresAt &&
+    new Date(user.twoFactorOtpExpiresAt) > now &&
+    String(user.twoFactorOtpHash || "");
+
+  if (!user.phone || !user.phoneVerified) {
+    const error = new Error("A verified phone number is required for two-factor authentication.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (enforceCooldown && cooldownRemaining > 0) {
+    const error = new Error("Please wait before requesting another verification code.");
+    error.status = 429;
+    error.retryAfterSeconds = cooldownRemaining;
+    throw error;
+  }
+
+  if (!enforceCooldown && cooldownRemaining > 0 && hasActiveOtp) {
+    return {
+      verificationToken: signPhoneOtpToken({
+        sub: String(user._id),
+        phone: String(user.phone || ""),
+        purpose,
+      }),
+      expiresAt: user.twoFactorOtpExpiresAt,
+      resendCooldownSeconds: cooldownRemaining,
+      reused: true,
+    };
+  }
+
+  const otpCode = generateOtpCode();
+  const otpHash = hashOtpCode(otpCode);
+  const otpExpiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
+
+  user.twoFactorOtpHash = otpHash;
+  user.twoFactorOtpExpiresAt = otpExpiresAt;
+  user.twoFactorOtpAttempts = 0;
+  user.twoFactorOtpLastSentAt = now;
+  await sendSms(String(user.phone || ""), buildTwoFactorMessage(otpCode));
+  setDevOtp(`${user._id}:${purpose}`, otpCode, otpExpiresAt);
+  await user.save();
+
+  return {
+    verificationToken: signPhoneOtpToken({
+      sub: String(user._id),
+      phone: String(user.phone || ""),
+      purpose,
+    }),
+    expiresAt: otpExpiresAt,
+    resendCooldownSeconds: PHONE_OTP_RESEND_COOLDOWN_SECONDS,
   };
 }
 
@@ -269,6 +347,21 @@ exports.login = async (req, res) => {
       });
     }
 
+    if (Boolean(user.twoFactorEnabled)) {
+      const challenge = await issueTwoFactorChallenge(user, {
+        purpose: "two_factor_login",
+        enforceCooldown: false,
+      });
+      return res.json({
+        twoFactorRequired: true,
+        verificationToken: challenge.verificationToken,
+        expiresAt: challenge.expiresAt,
+        resendCooldownSeconds: challenge.resendCooldownSeconds,
+        user: buildUserResponse(user),
+        message: "Two-factor verification required."
+      });
+    }
+
     const { accessToken, refreshToken } = await issueTokenPair(user);
 
     return res.json({
@@ -322,7 +415,7 @@ exports.logout = async (req, res) => {
 exports.me = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "_id name email phone phoneVerified authProvider isBlocked role organizationId cityIds stationIds branchIds createdAt"
+      "_id name email phone phoneVerified twoFactorEnabled authProvider isBlocked role organizationId cityIds stationIds branchIds createdAt"
     );
     if (!user) return res.status(404).json({ message: "User not found." });
 
@@ -365,10 +458,12 @@ exports.updateProfile = async (req, res) => {
 
     if (nextPhoneChanged) {
       user.phoneVerified = !phone;
+      user.twoFactorEnabled = false;
       user.phoneVerificationHash = "";
       user.phoneVerificationExpiresAt = null;
       user.phoneVerificationAttempts = 0;
       user.phoneVerificationLastSentAt = null;
+      clearTwoFactorChallenge(user);
     }
 
     await user.save();
@@ -423,6 +518,192 @@ exports.changePassword = async (req, res) => {
     });
   } catch (_error) {
     return res.status(500).json({ message: "Failed to change password." });
+  }
+};
+
+exports.startTwoFactor = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+
+    const challenge = await issueTwoFactorChallenge(user, {
+      purpose: "two_factor_setup",
+      enforceCooldown: false,
+    });
+
+    return res.json({
+      twoFactorSetupRequired: true,
+      verificationToken: challenge.verificationToken,
+      expiresAt: challenge.expiresAt,
+      resendCooldownSeconds: challenge.resendCooldownSeconds,
+      message: "Verification code sent."
+    });
+  } catch (error) {
+    if (error?.status === 400) {
+      return res.status(400).json({ message: String(error.message || "A verified phone number is required.") });
+    }
+    if (error?.status === 429) {
+      return res.status(429).json({
+        message: String(error.message || "Please wait before requesting another verification code."),
+        retryAfterSeconds: Number(error.retryAfterSeconds || 0)
+      });
+    }
+    return res.status(500).json({ message: "Failed to start two-factor authentication." });
+  }
+};
+
+exports.verifyTwoFactor = async (req, res) => {
+  try {
+    const verificationToken = String(req.body.verificationToken || "").trim();
+    const otpCode = String(req.body.otpCode || "").trim();
+    let payload;
+
+    try {
+      payload = verifyPhoneOtpToken(verificationToken);
+    } catch (_err) {
+      return res.status(401).json({ message: "Invalid or expired verification token." });
+    }
+
+    const purpose = String(payload?.purpose || "");
+    if (purpose !== "two_factor_setup" && purpose !== "two_factor_login") {
+      return res.status(401).json({ message: "Invalid verification purpose." });
+    }
+
+    const userId = String(payload?.sub || "");
+    if (!userId) {
+      return res.status(401).json({ message: "Invalid verification token payload." });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+    if (String(user.phone || "") !== String(payload.phone || "")) {
+      return res.status(401).json({ message: "Verification token does not match phone." });
+    }
+    if (purpose === "two_factor_login" && !user.twoFactorEnabled) {
+      return res.status(409).json({ message: "Two-factor authentication is no longer enabled for this account." });
+    }
+    if (!user.twoFactorOtpExpiresAt || user.twoFactorOtpExpiresAt <= new Date()) {
+      return res.status(410).json({ message: "Verification code expired. Request a new one." });
+    }
+    if (user.twoFactorOtpAttempts >= PHONE_OTP_MAX_ATTEMPTS) {
+      return res.status(429).json({ message: "Maximum OTP attempts reached. Request a new code." });
+    }
+
+    const isValid = verifyOtpHash(user.twoFactorOtpHash, otpCode);
+    if (!isValid) {
+      user.twoFactorOtpAttempts = Number(user.twoFactorOtpAttempts || 0) + 1;
+      await user.save();
+      return res.status(401).json({ message: "Invalid verification code." });
+    }
+
+    clearTwoFactorChallenge(user);
+    if (purpose === "two_factor_setup") {
+      user.twoFactorEnabled = true;
+      await user.save();
+      return res.json({
+        user: buildUserResponse(user),
+        message: "Two-factor authentication enabled."
+      });
+    }
+
+    await user.save();
+    const { accessToken, refreshToken } = await issueTokenPair(user);
+    return res.json({
+      user: buildUserResponse(user),
+      tokens: { accessToken, refreshToken },
+      message: "Two-factor verification successful."
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to verify security code." });
+  }
+};
+
+exports.resendTwoFactorOtp = async (req, res) => {
+  try {
+    const verificationToken = String(req.body.verificationToken || "").trim();
+    let payload;
+
+    try {
+      payload = verifyPhoneOtpToken(verificationToken);
+    } catch (_err) {
+      return res.status(401).json({ message: "Invalid or expired verification token." });
+    }
+
+    const purpose = String(payload?.purpose || "");
+    if (purpose !== "two_factor_setup" && purpose !== "two_factor_login") {
+      return res.status(401).json({ message: "Invalid verification purpose." });
+    }
+
+    const userId = String(payload?.sub || "");
+    if (!userId) {
+      return res.status(401).json({ message: "Invalid verification token payload." });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+    if (String(user.phone || "") !== String(payload.phone || "")) {
+      return res.status(401).json({ message: "Verification token does not match phone." });
+    }
+    if (purpose === "two_factor_login" && !user.twoFactorEnabled) {
+      return res.status(409).json({ message: "Two-factor authentication is no longer enabled for this account." });
+    }
+
+    const challenge = await issueTwoFactorChallenge(user, {
+      purpose,
+      enforceCooldown: true,
+    });
+
+    return res.json({
+      verificationToken: challenge.verificationToken,
+      expiresAt: challenge.expiresAt,
+      resendCooldownSeconds: challenge.resendCooldownSeconds,
+      message: "Verification code sent."
+    });
+  } catch (error) {
+    if (error?.status === 400) {
+      return res.status(400).json({ message: String(error.message || "A verified phone number is required.") });
+    }
+    if (error?.status === 429) {
+      return res.status(429).json({
+        message: String(error.message || "Please wait before requesting another verification code."),
+        retryAfterSeconds: Number(error.retryAfterSeconds || 0)
+      });
+    }
+    return res.status(500).json({ message: "Failed to resend security code." });
+  }
+};
+
+exports.disableTwoFactor = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+
+    user.twoFactorEnabled = false;
+    clearTwoFactorChallenge(user);
+    await user.save();
+
+    return res.json({
+      user: buildUserResponse(user),
+      message: "Two-factor authentication disabled."
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to disable two-factor authentication." });
   }
 };
 
@@ -565,7 +846,13 @@ exports.devGetPhoneOtp = async (req, res) => {
       return res.status(401).json({ message: "Invalid verification token payload." });
     }
 
-    const entry = getDevOtp(userId);
+    const purpose = String(payload?.purpose || "");
+    const storeKey =
+      purpose === "two_factor_setup" || purpose === "two_factor_login"
+        ? `${userId}:${purpose}`
+        : userId;
+
+    const entry = getDevOtp(storeKey);
     if (!entry) {
       return res.status(404).json({ message: "No OTP available for this user." });
     }
@@ -641,6 +928,21 @@ exports.googleAuth = async (req, res) => {
         resendCooldownSeconds: verification.resendCooldownSeconds,
         user: buildUserResponse(user),
         message: "Phone number not verified."
+      });
+    }
+
+    if (Boolean(user.twoFactorEnabled)) {
+      const challenge = await issueTwoFactorChallenge(user, {
+        purpose: "two_factor_login",
+        enforceCooldown: false,
+      });
+      return res.json({
+        twoFactorRequired: true,
+        verificationToken: challenge.verificationToken,
+        expiresAt: challenge.expiresAt,
+        resendCooldownSeconds: challenge.resendCooldownSeconds,
+        user: buildUserResponse(user),
+        message: "Two-factor verification required."
       });
     }
 
