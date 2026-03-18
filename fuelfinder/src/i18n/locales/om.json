@@ -224,6 +224,7 @@
     "noActiveTicket": "Tikkeen hojii irra jiru hin jiru.",
     "leftQueue": "Hiriiraa keessaa baateetta.",
     "failedLeaveQueue": "Hiriiraa keessaa ba'uun hin dandeenye.",
+    "completePaymentFirst": "QR yookaan OTP check-in uumuuf dura kaffaltii milkaa'aa xumuri.",
     "startCheckInFailed": "Cheekii-in buufataa jalqabuu hin dandeenye.",
     "startForQr": "QR fi OTP uumuuf cheekii-in jalqabi.",
     "attendantNote": "Mirkaneessi hojjetaa appii hojjetaa keessatti qofa taasifama.",

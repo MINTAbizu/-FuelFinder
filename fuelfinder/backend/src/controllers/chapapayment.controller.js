@@ -38,6 +38,32 @@ function getPlatformFeeBirr() {
   return Number(value.toFixed(2));
 }
 
+function normalizeChapaPaymentStatus(value) {
+  const status = String(value || "").trim().toLowerCase();
+  if (["success", "failed", "cancelled", "expired", "pending"].includes(status)) {
+    return status;
+  }
+  if (["completed", "paid", "successful"].includes(status)) {
+    return "success";
+  }
+  if (["processing", "initiated", "initialized"].includes(status)) {
+    return "pending";
+  }
+  return "";
+}
+
+function extractChapaPaymentStatus(response, fallback = {}) {
+  return (
+    normalizeChapaPaymentStatus(response?.data?.status) ||
+    normalizeChapaPaymentStatus(response?.data?.payment_status) ||
+    normalizeChapaPaymentStatus(response?.data?.paymentStatus) ||
+    normalizeChapaPaymentStatus(response?.data?.checkout_status) ||
+    normalizeChapaPaymentStatus(fallback?.status) ||
+    normalizeChapaPaymentStatus(fallback?.paymentStatus) ||
+    "pending"
+  );
+}
+
 function buildStationSubaccountPayload(station, platformFee) {
   const subaccountId = String(station?.chapaSubaccountId || "").trim();
   if (!subaccountId) {
@@ -134,6 +160,10 @@ function deriveFuelStatusFromInventory(inventory) {
 }
 
 async function finalizeSuccessfulPayment({ tx_ref, response }) {
+  if (extractChapaPaymentStatus(response) !== "success") {
+    return { ok: false, status: 409, message: "Payment is not confirmed yet." };
+  }
+
   const data = response?.data || {};
   const meta = data.meta || data.metadata || {};
   let reservationId = String(
@@ -463,11 +493,7 @@ exports.verify = async (req, res) => {
 
     const response = await chapaService.verifyPayment(tx_ref);
 
-    const status = String(response?.status || response?.data?.status || "").toLowerCase();
-    const normalizedStatus = ["success", "failed", "cancelled", "expired", "pending"]
-      .includes(status)
-      ? status
-      : "pending";
+    const normalizedStatus = extractChapaPaymentStatus(response);
 
     await PaymentTransaction.findOneAndUpdate(
       { provider: "chapa", txRef: tx_ref },
@@ -522,11 +548,10 @@ exports.callback = async (req, res) => {
 
     const response = await chapaService.verifyPayment(tx_ref);
 
-    const status = String(response?.status || response?.data?.status || "").toLowerCase();
-    const normalizedStatus = ["success", "failed", "cancelled", "expired", "pending"]
-      .includes(status)
-      ? status
-      : "pending";
+    const normalizedStatus = extractChapaPaymentStatus(response, {
+      status: req.body?.status || req.query?.status,
+      paymentStatus: req.body?.paymentStatus || req.query?.paymentStatus
+    });
     if (normalizedStatus !== "success") {
       await PaymentTransaction.findOneAndUpdate(
         { provider: "chapa", txRef: tx_ref },

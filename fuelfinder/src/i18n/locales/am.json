@@ -227,6 +227,7 @@
     "noActiveTicket": "ንቁ ትኬት የለም።",
     "leftQueue": "ከሰልፉ ወጥተዋል።",
     "failedLeaveQueue": "ከሰልፍ መውጣት አልተቻለም።",
+    "completePaymentFirst": "የቼክ-ኢን QR ወይም OTP ለማመንጨት በፊት ክፍያውን በትክክል ያጠናቅቁ።",
     "startCheckInFailed": "የማደያ ቼክ-ኢን መጀመር አልተቻለም።",
     "startForQr": "QR እና OTP ለመፍጠር ቼክ-ኢን ይጀምሩ።",
     "attendantNote": "ማረጋገጫ በሰራተኛ መተግበሪያ ብቻ ይደረጋል።",

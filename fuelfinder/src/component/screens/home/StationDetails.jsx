@@ -144,6 +144,7 @@ export default function StationDetails({ route }) {
       noActiveTicket: tr("stationDetails.noActiveTicket"),
       leftQueue: tr("stationDetails.leftQueue"),
       failedLeaveQueue: tr("stationDetails.failedLeaveQueue"),
+      completePaymentFirst: tr("stationDetails.completePaymentFirst"),
       startCheckInFailed: tr("stationDetails.startCheckInFailed"),
       startForQr: tr("stationDetails.startForQr"),
       attendantNote: tr("stationDetails.attendantNote"),
@@ -282,6 +283,9 @@ export default function StationDetails({ route }) {
     ["waiting", "called"].includes(String(myTicket?.status || "")) &&
     isFuelAvailable &&
     paymentPhase === "verified";
+  const canStartCheckIn =
+    Boolean(myTicket?.ticketId) &&
+    ["waiting", "called"].includes(String(myTicket?.status || "").toLowerCase());
 
   useEffect(() => {
     return () => {
@@ -523,13 +527,6 @@ export default function StationDetails({ route }) {
       }
 
       await WebBrowser.openBrowserAsync(checkoutUrl);
-      if (nextTxRef) {
-        try {
-          await verifyChapaPayment(nextTxRef);
-        } catch (verifyError) {
-          logReservationError("verifyChapaPayment", verifyError);
-        }
-      }
       setPaymentPhase("pending");
       setMessage(t.paymentInitiated);
       await pollReservation(nextReservationId, true);
@@ -603,6 +600,10 @@ export default function StationDetails({ route }) {
       Alert.alert(t.checkInMissingTicketTitle, t.checkInMissingTicketBody);
       return;
     }
+    if (!canStartCheckIn) {
+      setCheckInStatusText(t.completePaymentFirst);
+      return;
+    }
 
     setLoading(true);
     try {
@@ -628,7 +629,7 @@ export default function StationDetails({ route }) {
     } finally {
       setLoading(false);
     }
-  }, [myTicket, reservationId]);
+  }, [canStartCheckIn, myTicket, reservationId]);
 
   const getStatusStyle = () => {
     if (detail.fuelStatus === "available" || detail.fuelStatus === "full") return styles.statusFull;
@@ -878,12 +879,13 @@ export default function StationDetails({ route }) {
         </Text>
 
         <Pressable
-          style={[styles.actionButton, styles.primaryButton, loading && styles.disabled]}
+          style={[styles.actionButton, styles.primaryButton, (loading || !canStartCheckIn) && styles.disabled]}
           onPress={startCheckInNow}
-          disabled={loading}
+          disabled={loading || !canStartCheckIn}
         >
           <Text style={styles.primaryButtonText}>{t.startCheckInBtn}</Text>
         </Pressable>
+        {!canStartCheckIn ? <Text style={styles.noticeText}>{t.completePaymentFirst}</Text> : null}
 
         <Text style={styles.metaText}>{t.otpFromSession}</Text>
         <View style={styles.readonlyBox}>
