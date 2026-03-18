@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   callNextInQueue,
   createAdminStation,
+  createStationPromotion,
   createStationTeamUser,
   createAdminUser,
   forceLogoutAdminUser,
@@ -11,6 +12,7 @@ import {
   listAdminUsers,
   listOrganizationOptions,
   listOwnerStations,
+  listStationPromotions,
   listStationPayments,
   listStationTeam,
   loadSession,
@@ -20,6 +22,7 @@ import {
   setStationTeamUserBlocked,
   updateAdminStation,
   updateOwnerStation,
+  updateStationPromotion,
   updateStationTeamUser,
   updateAdminUser,
   updateFuelStock
@@ -112,6 +115,39 @@ function buildCreateStationFormState(defaultOrganizationId = "") {
     paymentAccountNumber: "",
     paymentPhoneNumber: "",
     paymentInstructions: ""
+  };
+}
+
+function formatDateTimeLocalValue(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function buildPromotionFormState(promotion = null) {
+  return {
+    id: String(promotion?.id || promotion?._id || ""),
+    title: String(promotion?.title || ""),
+    description: String(promotion?.description || ""),
+    mediaType: String(promotion?.mediaType || "image"),
+    mediaUrl: String(promotion?.mediaUrl || ""),
+    thumbnailUrl: String(promotion?.thumbnailUrl || ""),
+    ctaLabel: String(promotion?.ctaLabel || ""),
+    ctaUrl: String(promotion?.ctaUrl || ""),
+    startsAt: formatDateTimeLocalValue(promotion?.startsAt),
+    endsAt: formatDateTimeLocalValue(promotion?.endsAt),
+    sortOrder: String(
+      promotion?.sortOrder !== undefined && promotion?.sortOrder !== null
+        ? promotion.sortOrder
+        : 100
+    ),
+    isActive: promotion?.isActive !== undefined ? Boolean(promotion.isActive) : true
   };
 }
 
@@ -306,6 +342,12 @@ export default function Dashboard() {
   const [createStationError, setCreateStationError] = useState("");
   const [createStationStatus, setCreateStationStatus] = useState("");
   const [isCreatingStation, setIsCreatingStation] = useState(false);
+  const [promotions, setPromotions] = useState([]);
+  const [promotionsLoading, setPromotionsLoading] = useState(false);
+  const [promotionsError, setPromotionsError] = useState("");
+  const [promotionStatus, setPromotionStatus] = useState("");
+  const [promotionForm, setPromotionForm] = useState(() => buildPromotionFormState());
+  const [isSavingPromotion, setIsSavingPromotion] = useState(false);
   const [regionFilter, setRegionFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
 
@@ -623,6 +665,12 @@ export default function Dashboard() {
     setCreateStationError("");
     setCreateStationStatus("");
     setIsCreatingStation(false);
+    setPromotions([]);
+    setPromotionsLoading(false);
+    setPromotionsError("");
+    setPromotionStatus("");
+    setPromotionForm(buildPromotionFormState());
+    setIsSavingPromotion(false);
   }, [stationId]);
 
   useEffect(() => {
@@ -758,6 +806,104 @@ export default function Dashboard() {
     if (!stationId) return;
     loadStationPayments(paymentsFilters);
   }, [active, isStationExec, session?.tokens?.accessToken, stationId]);
+
+  const loadPromotions = async () => {
+    if (!stationId) return;
+    setPromotionsLoading(true);
+    setPromotionsError("");
+
+    try {
+      const data = await listStationPromotions(stationId);
+      setPromotions(Array.isArray(data?.promotions) ? data.promotions : []);
+    } catch (error) {
+      setPromotionsError(error.message);
+    } finally {
+      setPromotionsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!session?.tokens?.accessToken) return;
+    if (active !== "pricing") return;
+    if (!isStationExec) return;
+    if (!stationId) return;
+    loadPromotions();
+  }, [active, isStationExec, session?.tokens?.accessToken, stationId]);
+
+  const handlePromotionSubmit = async (event) => {
+    event.preventDefault();
+    if (!stationId) return;
+
+    setIsSavingPromotion(true);
+    setPromotionsError("");
+    setPromotionStatus("");
+
+    try {
+      const payload = {
+        title: String(promotionForm.title || "").trim(),
+        description: String(promotionForm.description || "").trim(),
+        mediaType: String(promotionForm.mediaType || "image").trim().toLowerCase(),
+        mediaUrl: String(promotionForm.mediaUrl || "").trim(),
+        thumbnailUrl: String(promotionForm.thumbnailUrl || "").trim(),
+        ctaLabel: String(promotionForm.ctaLabel || "").trim(),
+        ctaUrl: String(promotionForm.ctaUrl || "").trim(),
+        startsAt: String(promotionForm.startsAt || "").trim() || null,
+        endsAt: String(promotionForm.endsAt || "").trim() || null,
+        sortOrder: Number(promotionForm.sortOrder || 0),
+        isActive: Boolean(promotionForm.isActive)
+      };
+
+      const result = promotionForm.id
+        ? await updateStationPromotion(stationId, promotionForm.id, payload)
+        : await createStationPromotion(stationId, payload);
+
+      setPromotionStatus(result?.message || (promotionForm.id ? "Promotion updated." : "Promotion published."));
+      setPromotionForm(buildPromotionFormState());
+      await loadPromotions();
+    } catch (error) {
+      setPromotionsError(error.message);
+    } finally {
+      setIsSavingPromotion(false);
+    }
+  };
+
+  const startEditPromotion = (promotion) => {
+    setPromotionsError("");
+    setPromotionStatus("");
+    setPromotionForm(buildPromotionFormState(promotion));
+  };
+
+  const resetPromotionForm = () => {
+    setPromotionsError("");
+    setPromotionStatus("");
+    setPromotionForm(buildPromotionFormState());
+  };
+
+  const togglePromotionActive = async (promotion) => {
+    if (!stationId || !promotion?.id) return;
+
+    setIsSavingPromotion(true);
+    setPromotionsError("");
+    setPromotionStatus("");
+
+    try {
+      const nextIsActive = !promotion.isActive;
+      const result = await updateStationPromotion(stationId, promotion.id, {
+        isActive: nextIsActive
+      });
+      setPromotionStatus(
+        result?.message || (nextIsActive ? "Promotion enabled." : "Promotion hidden from the app.")
+      );
+      if (promotionForm.id === promotion.id) {
+        setPromotionForm((prev) => ({ ...prev, isActive: nextIsActive }));
+      }
+      await loadPromotions();
+    } catch (error) {
+      setPromotionsError(error.message);
+    } finally {
+      setIsSavingPromotion(false);
+    }
+  };
 
   const handleCreateUser = async (event) => {
     event.preventDefault();
@@ -1847,6 +1993,9 @@ export default function Dashboard() {
           <div className="grid">
             <div className="card wide">
               <h3>Price updates</h3>
+              <p className="section-title">
+                Customer home promotions render before the station list and only appear when a station admin publishes them.
+              </p>
               <div className="form-row">
                 <label>
                   Gasoline price
@@ -1870,44 +2019,212 @@ export default function Dashboard() {
               </button>
             </div>
             <div className="card narrow">
-              <h3>Active promos</h3>
-              <div className="list">
-                <div className="list-item">
-                  <div>
-                    <strong>Happy Hour</strong>
-                    <span>-$0.10 / liter - 4-6 PM</span>
-                  </div>
-                  <span className="pill">Draft</span>
+              <h3>Live carousel promos</h3>
+              <p className="section-title">
+                Published for {station?.name || "the selected station"}.
+              </p>
+              {promotionsError && <span className="status-banner">{promotionsError}</span>}
+              {promotionStatus && <span className="status-banner">{promotionStatus}</span>}
+              {promotionsLoading ? (
+                <p className="section-title">Loading promotions...</p>
+              ) : promotions.length ? (
+                <div className="list">
+                  {promotions.map((promotion) => {
+                    const hasSchedule = promotion.startsAt || promotion.endsAt;
+                    const pillLabel = promotion.isActive ? "Published" : "Hidden";
+                    return (
+                      <div className="list-item" key={promotion.id}>
+                        <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", width: "100%" }}>
+                          {promotion.previewUrl ? (
+                            <img
+                              src={promotion.previewUrl}
+                              alt={promotion.title}
+                              style={{
+                                width: "96px",
+                                height: "72px",
+                                objectFit: "cover",
+                                borderRadius: "12px",
+                                border: "1px solid rgba(148, 163, 184, 0.35)"
+                              }}
+                            />
+                          ) : (
+                            <div
+                              style={{
+                                width: "96px",
+                                height: "72px",
+                                borderRadius: "12px",
+                                border: "1px solid rgba(148, 163, 184, 0.35)",
+                                background: "linear-gradient(135deg, #dbeafe 0%, #fef3c7 100%)",
+                                display: "grid",
+                                placeItems: "center",
+                                fontWeight: 800,
+                                color: "#0f172a"
+                              }}
+                            >
+                              {String(promotion.mediaType || "image").toUpperCase()}
+                            </div>
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <strong>{promotion.title}</strong>
+                            <span>
+                              {promotion.mediaType === "video" ? "Video promo" : "Image promo"}
+                              {promotion.description ? ` - ${promotion.description}` : ""}
+                            </span>
+                            <span>
+                              {hasSchedule
+                                ? `Schedule: ${promotion.startsAt ? formatDateTime(promotion.startsAt) : "Now"} -> ${
+                                    promotion.endsAt ? formatDateTime(promotion.endsAt) : "Until disabled"
+                                  }`
+                                : "Schedule: live immediately until you hide it"}
+                            </span>
+                            <span>
+                              Sort order {Number(promotion.sortOrder || 0)}
+                              {promotion.ctaLabel ? ` - CTA: ${promotion.ctaLabel}` : ""}
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "flex-end" }}>
+                            <span className="pill">{pillLabel}</span>
+                            <button className="btn small" type="button" onClick={() => startEditPromotion(promotion)}>
+                              Edit
+                            </button>
+                            <button
+                              className="btn alt small"
+                              type="button"
+                              onClick={() => togglePromotionActive(promotion)}
+                              disabled={isSavingPromotion}
+                            >
+                              {promotion.isActive ? "Hide" : "Publish"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
+              ) : (
+                <p className="section-title">
+                  No promotions yet. The customer home carousel stays hidden until you publish one here.
+                </p>
+              )}
             </div>
             <div className="card full">
-              <h3>Create promotion</h3>
-              <div className="form-row">
+              <h3>{promotionForm.id ? "Edit promotion" : "Create promotion"}</h3>
+              <p className="section-title">
+                Use a lightweight image URL for best speed. For video promotions, add a thumbnail URL so the home carousel stays fast.
+              </p>
+              <form onSubmit={handlePromotionSubmit}>
+                <div className="form-row">
+                  <label>
+                    Promotion title
+                    <input
+                      value={promotionForm.title}
+                      onChange={(event) => setPromotionForm((prev) => ({ ...prev, title: event.target.value }))}
+                      placeholder="Weekend fuel deal"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Media type
+                    <select
+                      value={promotionForm.mediaType}
+                      onChange={(event) => setPromotionForm((prev) => ({ ...prev, mediaType: event.target.value }))}
+                    >
+                      <option value="image">Image</option>
+                      <option value="video">Video</option>
+                    </select>
+                  </label>
+                  <label>
+                    Media URL
+                    <input
+                      value={promotionForm.mediaUrl}
+                      onChange={(event) => setPromotionForm((prev) => ({ ...prev, mediaUrl: event.target.value }))}
+                      placeholder="https://..."
+                      required
+                    />
+                  </label>
+                  <label>
+                    Preview image URL
+                    <input
+                      value={promotionForm.thumbnailUrl}
+                      onChange={(event) => setPromotionForm((prev) => ({ ...prev, thumbnailUrl: event.target.value }))}
+                      placeholder="Recommended for video"
+                    />
+                  </label>
+                </div>
+                <div className="form-row">
+                  <label>
+                    CTA label
+                    <input
+                      value={promotionForm.ctaLabel}
+                      onChange={(event) => setPromotionForm((prev) => ({ ...prev, ctaLabel: event.target.value }))}
+                      placeholder="View station"
+                    />
+                  </label>
+                  <label>
+                    CTA URL
+                    <input
+                      value={promotionForm.ctaUrl}
+                      onChange={(event) => setPromotionForm((prev) => ({ ...prev, ctaUrl: event.target.value }))}
+                      placeholder="https://..."
+                    />
+                  </label>
+                  <label>
+                    Starts at
+                    <input
+                      type="datetime-local"
+                      value={promotionForm.startsAt}
+                      onChange={(event) => setPromotionForm((prev) => ({ ...prev, startsAt: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Ends at
+                    <input
+                      type="datetime-local"
+                      value={promotionForm.endsAt}
+                      onChange={(event) => setPromotionForm((prev) => ({ ...prev, endsAt: event.target.value }))}
+                    />
+                  </label>
+                </div>
+                <div className="form-row">
+                  <label>
+                    Sort order
+                    <input
+                      type="number"
+                      value={promotionForm.sortOrder}
+                      onChange={(event) => setPromotionForm((prev) => ({ ...prev, sortOrder: event.target.value }))}
+                      placeholder="100"
+                    />
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", paddingTop: "26px" }}>
+                    <input
+                      type="checkbox"
+                      checked={promotionForm.isActive}
+                      onChange={(event) => setPromotionForm((prev) => ({ ...prev, isActive: event.target.checked }))}
+                    />
+                    Publish immediately
+                  </label>
+                </div>
                 <label>
-                  Promo name
-                  <input type="text" placeholder="Evening discount" />
+                  Promotion description
+                  <textarea
+                    value={promotionForm.description}
+                    onChange={(event) => setPromotionForm((prev) => ({ ...prev, description: event.target.value }))}
+                    placeholder="Shown above the nearby station list in the customer app."
+                  />
                 </label>
-                <label>
-                  Discount
-                  <input type="text" placeholder="-$0.08 / liter" />
-                </label>
-                <label>
-                  Start time
-                  <input type="text" placeholder="6:00 PM" />
-                </label>
-                <label>
-                  End time
-                  <input type="text" placeholder="9:00 PM" />
-                </label>
-              </div>
-              <label>
-                Promo description
-                <textarea placeholder="Displayed to drivers in the FuelFinder app." />
-              </label>
-              <button className="btn" disabled>
-                Promo tools coming soon
-              </button>
+                <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginTop: "12px" }}>
+                  <button className="btn" type="submit" disabled={isSavingPromotion || !stationId}>
+                    {isSavingPromotion
+                      ? "Saving..."
+                      : promotionForm.id
+                        ? "Save promotion"
+                        : "Publish to customer home"}
+                  </button>
+                  <button className="btn alt" type="button" onClick={resetPromotionForm} disabled={isSavingPromotion}>
+                    Clear form
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

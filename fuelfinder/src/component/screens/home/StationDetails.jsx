@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import * as Location from "expo-location";
 import * as WebBrowser from "expo-web-browser";
 import QRCode from "react-native-qrcode-svg";
@@ -102,12 +103,17 @@ export default function StationDetails({ route }) {
       amountToPay: tr("stationDetails.amountToPay"),
       paymentDetailsTitle: tr("stationDetails.paymentDetailsTitle"),
       paymentDetailsHint: tr("stationDetails.paymentDetailsHint"),
+      paymentCopyHint: tr("stationDetails.paymentCopyHint"),
       paymentProvider: tr("stationDetails.paymentProvider"),
       paymentPhone: tr("stationDetails.paymentPhone"),
       paymentAccountName: tr("stationDetails.paymentAccountName"),
       paymentAccountNumber: tr("stationDetails.paymentAccountNumber"),
       paymentInstructions: tr("stationDetails.paymentInstructions"),
       paymentDetailsMissing: tr("stationDetails.paymentDetailsMissing"),
+      copyButton: tr("stationDetails.copyButton"),
+      copiedButton: tr("stationDetails.copiedButton"),
+      copyFailedTitle: tr("stationDetails.copyFailedTitle"),
+      copyFailedBody: tr("stationDetails.copyFailedBody"),
       reservePayBtn: tr("stationDetails.reservePayBtn"),
       checkPaymentBtn: tr("stationDetails.checkPaymentBtn"),
       refreshTicketBtn: tr("stationDetails.refreshTicketBtn"),
@@ -176,7 +182,9 @@ export default function StationDetails({ route }) {
   const [stationMeta, setStationMeta] = useState(null);
   const [checkInSession, setCheckInSession] = useState(null);
   const [checkInStatusText, setCheckInStatusText] = useState("");
+  const [copiedField, setCopiedField] = useState("");
   const pollRef = useRef(null);
+  const copyTimerRef = useRef(null);
 
   const stationId = useMemo(
     () => String(station?.stationId || station?._id || station?.id || "").trim(),
@@ -224,6 +232,52 @@ export default function StationDetails({ route }) {
   const hasManualPaymentDetails = useMemo(
     () => Object.values(manualPaymentDetails).some(Boolean),
     [manualPaymentDetails]
+  );
+  const paymentDetailRows = useMemo(
+    () => [
+      {
+        key: "providerName",
+        label: t.paymentProvider,
+        value: manualPaymentDetails.providerName,
+        copyable: false,
+      },
+      {
+        key: "phoneNumber",
+        label: t.paymentPhone,
+        value: manualPaymentDetails.phoneNumber,
+        copyable: true,
+      },
+      {
+        key: "accountName",
+        label: t.paymentAccountName,
+        value: manualPaymentDetails.accountName,
+        copyable: true,
+      },
+      {
+        key: "accountNumber",
+        label: t.paymentAccountNumber,
+        value: manualPaymentDetails.accountNumber,
+        copyable: true,
+      },
+      {
+        key: "instructions",
+        label: t.paymentInstructions,
+        value: manualPaymentDetails.instructions,
+        copyable: false,
+      },
+    ].filter((item) => item.value),
+    [
+      manualPaymentDetails.accountName,
+      manualPaymentDetails.accountNumber,
+      manualPaymentDetails.instructions,
+      manualPaymentDetails.phoneNumber,
+      manualPaymentDetails.providerName,
+      t.paymentAccountName,
+      t.paymentAccountNumber,
+      t.paymentInstructions,
+      t.paymentPhone,
+      t.paymentProvider,
+    ]
   );
 
   const detail = useMemo(() => {
@@ -290,8 +344,28 @@ export default function StationDetails({ route }) {
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
     };
   }, []);
+
+  const copyPaymentDetail = useCallback(
+    async (fieldKey, value) => {
+      const text = String(value || "").trim();
+      if (!text) return;
+      try {
+        await Clipboard.setStringAsync(text);
+        setCopiedField(fieldKey);
+        if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = setTimeout(() => {
+          setCopiedField((current) => (current === fieldKey ? "" : current));
+        }, 1800);
+      } catch (error) {
+        console.error("[StationDetails:copyPaymentDetail]", error);
+        Alert.alert(t.copyFailedTitle, t.copyFailedBody);
+      }
+    },
+    [t.copyFailedBody, t.copyFailedTitle]
+  );
 
   useEffect(() => {
     let active = true;
@@ -774,32 +848,36 @@ export default function StationDetails({ route }) {
           <Text style={styles.paymentDetailsTitle}>{t.paymentDetailsTitle}</Text>
           <Text style={styles.paymentDetailsHint}>{t.paymentDetailsHint}</Text>
           {hasManualPaymentDetails ? (
+            <Text style={styles.paymentCopyHint}>{t.paymentCopyHint}</Text>
+          ) : null}
+          {hasManualPaymentDetails ? (
             <>
-              {manualPaymentDetails.providerName ? (
-                <Text style={styles.metaText}>
-                  {t.paymentProvider}: {manualPaymentDetails.providerName}
-                </Text>
-              ) : null}
-              {manualPaymentDetails.phoneNumber ? (
-                <Text style={styles.metaText}>
-                  {t.paymentPhone}: {manualPaymentDetails.phoneNumber}
-                </Text>
-              ) : null}
-              {manualPaymentDetails.accountName ? (
-                <Text style={styles.metaText}>
-                  {t.paymentAccountName}: {manualPaymentDetails.accountName}
-                </Text>
-              ) : null}
-              {manualPaymentDetails.accountNumber ? (
-                <Text style={styles.metaText}>
-                  {t.paymentAccountNumber}: {manualPaymentDetails.accountNumber}
-                </Text>
-              ) : null}
-              {manualPaymentDetails.instructions ? (
-                <Text style={styles.metaText}>
-                  {t.paymentInstructions}: {manualPaymentDetails.instructions}
-                </Text>
-              ) : null}
+              {paymentDetailRows.map((item) => (
+                <View key={item.key} style={styles.paymentDetailRow}>
+                  <View style={styles.paymentDetailTextWrap}>
+                    <Text style={styles.paymentDetailLabel}>{item.label}</Text>
+                    <Text style={styles.paymentDetailValue}>{item.value}</Text>
+                  </View>
+                  {item.copyable ? (
+                    <Pressable
+                      style={[
+                        styles.copyButton,
+                        copiedField === item.key && styles.copyButtonActive,
+                      ]}
+                      onPress={() => copyPaymentDetail(item.key, item.value)}
+                    >
+                      <Text
+                        style={[
+                          styles.copyButtonText,
+                          copiedField === item.key && styles.copyButtonTextActive,
+                        ]}
+                      >
+                        {copiedField === item.key ? t.copiedButton : t.copyButton}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ))}
             </>
           ) : (
             <Text style={styles.noticeText}>{t.paymentDetailsMissing}</Text>
@@ -1170,6 +1248,60 @@ const styles = StyleSheet.create({
     color: "#475569",
     fontWeight: "600",
     marginBottom: 6,
+  },
+  paymentCopyHint: {
+    fontSize: 12,
+    color: "#1D4ED8",
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  paymentDetailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  paymentDetailTextWrap: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  paymentDetailLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#475569",
+    marginBottom: 2,
+    textTransform: "uppercase",
+  },
+  paymentDetailValue: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  copyButton: {
+    borderWidth: 1,
+    borderColor: "#93C5FD",
+    backgroundColor: "#EFF6FF",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  copyButtonActive: {
+    borderColor: "#10B981",
+    backgroundColor: "#D1FAE5",
+  },
+  copyButtonText: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#1D4ED8",
+  },
+  copyButtonTextActive: {
+    color: "#065F46",
   },
   qrWrap: {
     borderWidth: 1,

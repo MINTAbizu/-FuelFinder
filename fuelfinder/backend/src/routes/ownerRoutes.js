@@ -4,6 +4,7 @@ const { requireRole, requireScope } = require("../middleware/authorize");
 const ownerStationController = require("../controllers/ownerStationController");
 const ownerPaymentController = require("../controllers/ownerPaymentController");
 const ownerTeamController = require("../controllers/ownerTeamController");
+const promotionController = require("../controllers/promotionController");
 
 const router = express.Router();
 const OWNER_ROLES = ["staff", "station_manager", "city_manager", "org_admin", "super_admin"];
@@ -38,6 +39,27 @@ router.get(
   requireRole(STATION_EXEC_ROLES),
   requireScope({ stationKey: "stationId", requireAny: true }),
   ownerTeamController.listStationTeam
+);
+
+router.get(
+  "/stations/:stationId/promotions",
+  requireRole(STATION_EXEC_ROLES),
+  requireScope({ stationKey: "stationId", requireAny: true }),
+  promotionController.listStationPromotions
+);
+
+router.post(
+  "/stations/:stationId/promotions",
+  requireRole(STATION_EXEC_ROLES),
+  requireScope({ stationKey: "stationId", requireAny: true }),
+  promotionController.createStationPromotion
+);
+
+router.patch(
+  "/stations/:stationId/promotions/:promotionId",
+  requireRole(STATION_EXEC_ROLES),
+  requireScope({ stationKey: "stationId", requireAny: true }),
+  promotionController.updateStationPromotion
 );
 
 router.post(

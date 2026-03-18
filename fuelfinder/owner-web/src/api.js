@@ -137,6 +137,24 @@ export async function listStationTeam(stationId) {
   return apiRequest(`/owner/stations/${stationId}/team`);
 }
 
+export async function listStationPromotions(stationId) {
+  return apiRequest(`/owner/stations/${stationId}/promotions`);
+}
+
+export async function createStationPromotion(stationId, payload) {
+  return apiRequest(`/owner/stations/${stationId}/promotions`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateStationPromotion(stationId, promotionId, payload) {
+  return apiRequest(`/owner/stations/${stationId}/promotions/${promotionId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function createStationTeamUser(stationId, payload) {
   return apiRequest(`/owner/stations/${stationId}/team`, {
     method: "POST",

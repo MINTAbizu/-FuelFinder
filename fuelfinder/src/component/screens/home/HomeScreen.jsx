@@ -17,10 +17,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import * as Location from "expo-location";
+import * as WebBrowser from "expo-web-browser";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLanguage } from "../../context/LanguageContext";
 import api from "../../services/api";
 import { loadSavedStations, toggleSavedStation } from "../../services/accountStorage";
+import PromotionCarousel from "./PromotionCarousel";
 
 const DEFAULT_REGION = {
   latitude: 8.9806,
@@ -50,6 +52,26 @@ async function fetchNearbyFuelStations(basePoint, radiusMeters = 12000) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
   const { data } = await api.get("/map/nearby-fuel", { params: { lat, lon, radius: radiusMeters } });
   return Array.isArray(data?.stations) ? data.stations : [];
+}
+
+async function fetchStationPromotions(stationIds, limit = 6) {
+  const filteredIds = Array.from(
+    new Set(
+      (stationIds || [])
+        .map((value) => String(value || "").trim())
+        .filter((value) => /^[a-fA-F0-9]{24}$/.test(value))
+    )
+  );
+
+  if (!filteredIds.length) return [];
+
+  const { data } = await api.get("/map/promotions", {
+    params: {
+      stationIds: filteredIds.join(","),
+      limit
+    }
+  });
+  return Array.isArray(data?.promotions) ? data.promotions : [];
 }
 
 function statusLabel(t, status) {
@@ -114,6 +136,9 @@ export default function HomeScreen({ navigation }) {
   const [routeSummary, setRouteSummary] = useState(null);
   const [activeRouteStationId, setActiveRouteStationId] = useState("");
   const [savedStationIds, setSavedStationIds] = useState({});
+  const [promotions, setPromotions] = useState([]);
+  const [promotionsLoading, setPromotionsLoading] = useState(false);
+  const [promotionIndex, setPromotionIndex] = useState(0);
 
   const refreshSavedStations = useCallback(async () => {
     try {
@@ -210,6 +235,41 @@ export default function HomeScreen({ navigation }) {
       setRefreshing(false);
     }
   }, [loadNearbyStations]);
+
+  useEffect(() => {
+    let active = true;
+    const nextStationIds = stations
+      .map((item) => String(item.stationId || item._id || "").trim())
+      .filter(Boolean);
+
+    if (!nextStationIds.length) {
+      setPromotions([]);
+      setPromotionsLoading(false);
+      setPromotionIndex(0);
+      return undefined;
+    }
+
+    const loadPromotions = async () => {
+      setPromotionsLoading(true);
+      try {
+        const nextPromotions = await fetchStationPromotions(nextStationIds, 8);
+        if (!active) return;
+        setPromotions(nextPromotions);
+        setPromotionIndex(0);
+      } catch (error) {
+        if (!active) return;
+        setPromotions([]);
+        console.error("[Promotions:load]", error?.response?.status, error?.response?.data, error?.message);
+      } finally {
+        if (active) setPromotionsLoading(false);
+      }
+    };
+
+    loadPromotions();
+    return () => {
+      active = false;
+    };
+  }, [stations]);
 
   const onCenterMap = useCallback(() => {
     if (!mapRef.current || !location) return;
@@ -351,6 +411,39 @@ export default function HomeScreen({ navigation }) {
     [t]
   );
 
+  const stationByBackendId = useMemo(() => {
+    return stations.reduce((accumulator, item) => {
+      const key = String(item.stationId || item._id || "").trim();
+      if (key) {
+        accumulator[key] = item;
+      }
+      return accumulator;
+    }, {});
+  }, [stations]);
+
+  const openPromotion = useCallback(
+    async (promotion) => {
+      const externalUrl = String(
+        promotion?.ctaUrl || (promotion?.mediaType === "video" ? promotion?.mediaUrl : "")
+      ).trim();
+
+      if (externalUrl) {
+        try {
+          await WebBrowser.openBrowserAsync(externalUrl);
+          return;
+        } catch (error) {
+          console.error("[Promotions:openExternal]", error?.message || error);
+        }
+      }
+
+      const linkedStation = stationByBackendId[String(promotion?.stationId || "").trim()];
+      if (linkedStation) {
+        navigation?.navigate?.("StationDetails", { station: linkedStation });
+      }
+    },
+    [navigation, stationByBackendId]
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <FlatList
@@ -428,6 +521,30 @@ export default function HomeScreen({ navigation }) {
             {stationsError ? <Text style={styles.error}>{stationsError}</Text> : null}
             {routingError ? <Text style={styles.error}>{routingError}</Text> : null}
             <TextInput value={searchText} onChangeText={setSearchText} placeholder={t("homeScreen.search")} style={styles.search} />
+
+            {promotionsLoading && !promotions.length ? (
+              <View style={styles.promotionsLoading}>
+                <ActivityIndicator size="small" color="#0F766E" />
+              </View>
+            ) : null}
+            {promotions.length ? (
+              <PromotionCarousel
+                activeIndex={promotionIndex}
+                onPressPromotion={openPromotion}
+                onSnapToItem={setPromotionIndex}
+                promotions={promotions}
+                texts={{
+                  eyebrow: t("homeScreen.promotions.eyebrow"),
+                  title: t("homeScreen.promotions.title"),
+                  subtitle: t("homeScreen.promotions.subtitle"),
+                  videoLabel: t("homeScreen.promotions.videoLabel"),
+                  watchVideo: t("homeScreen.promotions.watchVideo"),
+                  viewStation: t("homeScreen.promotions.viewStation"),
+                  endsLabel: t("homeScreen.promotions.endsLabel"),
+                  stationFallback: t("homeScreen.promotions.stationFallback")
+                }}
+              />
+            ) : null}
 
             <Text style={styles.section}>{t("homeScreen.filter")}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
@@ -620,6 +737,16 @@ const styles = StyleSheet.create({
   loadingLineWide: { height: 12, borderRadius: 8, backgroundColor: "#E2E8F0", width: "90%" },
   loadingLine: { height: 10, borderRadius: 8, backgroundColor: "#E2E8F0", width: "70%" },
   loadingLineShort: { height: 10, borderRadius: 8, backgroundColor: "#E2E8F0", width: "50%" },
+  promotionsLoading: {
+    marginTop: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+    paddingVertical: 18,
+    alignItems: "center",
+    justifyContent: "center"
+  },
   search: {
     marginTop: 10,
     backgroundColor: "#fff",
