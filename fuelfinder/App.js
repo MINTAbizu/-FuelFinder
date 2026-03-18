@@ -2121,6 +2121,9 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  navigatorRoot: {
+    flex: 1,
+  },
   loadingScreen: {
     flex: 1,
     backgroundColor: "#F8FAFC",
@@ -2131,6 +2134,78 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: "#475569",
     fontWeight: "700",
+  },
+  biometricOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(15, 23, 42, 0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+  biometricCard: {
+    width: "100%",
+    maxWidth: 360,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 22,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  biometricIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#CCFBF1",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  biometricTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: "#0F172A",
+    textAlign: "center",
+  },
+  biometricSubtitle: {
+    marginTop: 8,
+    marginBottom: 20,
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: "700",
+    color: "#64748B",
+    textAlign: "center",
+  },
+  biometricPrimaryButton: {
+    width: "100%",
+    minHeight: 50,
+    borderRadius: 14,
+    backgroundColor: "#0F766E",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  biometricPrimaryButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  biometricSecondaryButton: {
+    width: "100%",
+    minHeight: 48,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  biometricSecondaryButtonText: {
+    color: "#0F172A",
+    fontSize: 14,
+    fontWeight: "800",
   },
   placeholderScreen: {
     flex: 1,

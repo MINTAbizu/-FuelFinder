@@ -38,6 +38,12 @@
     "plugins": [
       "expo-font",
       "expo-localization",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow FuelFinder to use Face ID to unlock your account securely."
+        }
+      ],
       "./plugins/withAndroidX",
       [
         "expo-location",
