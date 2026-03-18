@@ -120,7 +120,10 @@
       "button": "Create Account",
       "alreadyHave": "Already have an account?",
       "login": "Login"
-    }
+    },
+    "google": "Continue with Google",
+    "googleFailed": "Google sign-in failed.",
+    "googleNotReady": "Google sign-in is not ready yet."
   },
 
   "homeScreen": {
@@ -205,9 +208,19 @@
     "liters": "How Many Liters",
     "litersPlaceholder": "Enter liters (e.g. 25)",
     "currentPrice": "Current Price",
-    "estimatedTotal": "Estimated Total",
-    "reservePayBtn": "Reserve & Pay with Telebirr",
-    "checkPaymentBtn": "Check Payment Status",
+      "estimatedTotal": "Estimated Total",
+      "platformFee": "Platform fee",
+      "amountToPay": "Amount to pay",
+      "paymentDetailsTitle": "Station payment details",
+      "paymentDetailsHint": "These details update automatically for the station you selected, so customers do not need to remember them.",
+      "paymentProvider": "Provider",
+      "paymentPhone": "Payment phone",
+      "paymentAccountName": "Account name",
+      "paymentAccountNumber": "Account number",
+      "paymentInstructions": "Instructions",
+      "paymentDetailsMissing": "This station has not added manual payment details yet. You can still use the in-app checkout button.",
+      "reservePayBtn": "Reserve & Pay with Telebirr",
+      "checkPaymentBtn": "Check Payment Status",
     "refreshTicketBtn": "Refresh My Ticket",
     "leaveQueueBtn": "Leave Queue",
     "activeTicket": "My Active Ticket",

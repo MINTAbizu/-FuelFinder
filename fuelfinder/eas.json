@@ -5,10 +5,12 @@
   },
   "build": {
     "development": {
+      "node": "24.12.0",
       "developmentClient": true,
       "distribution": "internal"
     },
     "preview": {
+      "node": "24.12.0",
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://fuelfinder-2.onrender.com",
@@ -17,6 +19,7 @@
       }
     },
     "production": {
+      "node": "24.12.0",
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://fuelfinder-2.onrender.com",

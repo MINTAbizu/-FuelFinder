@@ -153,3 +153,49 @@ exports.validatePhoneResend = (req, res, next) => {
   req.body.verificationToken = verificationToken;
   return next();
 };
+
+exports.validateUpdateProfile = (req, res, next) => {
+  const name = normalize(req.body.name);
+  const phone = normalizePhone(req.body.phone);
+  const email = normalizeEmail(req.body.email);
+
+  if (!name || !email) {
+    return sendValidationError(res, "name and email are required.");
+  }
+  if (name.length > 120) {
+    return sendValidationError(res, "name is too long.");
+  }
+  if (phone.length > 40) {
+    return sendValidationError(res, "phone is too long.");
+  }
+  if (phone && !isValidPhone(phone)) {
+    return sendValidationError(res, "Invalid phone number format.");
+  }
+  if (!isValidEmail(email)) {
+    return sendValidationError(res, "Invalid email format.");
+  }
+
+  req.body.name = name;
+  req.body.phone = phone;
+  req.body.email = email;
+  return next();
+};
+
+exports.validateChangePassword = (req, res, next) => {
+  const currentPassword = String(req.body.currentPassword || "");
+  const newPassword = String(req.body.newPassword || "");
+
+  if (!newPassword) {
+    return sendValidationError(res, "newPassword is required.");
+  }
+  if (!isStrongPassword(newPassword)) {
+    return sendValidationError(
+      res,
+      "Password must be 8+ chars and include upper, lower, number, and special character."
+    );
+  }
+
+  req.body.currentPassword = currentPassword;
+  req.body.newPassword = newPassword;
+  return next();
+};

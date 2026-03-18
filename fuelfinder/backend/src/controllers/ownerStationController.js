@@ -1,5 +1,9 @@
 const mongoose = require("mongoose");
 const Station = require("../models/Station");
+const {
+  normalizePaymentDetails,
+  pickPaymentDetailsPayload
+} = require("../utils/stationPaymentDetails");
 
 function buildStationResponse(station) {
   const coords = Array.isArray(station.location?.coordinates) ? station.location.coordinates : [];
@@ -17,6 +21,7 @@ function buildStationResponse(station) {
       updatedAt: fuelInventory.updatedAt || null,
       updatedByUserId: fuelInventory.updatedByUserId ? String(fuelInventory.updatedByUserId) : null
     },
+    paymentDetails: normalizePaymentDetails(station.paymentDetails),
     isActive: Boolean(station.isActive),
     organizationId: station.organizationId ? String(station.organizationId) : null,
     cityId: station.cityId ? String(station.cityId) : null,
@@ -121,6 +126,13 @@ exports.updateMyStation = async (req, res) => {
     }
     if (req.body.contact !== undefined) {
       station.contact = String(req.body.contact || "").trim();
+    }
+    const paymentDetails = pickPaymentDetailsPayload(req.body);
+    if (paymentDetails) {
+      station.paymentDetails = {
+        ...normalizePaymentDetails(station.paymentDetails),
+        ...paymentDetails
+      };
     }
     if (req.body.isActive !== undefined) {
       station.isActive = Boolean(req.body.isActive);

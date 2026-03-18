@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -12,7 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import * as Location from "expo-location";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLanguage } from "../../context/LanguageContext";
@@ -327,6 +328,7 @@ export default function HomeScreen({ navigation }) {
               <MapView
                 ref={mapRef}
                 style={styles.map}
+                provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
                 initialRegion={
                   location
                     ? {

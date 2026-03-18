@@ -5,16 +5,19 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from "react-native";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, useFocusEffect } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
@@ -24,6 +27,16 @@ import StationDetails from "./src/component/screens/home/StationDetails";
 import LoginScreen from "./src/component/screens/auth/LoginScreen";
 import RegisterScreen from "./src/component/screens/auth/RegisterScreen";
 import PhoneVerifyScreen from "./src/component/screens/auth/PhoneVerifyScreen";
+import { changeMyPassword, updateMyProfile } from "./src/component/services/authService";
+import {
+  loadSavedStations,
+  loadVehicles,
+  removeSavedStation,
+  removeVehicle,
+  saveSavedStations,
+  saveVehicles,
+  upsertVehicle,
+} from "./src/component/services/accountStorage";
 import { AuthProvider, useAuth } from "./src/component/context/AuthContext";
 import { LanguageProvider, useLanguage } from "./src/component/context/LanguageContext";
 
@@ -68,8 +81,26 @@ function PlaceholderScreen({ title }) {
   );
 }
 
+function createEmptyVehicleDraft(preferredFuel = "gasoline") {
+  return {
+    id: "",
+    nickname: "",
+    plateNumber: "",
+    fuelType:
+      preferredFuel === "diesel" || preferredFuel === "electric" ? preferredFuel : "gasoline",
+    tankCapacityLiters: "",
+    isPrimary: false,
+  };
+}
+
+function getVehicleFuelLabel(t, fuelType) {
+  if (fuelType === "diesel") return t("fuelDiesel");
+  if (fuelType === "electric") return t("fuelElectric");
+  return t("fuelGasoline");
+}
+
 function ProfileScreen() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, replaceUser } = useAuth();
   const { t, changeLanguage, language } = useLanguage();
   const qc = useQueryClient();
 
@@ -104,6 +135,22 @@ function ProfileScreen() {
     preferredFuel: "gasoline", // gasoline | diesel | electric
   });
   const [prefsReady, setPrefsReady] = React.useState(false);
+  const [accountModal, setAccountModal] = React.useState("");
+  const [accountBusy, setAccountBusy] = React.useState(false);
+  const [vehicles, setVehicles] = React.useState([]);
+  const [savedStations, setSavedStations] = React.useState([]);
+  const [profileForm, setProfileForm] = React.useState({
+    name: "",
+    email: "",
+    phone: "",
+  });
+  const [passwordForm, setPasswordForm] = React.useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [vehicleEditorVisible, setVehicleEditorVisible] = React.useState(false);
+  const [vehicleDraft, setVehicleDraft] = React.useState(() => createEmptyVehicleDraft());
 
   React.useEffect(() => {
     let mounted = true;
@@ -148,6 +195,34 @@ function ProfileScreen() {
       mounted = false;
     };
   }, [PREF_KEYS]);
+
+  React.useEffect(() => {
+    setProfileForm({
+      name: user?.name || "",
+      email: user?.email || "",
+      phone: user?.phone || "",
+    });
+  }, [user?.email, user?.name, user?.phone]);
+
+  const refreshAccountCollections = React.useCallback(async () => {
+    try {
+      const [nextVehicles, nextSavedStations] = await Promise.all([
+        loadVehicles(),
+        loadSavedStations(),
+      ]);
+      setVehicles(nextVehicles);
+      setSavedStations(nextSavedStations);
+    } catch (_error) {
+      Alert.alert(t("somethingWentWrong"));
+    }
+  }, [t]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      refreshAccountCollections();
+      return undefined;
+    }, [refreshAccountCollections])
+  );
 
   const persistBool = React.useCallback(async (key, next) => {
     await AsyncStorage.setItem(key, next ? "1" : "0");
@@ -224,6 +299,312 @@ function ProfileScreen() {
     });
   }, [confirmAction, signOut, t]);
 
+  const resetVehicleEditor = React.useCallback(() => {
+    setVehicleEditorVisible(false);
+    setVehicleDraft(createEmptyVehicleDraft(prefs.preferredFuel));
+  }, [prefs.preferredFuel]);
+
+  const closeAccountModal = React.useCallback(() => {
+    setAccountModal("");
+    setAccountBusy(false);
+    setProfileForm({
+      name: user?.name || "",
+      email: user?.email || "",
+      phone: user?.phone || "",
+    });
+    setPasswordForm({
+      currentPassword: "",
+      newPassword: "",
+      confirmPassword: "",
+    });
+    resetVehicleEditor();
+  }, [resetVehicleEditor, user?.email, user?.name, user?.phone]);
+
+  const openAccountModal = React.useCallback(
+    async (modalName) => {
+      setAccountModal(modalName);
+      if (modalName === "editProfile") {
+        setProfileForm({
+          name: user?.name || "",
+          email: user?.email || "",
+          phone: user?.phone || "",
+        });
+      }
+      if (modalName === "changePassword") {
+        setPasswordForm({
+          currentPassword: "",
+          newPassword: "",
+          confirmPassword: "",
+        });
+      }
+      if (modalName === "vehicles") {
+        resetVehicleEditor();
+      }
+      if (modalName === "vehicles" || modalName === "savedStations") {
+        await refreshAccountCollections();
+      }
+    },
+    [refreshAccountCollections, resetVehicleEditor, user?.email, user?.name, user?.phone]
+  );
+
+  const saveProfileChanges = React.useCallback(async () => {
+    const payload = {
+      name: String(profileForm.name || "").trim(),
+      email: String(profileForm.email || "").trim().toLowerCase(),
+      phone: String(profileForm.phone || "").trim(),
+    };
+
+    if (!payload.name || !payload.email) {
+      Alert.alert(
+        t("profileAccountValidationTitle", { defaultValue: "Missing details" }),
+        t("profileAccountValidationBody", { defaultValue: "Name and email are required." })
+      );
+      return;
+    }
+
+    setAccountBusy(true);
+    try {
+      const data = await updateMyProfile(payload);
+      await replaceUser(data.user);
+      Alert.alert(
+        t("done"),
+        data?.message || t("profileUpdated", { defaultValue: "Profile updated successfully." })
+      );
+      closeAccountModal();
+    } catch (error) {
+      Alert.alert(
+        t("updateFailed", { defaultValue: "Update failed" }),
+        error?.response?.data?.message || t("somethingWentWrong")
+      );
+    } finally {
+      setAccountBusy(false);
+    }
+  }, [closeAccountModal, profileForm.email, profileForm.name, profileForm.phone, replaceUser, t]);
+
+  const savePasswordChanges = React.useCallback(async () => {
+    const currentPassword = String(passwordForm.currentPassword || "");
+    const newPassword = String(passwordForm.newPassword || "");
+    const confirmPassword = String(passwordForm.confirmPassword || "");
+    const isGoogleAccount = String(user?.authProvider || "local") === "google";
+
+    if (!newPassword) {
+      Alert.alert(
+        t("passwordRequiredTitle", { defaultValue: "Password required" }),
+        t("passwordRequiredBody", { defaultValue: "Enter your new password to continue." })
+      );
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      Alert.alert(
+        t("passwordMismatchTitle", { defaultValue: "Passwords do not match" }),
+        t("passwordMismatchBody", {
+          defaultValue: "Your new password and confirmation must match.",
+        })
+      );
+      return;
+    }
+
+    if (!isGoogleAccount && !currentPassword) {
+      Alert.alert(
+        t("currentPasswordRequiredTitle", { defaultValue: "Current password required" }),
+        t("currentPasswordRequiredBody", {
+          defaultValue: "Enter your current password to continue.",
+        })
+      );
+      return;
+    }
+
+    setAccountBusy(true);
+    try {
+      const data = await changeMyPassword({
+        currentPassword,
+        newPassword,
+      });
+      Alert.alert(
+        t("done"),
+        data?.message || t("passwordUpdated", { defaultValue: "Password changed successfully." })
+      );
+      closeAccountModal();
+    } catch (error) {
+      Alert.alert(
+        t("changePasswordFailed", { defaultValue: "Could not change password" }),
+        error?.response?.data?.message || t("somethingWentWrong")
+      );
+    } finally {
+      setAccountBusy(false);
+    }
+  }, [
+    closeAccountModal,
+    passwordForm.confirmPassword,
+    passwordForm.currentPassword,
+    passwordForm.newPassword,
+    t,
+    user?.authProvider,
+  ]);
+
+  const startVehicleCreate = React.useCallback(() => {
+    setVehicleDraft(createEmptyVehicleDraft(prefs.preferredFuel));
+    setVehicleEditorVisible(true);
+  }, [prefs.preferredFuel]);
+
+  const startVehicleEdit = React.useCallback((vehicle) => {
+    setVehicleDraft({
+      id: vehicle.id,
+      nickname: vehicle.nickname || "",
+      plateNumber: vehicle.plateNumber || "",
+      fuelType: vehicle.fuelType || "gasoline",
+      tankCapacityLiters: vehicle.tankCapacityLiters ? String(vehicle.tankCapacityLiters) : "",
+      isPrimary: Boolean(vehicle.isPrimary),
+    });
+    setVehicleEditorVisible(true);
+  }, []);
+
+  const saveVehicleChanges = React.useCallback(async () => {
+    const nickname = String(vehicleDraft.nickname || "").trim();
+    const plateNumber = String(vehicleDraft.plateNumber || "").trim().toUpperCase();
+    const rawCapacity = String(vehicleDraft.tankCapacityLiters || "").trim();
+    const tankCapacityLiters = rawCapacity ? Number(rawCapacity) : 0;
+
+    if (!nickname && !plateNumber) {
+      Alert.alert(
+        t("vehicleNameRequiredTitle", { defaultValue: "Vehicle details required" }),
+        t("vehicleNameRequiredBody", {
+          defaultValue: "Add a vehicle nickname or plate number.",
+        })
+      );
+      return;
+    }
+
+    if (rawCapacity && (!Number.isFinite(tankCapacityLiters) || tankCapacityLiters <= 0)) {
+      Alert.alert(
+        t("vehicleCapacityTitle", { defaultValue: "Invalid tank capacity" }),
+        t("vehicleCapacityBody", {
+          defaultValue: "Enter a valid tank capacity in liters.",
+        })
+      );
+      return;
+    }
+
+    setAccountBusy(true);
+    try {
+      const nextVehicles = await upsertVehicle({
+        id: vehicleDraft.id,
+        nickname,
+        plateNumber,
+        fuelType: vehicleDraft.fuelType,
+        tankCapacityLiters,
+        isPrimary: vehicleDraft.isPrimary,
+      });
+      setVehicles(nextVehicles);
+      resetVehicleEditor();
+    } catch (_error) {
+      Alert.alert(t("somethingWentWrong"));
+    } finally {
+      setAccountBusy(false);
+    }
+  }, [
+    resetVehicleEditor,
+    t,
+    vehicleDraft.fuelType,
+    vehicleDraft.id,
+    vehicleDraft.isPrimary,
+    vehicleDraft.nickname,
+    vehicleDraft.plateNumber,
+    vehicleDraft.tankCapacityLiters,
+  ]);
+
+  const deleteVehicleItem = React.useCallback((vehicleId) => {
+    confirmAction(
+      t("removeVehicle", { defaultValue: "Remove vehicle" }),
+      t("removeVehicleBody", {
+        defaultValue: "This vehicle will be removed from this device.",
+      }),
+      async () => {
+        setAccountBusy(true);
+        try {
+          const nextVehicles = await removeVehicle(vehicleId);
+          setVehicles(nextVehicles);
+          if (vehicleDraft.id === vehicleId) {
+            resetVehicleEditor();
+          }
+        } catch (_error) {
+          Alert.alert(t("somethingWentWrong"));
+        } finally {
+          setAccountBusy(false);
+        }
+      }
+    );
+  }, [confirmAction, resetVehicleEditor, t, vehicleDraft.id]);
+
+  const makePrimaryVehicle = React.useCallback(async (vehicleId) => {
+    setAccountBusy(true);
+    try {
+      const nextVehicles = await saveVehicles(
+        vehicles.map((vehicle) => ({
+          ...vehicle,
+          isPrimary: vehicle.id === vehicleId,
+        }))
+      );
+      setVehicles(nextVehicles);
+    } catch (_error) {
+      Alert.alert(t("somethingWentWrong"));
+    } finally {
+      setAccountBusy(false);
+    }
+  }, [t, vehicles]);
+
+  const removeSavedStationItem = React.useCallback((stationId) => {
+    confirmAction(
+      t("removeSavedStation", { defaultValue: "Remove saved station" }),
+      t("removeSavedStationBody", {
+        defaultValue: "This station will be removed from your saved list.",
+      }),
+      async () => {
+        setAccountBusy(true);
+        try {
+          const nextSavedStations = await removeSavedStation(stationId);
+          setSavedStations(nextSavedStations);
+        } catch (_error) {
+          Alert.alert(t("somethingWentWrong"));
+        } finally {
+          setAccountBusy(false);
+        }
+      }
+    );
+  }, [confirmAction, t]);
+
+  const openSavedStationRoute = React.useCallback((station) => {
+    const latitude = Number(station?.latitude);
+    const longitude = Number(station?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      Alert.alert(
+        t("routeUnavailableTitle", { defaultValue: "Route unavailable" }),
+        t("routeUnavailableBody", {
+          defaultValue: "This station does not have valid map coordinates yet.",
+        })
+      );
+      return;
+    }
+
+    const url = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+    openUrl(url);
+  }, [openUrl, t]);
+
+  const callSavedStation = React.useCallback((station) => {
+    if (!station?.contact) {
+      Alert.alert(
+        t("contactUnavailableTitle", { defaultValue: "Contact unavailable" }),
+        t("contactUnavailableBody", {
+          defaultValue: "This station has not published a contact number yet.",
+        })
+      );
+      return;
+    }
+
+    openUrl(`tel:${station.contact}`);
+  }, [openUrl, t]);
+
   const SettingRow = React.useCallback(
     ({
       icon,
@@ -276,13 +657,460 @@ function ProfileScreen() {
   const displayName = user?.name || "-";
   const displayEmail = user?.email || "-";
   const avatarLetter = (user?.name || user?.email || "?").trim().slice(0, 1).toUpperCase();
+  const isGoogleAccount = String(user?.authProvider || "local") === "google";
+  const modalMeta = {
+    editProfile: {
+      title: t("editProfile"),
+      subtitle: t("editProfileSheetSubtitle", {
+        defaultValue: "Keep your name, email, and phone number current.",
+      }),
+    },
+    changePassword: {
+      title: t("changePassword"),
+      subtitle: t("changePasswordSheetSubtitle", {
+        defaultValue: "Protect your account with a strong password.",
+      }),
+    },
+    vehicles: {
+      title: t("myVehicles"),
+      subtitle: t("myVehiclesSheetSubtitle", {
+        defaultValue: "Store the vehicles you drive most often.",
+      }),
+    },
+    savedStations: {
+      title: t("savedStations"),
+      subtitle: t("savedStationsSheetSubtitle", {
+        defaultValue: "Review your saved stations and jump back to them quickly.",
+      }),
+    },
+  };
+
+  const renderAccountModalContent = () => {
+    if (accountModal === "editProfile") {
+      return (
+        <View style={styles.modalContent}>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>{t("name")}</Text>
+            <TextInput
+              value={profileForm.name}
+              onChangeText={(value) => setProfileForm((current) => ({ ...current, name: value }))}
+              style={styles.textInput}
+              placeholder={t("name")}
+              placeholderTextColor="#94A3B8"
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>{t("email")}</Text>
+            <TextInput
+              value={profileForm.email}
+              onChangeText={(value) => setProfileForm((current) => ({ ...current, email: value }))}
+              style={[styles.textInput, isGoogleAccount && styles.textInputDisabled]}
+              placeholder={t("email")}
+              placeholderTextColor="#94A3B8"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              editable={!isGoogleAccount}
+            />
+            {isGoogleAccount ? (
+              <Text style={styles.inputHelper}>
+                {t("googleEmailLocked", {
+                  defaultValue: "Google sign-in accounts keep their email synced from Google.",
+                })}
+              </Text>
+            ) : null}
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>{t("profilePhoneLabel", { defaultValue: "Phone" })}</Text>
+            <TextInput
+              value={profileForm.phone}
+              onChangeText={(value) => setProfileForm((current) => ({ ...current, phone: value }))}
+              style={styles.textInput}
+              placeholder={t("profilePhonePlaceholder", { defaultValue: "+251..." })}
+              placeholderTextColor="#94A3B8"
+              keyboardType="phone-pad"
+            />
+            <Text style={styles.inputHelper}>
+              {t("profilePhoneHelper", {
+                defaultValue: "Updating your phone will require verification before customer actions that depend on it.",
+              })}
+            </Text>
+          </View>
+
+          <View style={styles.modalActionRow}>
+            <Pressable style={styles.modalSecondaryButton} onPress={closeAccountModal}>
+              <Text style={styles.modalSecondaryButtonText}>{t("cancel")}</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.modalPrimaryButton, accountBusy && styles.modalButtonDisabled]}
+              onPress={saveProfileChanges}
+              disabled={accountBusy}
+            >
+              {accountBusy ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.modalPrimaryButtonText}>
+                  {t("saveProfileCta", { defaultValue: "Save changes" })}
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
+    if (accountModal === "changePassword") {
+      return (
+        <View style={styles.modalContent}>
+          <Text style={styles.modalHelperText}>{t("auth.register.passwordHint")}</Text>
+          {isGoogleAccount ? (
+            <Text style={styles.modalHelperText}>
+              {t("googlePasswordHelper", {
+                defaultValue: "Because you sign in with Google, your current password is optional when adding a local password.",
+              })}
+            </Text>
+          ) : null}
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>
+              {t("currentPasswordLabel", {
+                defaultValue: isGoogleAccount ? "Current password (optional)" : "Current password",
+              })}
+            </Text>
+            <TextInput
+              value={passwordForm.currentPassword}
+              onChangeText={(value) => setPasswordForm((current) => ({ ...current, currentPassword: value }))}
+              style={styles.textInput}
+              placeholder={t("currentPasswordPlaceholder", { defaultValue: "Enter current password" })}
+              placeholderTextColor="#94A3B8"
+              secureTextEntry
+              autoCapitalize="none"
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>{t("newPasswordLabel", { defaultValue: "New password" })}</Text>
+            <TextInput
+              value={passwordForm.newPassword}
+              onChangeText={(value) => setPasswordForm((current) => ({ ...current, newPassword: value }))}
+              style={styles.textInput}
+              placeholder={t("newPasswordPlaceholder", { defaultValue: "Create a strong password" })}
+              placeholderTextColor="#94A3B8"
+              secureTextEntry
+              autoCapitalize="none"
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>{t("confirmPasswordLabel", { defaultValue: "Confirm password" })}</Text>
+            <TextInput
+              value={passwordForm.confirmPassword}
+              onChangeText={(value) => setPasswordForm((current) => ({ ...current, confirmPassword: value }))}
+              style={styles.textInput}
+              placeholder={t("confirmPasswordPlaceholder", { defaultValue: "Repeat your new password" })}
+              placeholderTextColor="#94A3B8"
+              secureTextEntry
+              autoCapitalize="none"
+            />
+          </View>
+
+          <View style={styles.modalActionRow}>
+            <Pressable style={styles.modalSecondaryButton} onPress={closeAccountModal}>
+              <Text style={styles.modalSecondaryButtonText}>{t("cancel")}</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.modalPrimaryButton, accountBusy && styles.modalButtonDisabled]}
+              onPress={savePasswordChanges}
+              disabled={accountBusy}
+            >
+              {accountBusy ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.modalPrimaryButtonText}>
+                  {t("changePasswordCta", { defaultValue: "Update password" })}
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
+    if (accountModal === "vehicles") {
+      return (
+        <View style={styles.modalContent}>
+          <View style={styles.inlineActionHeader}>
+            <Text style={styles.inlineActionCount}>
+              {vehicles.length} {t("vehiclesCountLabel", { defaultValue: "vehicles saved" })}
+            </Text>
+            <Pressable style={styles.modalGhostButton} onPress={startVehicleCreate}>
+              <Ionicons name="add" size={16} color="#0F766E" />
+              <Text style={styles.modalGhostButtonText}>
+                {t("addVehicleCta", { defaultValue: "Add vehicle" })}
+              </Text>
+            </Pressable>
+          </View>
+
+          {vehicleEditorVisible ? (
+            <View style={styles.editorCard}>
+              <Text style={styles.editorTitle}>
+                {vehicleDraft.id
+                  ? t("editVehicleTitle", { defaultValue: "Edit vehicle" })
+                  : t("newVehicleTitle", { defaultValue: "New vehicle" })}
+              </Text>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>{t("vehicleNicknameLabel", { defaultValue: "Vehicle name" })}</Text>
+                <TextInput
+                  value={vehicleDraft.nickname}
+                  onChangeText={(value) => setVehicleDraft((current) => ({ ...current, nickname: value }))}
+                  style={styles.textInput}
+                  placeholder={t("vehicleNicknamePlaceholder", { defaultValue: "Family SUV, Work pickup..." })}
+                  placeholderTextColor="#94A3B8"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>{t("vehiclePlateLabel", { defaultValue: "Plate number" })}</Text>
+                <TextInput
+                  value={vehicleDraft.plateNumber}
+                  onChangeText={(value) => setVehicleDraft((current) => ({ ...current, plateNumber: value }))}
+                  style={styles.textInput}
+                  placeholder={t("vehiclePlatePlaceholder", { defaultValue: "ABC-1234" })}
+                  placeholderTextColor="#94A3B8"
+                  autoCapitalize="characters"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>{t("preferredFuel")}</Text>
+                <View style={styles.chipRowCompact}>
+                  {["gasoline", "diesel", "electric"].map((fuelType) => (
+                    <Pressable
+                      key={fuelType}
+                      style={[styles.chip, vehicleDraft.fuelType === fuelType && styles.chipActive]}
+                      onPress={() => setVehicleDraft((current) => ({ ...current, fuelType }))}
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          vehicleDraft.fuelType === fuelType && styles.chipTextActive,
+                        ]}
+                      >
+                        {getVehicleFuelLabel(t, fuelType)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>
+                  {t("vehicleCapacityLabel", { defaultValue: "Tank capacity (liters)" })}
+                </Text>
+                <TextInput
+                  value={vehicleDraft.tankCapacityLiters}
+                  onChangeText={(value) => setVehicleDraft((current) => ({ ...current, tankCapacityLiters: value }))}
+                  style={styles.textInput}
+                  placeholder={t("vehicleCapacityPlaceholder", { defaultValue: "55" })}
+                  placeholderTextColor="#94A3B8"
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <View style={styles.switchRow}>
+                <View style={styles.switchTextWrap}>
+                  <Text style={styles.switchTitle}>
+                    {t("vehiclePrimaryLabel", { defaultValue: "Set as primary vehicle" })}
+                  </Text>
+                  <Text style={styles.switchSubtitle}>
+                    {t("vehiclePrimaryBody", {
+                      defaultValue: "Use this vehicle as your default choice in the app.",
+                    })}
+                  </Text>
+                </View>
+                <Switch
+                  value={vehicleDraft.isPrimary}
+                  onValueChange={(value) => setVehicleDraft((current) => ({ ...current, isPrimary: value }))}
+                />
+              </View>
+
+              <View style={styles.modalActionRow}>
+                <Pressable style={styles.modalSecondaryButton} onPress={resetVehicleEditor}>
+                  <Text style={styles.modalSecondaryButtonText}>{t("cancel")}</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.modalPrimaryButton, accountBusy && styles.modalButtonDisabled]}
+                  onPress={saveVehicleChanges}
+                  disabled={accountBusy}
+                >
+                  {accountBusy ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.modalPrimaryButtonText}>
+                      {t("saveVehicleCta", { defaultValue: "Save vehicle" })}
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+
+          {!vehicles.length ? (
+            <View style={styles.emptyStateCard}>
+              <Ionicons name="car-sport-outline" size={24} color="#0F766E" />
+              <Text style={styles.emptyStateTitle}>
+                {t("vehiclesEmptyTitle", { defaultValue: "No vehicles saved yet" })}
+              </Text>
+              <Text style={styles.emptyStateSubtitle}>
+                {t("vehiclesEmptyBody", {
+                  defaultValue: "Add your everyday vehicles to personalize fuel planning and future reservations.",
+                })}
+              </Text>
+            </View>
+          ) : null}
+
+          {vehicles.map((vehicle) => (
+            <View key={vehicle.id} style={styles.vehicleCard}>
+              <View style={styles.vehicleHeader}>
+                <View style={styles.vehicleHeaderText}>
+                  <Text style={styles.vehicleTitle}>
+                    {vehicle.nickname || vehicle.plateNumber || t("myVehicles")}
+                  </Text>
+                  <Text style={styles.vehicleMeta}>
+                    {getVehicleFuelLabel(t, vehicle.fuelType)}
+                    {vehicle.plateNumber ? ` • ${vehicle.plateNumber}` : ""}
+                    {vehicle.tankCapacityLiters ? ` • ${vehicle.tankCapacityLiters}L` : ""}
+                  </Text>
+                </View>
+                {vehicle.isPrimary ? (
+                  <View style={styles.primaryBadge}>
+                    <Text style={styles.primaryBadgeText}>
+                      {t("primaryVehicleBadge", { defaultValue: "Primary" })}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+
+              <View style={styles.cardActionRow}>
+                {!vehicle.isPrimary ? (
+                  <Pressable style={styles.inlineLinkButton} onPress={() => makePrimaryVehicle(vehicle.id)}>
+                    <Text style={styles.inlineLinkButtonText}>
+                      {t("setPrimaryVehicleCta", { defaultValue: "Set primary" })}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                <Pressable style={styles.inlineLinkButton} onPress={() => startVehicleEdit(vehicle)}>
+                  <Text style={styles.inlineLinkButtonText}>
+                    {t("editActionLabel", { defaultValue: "Edit" })}
+                  </Text>
+                </Pressable>
+                <Pressable style={styles.inlineLinkButtonDanger} onPress={() => deleteVehicleItem(vehicle.id)}>
+                  <Text style={styles.inlineLinkButtonDangerText}>
+                    {t("removeVehicleCta", { defaultValue: "Remove" })}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ))}
+        </View>
+      );
+    }
+
+    if (accountModal === "savedStations") {
+      return (
+        <View style={styles.modalContent}>
+          <View style={styles.inlineActionHeader}>
+            <Text style={styles.inlineActionCount}>
+              {savedStations.length} {t("savedStationsCountLabel", { defaultValue: "stations saved" })}
+            </Text>
+            {savedStations.length ? (
+              <Pressable
+                style={styles.inlineLinkButtonDanger}
+                onPress={() =>
+                  confirmAction(
+                    t("clearSavedStations", { defaultValue: "Clear saved stations" }),
+                    t("clearSavedStationsBody", {
+                      defaultValue: "This removes all saved stations from this device.",
+                    }),
+                    async () => {
+                      setAccountBusy(true);
+                      try {
+                        const nextSavedStations = await saveSavedStations([]);
+                        setSavedStations(nextSavedStations);
+                      } catch (_error) {
+                        Alert.alert(t("somethingWentWrong"));
+                      } finally {
+                        setAccountBusy(false);
+                      }
+                    }
+                  )
+                }
+              >
+                <Text style={styles.inlineLinkButtonDangerText}>
+                  {t("clearAllActionLabel", { defaultValue: "Clear all" })}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+
+          {!savedStations.length ? (
+            <View style={styles.emptyStateCard}>
+              <Ionicons name="bookmark-outline" size={24} color="#0F766E" />
+              <Text style={styles.emptyStateTitle}>
+                {t("savedStationsEmptyTitle", { defaultValue: "No saved stations yet" })}
+              </Text>
+              <Text style={styles.emptyStateSubtitle}>
+                {t("savedStationsEmptyBody", {
+                  defaultValue: "Save stations from the Home tab to build your quick-access list here.",
+                })}
+              </Text>
+            </View>
+          ) : null}
+
+          {savedStations.map((station) => (
+            <View key={station.id} style={styles.savedStationCard}>
+              <Text style={styles.savedStationTitle}>{station.name}</Text>
+              <Text style={styles.savedStationMeta}>
+                {station.address || t("homeScreen.addressMissing")}
+              </Text>
+              <Text style={styles.savedStationMeta}>
+                {t("homeScreen.queue")}: {station.queueLength} {t("homeScreen.units.cars")}
+              </Text>
+
+              <View style={styles.cardActionRow}>
+                <Pressable style={styles.inlineLinkButton} onPress={() => openSavedStationRoute(station)}>
+                  <Text style={styles.inlineLinkButtonText}>{t("homeScreen.route.show")}</Text>
+                </Pressable>
+                <Pressable style={styles.inlineLinkButton} onPress={() => callSavedStation(station)}>
+                  <Text style={styles.inlineLinkButtonText}>
+                    {t("callStationCta", { defaultValue: "Call" })}
+                  </Text>
+                </Pressable>
+                <Pressable style={styles.inlineLinkButtonDanger} onPress={() => removeSavedStationItem(station.id)}>
+                  <Text style={styles.inlineLinkButtonDangerText}>
+                    {t("removeSavedStationCta", { defaultValue: "Remove" })}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ))}
+        </View>
+      );
+    }
+
+    return null;
+  };
 
   return (
-    <ScrollView
-      style={styles.profileScreen}
-      contentContainerStyle={styles.profileContent}
-      showsVerticalScrollIndicator={false}
-    >
+    <>
+      <ScrollView
+        style={styles.profileScreen}
+        contentContainerStyle={styles.profileContent}
+        showsVerticalScrollIndicator={false}
+      >
       <Text style={styles.profileTitle}>{t("profile")}</Text>
 
       <View style={styles.profileHeaderCard}>
@@ -311,25 +1139,27 @@ function ProfileScreen() {
           icon="create-outline"
           title={t("editProfile")}
           subtitle={t("editProfileSubtitle")}
-          onPress={() => Alert.alert(t("comingSoon"))}
+          onPress={() => openAccountModal("editProfile")}
         />
         <SettingRow
           icon="key-outline"
           title={t("changePassword")}
           subtitle={t("changePasswordSubtitle")}
-          onPress={() => Alert.alert(t("comingSoon"))}
+          onPress={() => openAccountModal("changePassword")}
         />
         <SettingRow
           icon="car-outline"
           title={t("myVehicles")}
           subtitle={t("myVehiclesSubtitle")}
-          onPress={() => Alert.alert(t("comingSoon"))}
+          valueText={vehicles.length ? String(vehicles.length) : undefined}
+          onPress={() => openAccountModal("vehicles")}
         />
         <SettingRow
           icon="bookmark-outline"
           title={t("savedStations")}
           subtitle={t("savedStationsSubtitle")}
-          onPress={() => Alert.alert(t("comingSoon"))}
+          valueText={savedStations.length ? String(savedStations.length) : undefined}
+          onPress={() => openAccountModal("savedStations")}
         />
       </View>
 
@@ -632,8 +1462,40 @@ function ProfileScreen() {
         />
       </View>
 
-      <View style={styles.bottomSpacer} />
-    </ScrollView>
+        <View style={styles.bottomSpacer} />
+      </ScrollView>
+
+      <Modal
+        visible={Boolean(accountModal)}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={closeAccountModal}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalScreen}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <View style={styles.modalHeader}>
+            <View style={styles.modalHeaderTextWrap}>
+              <Text style={styles.modalTitle}>{modalMeta[accountModal]?.title || t("account")}</Text>
+              <Text style={styles.modalSubtitle}>
+                {modalMeta[accountModal]?.subtitle || ""}
+              </Text>
+            </View>
+            <Pressable style={styles.modalCloseButton} onPress={closeAccountModal}>
+              <Ionicons name="close" size={20} color="#0F172A" />
+            </Pressable>
+          </View>
+          <ScrollView
+            style={styles.modalScroll}
+            contentContainerStyle={styles.modalScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {renderAccountModalContent()}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
+    </>
   );
 }
 

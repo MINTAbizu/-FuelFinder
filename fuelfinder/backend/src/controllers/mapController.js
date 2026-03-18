@@ -1,5 +1,6 @@
 const { fetchNearbyFuelStations, fetchDrivingRoute } = require("../services/mapService");
 const Station = require("../models/Station");
+const { normalizePaymentDetails } = require("../utils/stationPaymentDetails");
 
 function parseNumber(value) {
   const num = Number(value);
@@ -174,6 +175,7 @@ async function attachBackendStationIds(stations) {
           otherLiters: Number(doc?.fuelInventory?.otherLiters || 0),
           updatedAt: doc?.fuelInventory?.updatedAt || null
         },
+        paymentDetails: normalizePaymentDetails(doc?.paymentDetails),
         latitude: Number.isFinite(docLat) ? docLat : lat,
         longitude: Number.isFinite(docLon) ? docLon : lon,
         stationId: String(doc?._id || "")

@@ -27,7 +27,9 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
+        "ACCESS_BACKGROUND_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
@@ -36,6 +38,7 @@
     "plugins": [
       "expo-font",
       "expo-localization",
+      "./plugins/withAndroidX",
       [
         "expo-location",
         {
@@ -52,15 +55,16 @@
       "@sentry/react-native"
     ],
     "extra": {
-      "eas": {
-        "projectId": "1d441dd4-571d-4889-8cea-be49ef6dbe27"
-      },
       "sentry": {
         "dsn": "https://e80bcf5574ef345c2c5f51cd7e53bcb6@o4510905935003648.ingest.us.sentry.io/4511011593846784",
         "environment": "production",
         "org": "fuelfinder",
         "project": "fuelfinder"
+      },
+      "eas": {
+        "projectId": "b3ee0134-33a4-4fc6-812c-1168dae601fb"
       }
-    }
+    },
+    "owner": "mintesenotb"
   }
 }

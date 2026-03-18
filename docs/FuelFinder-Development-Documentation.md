@@ -1,7 +1,17 @@
 # FuelFinder - Development Documentation
+<!-- https://expo.dev/accounts/mintesenotb/projects/fuelfinder/builds/65fa0a97-8743-4b07-b4bc-1be17e8bcea9 -->
 
-Last updated: 2026-03-11
+<!-- eas.cmd env:create preview --name GOOGLE_MAPS_API_KEY --value AIzaSyC9STzzaUMPylYw92VchQ1xTsLLflvOTXc --visibility secret --scope project -->
 
+
+<!-- rootadmin -->
+<!-- root@admin.com------Admin@1234 -->
+
+
+
+
+
+map_key=AIzaSyCvE8A-8LUcbm3tOlmwCauM_zoJLD-m4cs
 ## 1. Overview
 FuelFinder is a mobile-first fuel station discovery and queue management app. It includes:
 - A React Native (Expo) client for customers.

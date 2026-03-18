@@ -195,6 +195,20 @@ export async function listOrganizationOptions() {
   return apiRequest("/admin/organizations/options");
 }
 
+export async function createAdminStation(payload) {
+  return apiRequest("/admin/stations", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateAdminStation(stationId, payload) {
+  return apiRequest(`/admin/stations/${stationId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
 async function refreshToken(refreshTokenValue) {
   return apiRequest(
     "/auth/refresh",

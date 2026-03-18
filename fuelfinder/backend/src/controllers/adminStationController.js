@@ -1,5 +1,9 @@
 const mongoose = require("mongoose");
 const Station = require("../models/Station");
+const {
+  normalizePaymentDetails,
+  pickPaymentDetailsPayload
+} = require("../utils/stationPaymentDetails");
 
 function asText(value) {
   return String(value || "").trim();
@@ -38,6 +42,7 @@ function buildStationResponse(station) {
       updatedAt: fuelInventory.updatedAt || null,
       updatedByUserId: fuelInventory.updatedByUserId ? String(fuelInventory.updatedByUserId) : null
     },
+    paymentDetails: normalizePaymentDetails(station.paymentDetails),
     chapaSubaccountId: station.chapaSubaccountId || "",
     isActive: Boolean(station.isActive),
     organizationId: station.organizationId ? String(station.organizationId) : null,
@@ -118,6 +123,7 @@ exports.createStation = async (req, res) => {
     const fuelStatus = asText(req.body.fuelStatus) || "partial";
     const latitude = asNumber(req.body.latitude, "latitude");
     const longitude = asNumber(req.body.longitude, "longitude");
+    const paymentDetails = pickPaymentDetailsPayload(req.body);
     let organizationId = asObjectIdOrNull(req.body.organizationId, "organizationId");
     const cityId = asObjectIdOrNull(req.body.cityId, "cityId");
     const branchId = asObjectIdOrNull(req.body.branchId, "branchId");
@@ -152,6 +158,7 @@ exports.createStation = async (req, res) => {
       name,
       address,
       contact,
+      ...(paymentDetails ? { paymentDetails: normalizePaymentDetails(paymentDetails) } : {}),
       chapaSubaccountId: asText(req.body.chapaSubaccountId),
       fuelStatus,
       isActive: req.body.isActive !== undefined ? Boolean(req.body.isActive) : true,
@@ -210,6 +217,13 @@ exports.updateStation = async (req, res) => {
     }
     if (req.body.contact !== undefined) {
       station.contact = asText(req.body.contact);
+    }
+    const paymentDetails = pickPaymentDetailsPayload(req.body);
+    if (paymentDetails) {
+      station.paymentDetails = {
+        ...normalizePaymentDetails(station.paymentDetails),
+        ...paymentDetails
+      };
     }
     if (req.body.chapaSubaccountId !== undefined) {
       if (!isSuperAdmin(req)) {

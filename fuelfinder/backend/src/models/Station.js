@@ -22,6 +22,13 @@ const stationSchema = new mongoose.Schema(
       updatedAt: { type: Date, default: null },
       updatedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null }
     },
+    paymentDetails: {
+      providerName: { type: String, trim: true, default: "" },
+      accountName: { type: String, trim: true, default: "" },
+      accountNumber: { type: String, trim: true, default: "" },
+      phoneNumber: { type: String, trim: true, default: "" },
+      instructions: { type: String, trim: true, default: "" }
+    },
     chapaSubaccountId: { type: String, trim: true, default: "" },
     isActive: { type: Boolean, default: true },
     location: {

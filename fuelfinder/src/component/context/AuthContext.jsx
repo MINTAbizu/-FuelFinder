@@ -47,6 +47,11 @@ export function AuthProvider({ children }) {
     await AsyncStorage.removeItem(USER_KEY);
   }, []);
 
+  const replaceUser = useCallback(async (nextUser) => {
+    setUser(nextUser);
+    await AsyncStorage.setItem(USER_KEY, JSON.stringify(nextUser));
+  }, []);
+
   const refreshSession = useCallback(async () => {
     if (!refreshToken) throw new Error("Missing refresh token");
     if (refreshPromiseRef.current) return refreshPromiseRef.current;
@@ -251,6 +256,7 @@ export function AuthProvider({ children }) {
       signUp,
       signIn,
       signOut,
+      replaceUser,
       confirmPhoneOtp,
       resendPhoneVerification,
       signInWithGoogle,
@@ -264,6 +270,7 @@ export function AuthProvider({ children }) {
       signUp,
       signIn,
       signOut,
+      replaceUser,
       confirmPhoneOtp,
       resendPhoneVerification,
       signInWithGoogle,

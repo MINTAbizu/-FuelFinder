@@ -7,9 +7,11 @@ const {
   validateLogin,
   validateRefresh,
   validateBootstrapSuperAdmin,
+  validateChangePassword,
   validatePhoneVerification,
   validatePhoneResend,
-  validateGoogleAuth
+  validateGoogleAuth,
+  validateUpdateProfile
 } = require("../middleware/validateAuth");
 
 const router = express.Router();
@@ -26,6 +28,8 @@ router.post("/refresh", authLimiter, validateRefresh, authController.refresh);
 router.post("/google", authLimiter, validateGoogleAuth, authController.googleAuth);
 router.post("/logout", auth, authController.logout);
 router.get("/me", auth, authController.me);
+router.patch("/me", auth, validateUpdateProfile, authController.updateProfile);
+router.post("/change-password", auth, validateChangePassword, authController.changePassword);
 router.post("/phone/verify", authLimiter, validatePhoneVerification, authController.verifyPhone);
 router.post("/phone/resend", authLimiter, validatePhoneResend, authController.resendPhoneOtp);
 router.post("/phone/dev-otp", authLimiter, validatePhoneResend, authController.devGetPhoneOtp);

@@ -20,8 +20,18 @@ export async function getMyProfile() {
   return data;
 }
 
+export async function updateMyProfile(payload) {
+  const { data } = await api.patch("/auth/me", payload);
+  return data;
+}
+
 export async function logoutUser() {
   const { data } = await api.post("/auth/logout");
+  return data;
+}
+
+export async function changeMyPassword(payload) {
+  const { data } = await api.post("/auth/change-password", payload);
   return data;
 }
 

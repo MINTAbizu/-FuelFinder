@@ -118,7 +118,10 @@
       "button": "መለያ ፍጠር",
       "alreadyHave": "ቀድም ሲል መለያ አለዎት?",
       "login": "ግባ"
-    }
+    },
+    "google": "በ Google ቀጥል",
+    "googleFailed": "Google መግቢያ አልተሳካም።",
+    "googleNotReady": "Google መግቢያ ገና አልተዘጋጀም።"
   },
 
   "homeScreen": {
@@ -178,6 +181,16 @@
     "litersPlaceholder": "ሊትር ያስገቡ (ለምሳሌ 25)",
     "currentPrice": "አሁን ያለ ዋጋ",
     "estimatedTotal": "ጠቅላላ የተገመተ ዋጋ",
+    "platformFee": "የመድረክ ክፍያ",
+    "amountToPay": "የሚከፈለው መጠን",
+    "paymentDetailsTitle": "Station payment details",
+    "paymentDetailsHint": "These details update automatically for the station you selected, so customers do not need to remember them.",
+    "paymentProvider": "Provider",
+    "paymentPhone": "Payment phone",
+    "paymentAccountName": "Account name",
+    "paymentAccountNumber": "Account number",
+    "paymentInstructions": "Instructions",
+    "paymentDetailsMissing": "This station has not added manual payment details yet. You can still use the in-app checkout button.",
     "reservePayBtn": "ያስያዙ እና በቴሌብር ይክፈሉ",
     "checkPaymentBtn": "የክፍያ ሁኔታ ያረጋግጡ",
     "refreshTicketBtn": "የኔን ትኬት አድስ",

@@ -185,6 +185,12 @@ body {
   background: transparent;
   font-weight: 600;
 }
+.station-filters label {
+  min-width: 180px;
+}
+.station-filters .pill {
+  justify-self: flex-start;
+}
 
 .grid {
   display: grid;
@@ -293,6 +299,11 @@ textarea {
 
 .btn.alt {
   background: var(--accent);
+}
+
+.btn.small {
+  padding: 8px 12px;
+  font-size: 12px;
 }
 
 .list {

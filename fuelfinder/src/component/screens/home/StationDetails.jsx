@@ -19,6 +19,7 @@ import {
 const getWaitEstimate = (queueLength) => Math.max(2, Number(queueLength || 0) * 3);
 const REQUESTED_BANDS = ["10-20", "20-40", "40+"];
 const FUEL_TYPES = ["gasoline", "diesel", "other"];
+const CHAPA_PLATFORM_FEE_DEFAULT_BIRR = 2;
 const DEFAULT_FUEL_PRICES = {
   gasoline: 95,
   diesel: 92,
@@ -96,6 +97,16 @@ export default function StationDetails({ route }) {
       litersPlaceholder: tr("stationDetails.litersPlaceholder"),
       currentPrice: tr("stationDetails.currentPrice"),
       estimatedTotal: tr("stationDetails.estimatedTotal"),
+      platformFee: tr("stationDetails.platformFee"),
+      amountToPay: tr("stationDetails.amountToPay"),
+      paymentDetailsTitle: tr("stationDetails.paymentDetailsTitle"),
+      paymentDetailsHint: tr("stationDetails.paymentDetailsHint"),
+      paymentProvider: tr("stationDetails.paymentProvider"),
+      paymentPhone: tr("stationDetails.paymentPhone"),
+      paymentAccountName: tr("stationDetails.paymentAccountName"),
+      paymentAccountNumber: tr("stationDetails.paymentAccountNumber"),
+      paymentInstructions: tr("stationDetails.paymentInstructions"),
+      paymentDetailsMissing: tr("stationDetails.paymentDetailsMissing"),
       reservePayBtn: tr("stationDetails.reservePayBtn"),
       checkPaymentBtn: tr("stationDetails.checkPaymentBtn"),
       refreshTicketBtn: tr("stationDetails.refreshTicketBtn"),
@@ -188,6 +199,29 @@ export default function StationDetails({ route }) {
   const estimatedAmount = Number.isFinite(litersValue) && litersValue > 0
     ? Number((litersValue * selectedUnitPrice).toFixed(2))
     : 0;
+  const platformFeeBirr = useMemo(() => {
+    const raw = String(process.env.EXPO_PUBLIC_CHAPA_PLATFORM_FEE_BIRR || CHAPA_PLATFORM_FEE_DEFAULT_BIRR).trim();
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0) return CHAPA_PLATFORM_FEE_DEFAULT_BIRR;
+    return Number(value.toFixed(2));
+  }, []);
+  const amountToPay = estimatedAmount > 0
+    ? Number((estimatedAmount + platformFeeBirr).toFixed(2))
+    : 0;
+  const manualPaymentDetails = useMemo(() => {
+    const fromStation = station?.paymentDetails || {};
+    return {
+      providerName: String(fromStation.providerName || "").trim(),
+      accountName: String(fromStation.accountName || "").trim(),
+      accountNumber: String(fromStation.accountNumber || "").trim(),
+      phoneNumber: String(fromStation.phoneNumber || "").trim(),
+      instructions: String(fromStation.instructions || "").trim(),
+    };
+  }, [station]);
+  const hasManualPaymentDetails = useMemo(
+    () => Object.values(manualPaymentDetails).some(Boolean),
+    [manualPaymentDetails]
+  );
 
   const detail = useMemo(() => {
     const queue = Number(
@@ -689,6 +723,47 @@ export default function StationDetails({ route }) {
         />
         <Text style={styles.metaText}>{t.currentPrice} ({fuelType}): {selectedUnitPrice.toFixed(2)} ETB/L</Text>
         <Text style={styles.estimateText}>{t.estimatedTotal}: {estimatedAmount.toFixed(2)} ETB</Text>
+        <Text style={styles.metaText}>{t.platformFee}: {platformFeeBirr.toFixed(2)} ETB</Text>
+        <Text style={styles.metaText}>{t.amountToPay}</Text>
+        <View style={styles.readonlyBox}>
+          <Text style={styles.readonlyText}>{amountToPay.toFixed(2)} ETB</Text>
+        </View>
+
+        <View style={styles.paymentDetailsCard}>
+          <Text style={styles.paymentDetailsTitle}>{t.paymentDetailsTitle}</Text>
+          <Text style={styles.paymentDetailsHint}>{t.paymentDetailsHint}</Text>
+          {hasManualPaymentDetails ? (
+            <>
+              {manualPaymentDetails.providerName ? (
+                <Text style={styles.metaText}>
+                  {t.paymentProvider}: {manualPaymentDetails.providerName}
+                </Text>
+              ) : null}
+              {manualPaymentDetails.phoneNumber ? (
+                <Text style={styles.metaText}>
+                  {t.paymentPhone}: {manualPaymentDetails.phoneNumber}
+                </Text>
+              ) : null}
+              {manualPaymentDetails.accountName ? (
+                <Text style={styles.metaText}>
+                  {t.paymentAccountName}: {manualPaymentDetails.accountName}
+                </Text>
+              ) : null}
+              {manualPaymentDetails.accountNumber ? (
+                <Text style={styles.metaText}>
+                  {t.paymentAccountNumber}: {manualPaymentDetails.accountNumber}
+                </Text>
+              ) : null}
+              {manualPaymentDetails.instructions ? (
+                <Text style={styles.metaText}>
+                  {t.paymentInstructions}: {manualPaymentDetails.instructions}
+                </Text>
+              ) : null}
+            </>
+          ) : (
+            <Text style={styles.noticeText}>{t.paymentDetailsMissing}</Text>
+          )}
+        </View>
 
         <View style={styles.buttonGrid}>
           <Pressable
@@ -1033,6 +1108,26 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#0F172A",
     letterSpacing: 1,
+  },
+  paymentDetailsCard: {
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    backgroundColor: "#F8FBFF",
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 10,
+  },
+  paymentDetailsTitle: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#1E3A8A",
+    marginBottom: 4,
+  },
+  paymentDetailsHint: {
+    fontSize: 12,
+    color: "#475569",
+    fontWeight: "600",
+    marginBottom: 6,
   },
   qrWrap: {
     borderWidth: 1,

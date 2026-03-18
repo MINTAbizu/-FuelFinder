@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   callNextInQueue,
+  createAdminStation,
   createStationTeamUser,
   createAdminUser,
   forceLogoutAdminUser,
@@ -17,6 +18,7 @@ import {
   logout,
   setAdminUserBlocked,
   setStationTeamUserBlocked,
+  updateAdminStation,
   updateOwnerStation,
   updateStationTeamUser,
   updateAdminUser,
@@ -56,6 +58,149 @@ function buildEstimate(waitingCount) {
   return waitingCount * avgMinutesPerCar;
 }
 
+function formatDateTime(value) {
+  if (!value) return "--";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleString();
+}
+
+function formatMoney(value, currency = "ETB") {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "--";
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2
+    }).format(amount);
+  } catch {
+    return `${currency} ${amount.toFixed(2)}`;
+  }
+}
+
+function buildStationFormState(stationId, station) {
+  const paymentDetails = station?.paymentDetails || {};
+  return {
+    _stationId: stationId,
+    name: String(station?.name || ""),
+    address: String(station?.address || ""),
+    contact: String(station?.contact || ""),
+    paymentProviderName: String(paymentDetails.providerName || ""),
+    paymentAccountName: String(paymentDetails.accountName || ""),
+    paymentAccountNumber: String(paymentDetails.accountNumber || ""),
+    paymentPhoneNumber: String(paymentDetails.phoneNumber || ""),
+    paymentInstructions: String(paymentDetails.instructions || ""),
+    isActive: Boolean(station?.isActive)
+  };
+}
+
+function buildCreateStationFormState(defaultOrganizationId = "") {
+  return {
+    name: "",
+    address: "",
+    contact: "",
+    latitude: "",
+    longitude: "",
+    fuelStatus: "partial",
+    isActive: true,
+    organizationId: String(defaultOrganizationId || ""),
+    cityId: "",
+    branchId: "",
+    paymentProviderName: "",
+    paymentAccountName: "",
+    paymentAccountNumber: "",
+    paymentPhoneNumber: "",
+    paymentInstructions: ""
+  };
+}
+
+function splitAddressParts(address) {
+  return String(address || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function normalizeKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function deriveCityRegion(station) {
+  const countryTokens = new Set(["ethiopia", "ethiopia.", "et", "eth", "ethiopian"]);
+  const parts = splitAddressParts(station?.address);
+  while (parts.length && countryTokens.has(normalizeKey(parts[parts.length - 1]))) {
+    parts.pop();
+  }
+
+  if (parts.length >= 2) {
+    const cityLabel = parts[parts.length - 2];
+    const regionLabel = parts[parts.length - 1];
+    return { cityLabel, regionLabel };
+  }
+
+  if (parts.length === 1) {
+    const only = parts[0];
+    return { cityLabel: only, regionLabel: only };
+  }
+
+  const fallbackCity = station?.cityId ? `City ${String(station.cityId).slice(-6).toUpperCase()}` : "Unspecified city";
+  return { cityLabel: fallbackCity, regionLabel: "Unspecified region" };
+}
+
+function localDateKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function readStorageJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const CEO_TASKS = [
+  {
+    id: "fuel_stock",
+    title: "Confirm fuel stock is up to date",
+    note: "Keep customer availability accurate.",
+    section: "inventory"
+  },
+  {
+    id: "queue_health",
+    title: "Check queue health",
+    note: "Watch avg wait time and call next ticket if needed.",
+    section: "queue"
+  },
+  {
+    id: "cashflow_review",
+    title: "Review payments and payouts",
+    note: "Confirm transactions and expected station payout.",
+    section: "cashflow"
+  },
+  {
+    id: "team_review",
+    title: "Review team roster",
+    note: "Block old accounts, revoke sessions if needed.",
+    section: "staff"
+  },
+  {
+    id: "profile_review",
+    title: "Verify station profile",
+    note: "Name, address, and contact should be correct.",
+    section: "settings"
+  }
+];
+
 export default function Dashboard() {
   const [active, setActive] = useState("overview");
   const [session, setSession] = useState(() => loadSession());
@@ -75,6 +220,7 @@ export default function Dashboard() {
   const actorRole = String(session?.user?.role || "");
   const isSuperAdmin = actorRole === "super_admin";
   const isStationExec = actorRole === "station_manager" || actorRole === "org_admin" || actorRole === "super_admin";
+  const canManageStations = actorRole === "org_admin" || actorRole === "super_admin";
   const isCeo = actorRole === "station_manager" || actorRole === "org_admin";
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
@@ -106,6 +252,63 @@ export default function Dashboard() {
   const [editUserStatus, setEditUserStatus] = useState("");
   const [isSavingUser, setIsSavingUser] = useState(false);
 
+  const [ceoTasks, setCeoTasks] = useState({});
+
+  const [paymentsSnapshot, setPaymentsSnapshot] = useState(() => ({
+    total: 0,
+    page: 1,
+    limit: 25,
+    stationId: "",
+    summary: { amount: 0, platformFee: 0, stationPayout: 0 },
+    items: []
+  }));
+  const [paymentsFilters, setPaymentsFilters] = useState({
+    provider: "",
+    status: "",
+    from: "",
+    to: "",
+    page: 1,
+    limit: 25
+  });
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [paymentsError, setPaymentsError] = useState("");
+
+  const [teamUsers, setTeamUsers] = useState([]);
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamError, setTeamError] = useState("");
+  const [teamStatus, setTeamStatus] = useState("");
+
+  const [createTeamForm, setCreateTeamForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    password: "",
+    role: "staff"
+  });
+  const [createTeamError, setCreateTeamError] = useState("");
+  const [createTeamStatus, setCreateTeamStatus] = useState("");
+  const [isCreatingTeam, setIsCreatingTeam] = useState(false);
+
+  const [editTeamUserId, setEditTeamUserId] = useState("");
+  const [editTeamForm, setEditTeamForm] = useState(null);
+  const [editTeamError, setEditTeamError] = useState("");
+  const [editTeamStatus, setEditTeamStatus] = useState("");
+  const [isSavingTeam, setIsSavingTeam] = useState(false);
+
+  const [stationForm, setStationForm] = useState(null);
+  const [stationFormDirty, setStationFormDirty] = useState(false);
+  const [stationFormError, setStationFormError] = useState("");
+  const [stationFormStatus, setStationFormStatus] = useState("");
+  const [isSavingStation, setIsSavingStation] = useState(false);
+  const [createStationForm, setCreateStationForm] = useState(() =>
+    buildCreateStationFormState(session?.user?.organizationId || "")
+  );
+  const [createStationError, setCreateStationError] = useState("");
+  const [createStationStatus, setCreateStationStatus] = useState("");
+  const [isCreatingStation, setIsCreatingStation] = useState(false);
+  const [regionFilter, setRegionFilter] = useState("all");
+  const [cityFilter, setCityFilter] = useState("all");
+
   const parseIdList = (value) => {
     return String(value || "")
       .split(/[,\s]+/)
@@ -117,6 +320,89 @@ export default function Dashboard() {
     if (!Array.isArray(value)) return "";
     return value.map((item) => String(item || "").trim()).filter(Boolean).join(", ");
   };
+
+  const stationGeo = useMemo(() => {
+    return stations.map((item) => {
+      const { cityLabel, regionLabel } = deriveCityRegion(item);
+      const cityLabelKey = normalizeKey(cityLabel);
+      return {
+        ...item,
+        regionLabel,
+        cityLabel,
+        regionKey: normalizeKey(regionLabel),
+        cityLabelKey
+      };
+    });
+  }, [stations]);
+
+  const regionOptions = useMemo(() => {
+    const map = new Map();
+    stationGeo.forEach(({ regionKey, regionLabel }) => {
+      if (!regionKey) return;
+      if (!map.has(regionKey)) {
+        map.set(regionKey, { key: regionKey, label: regionLabel });
+      }
+    });
+    const options = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+    return [{ key: "all", label: "All regions" }, ...options];
+  }, [stationGeo]);
+
+  const cityOptions = useMemo(() => {
+    const map = new Map();
+    stationGeo
+      .filter((stationItem) => {
+        if (regionFilter === "all") return true;
+        if (stationItem.regionKey === regionFilter) return true;
+        // Allow stations with no region to still show up under any region so their city can be selected.
+        return !stationItem.regionKey;
+      })
+      .forEach(({ cityLabelKey, cityLabel }) => {
+        if (!cityLabelKey) return;
+        const existing = map.get(cityLabelKey) || { key: cityLabelKey, label: cityLabel, count: 0 };
+        map.set(cityLabelKey, { ...existing, count: existing.count + 1 });
+      });
+    const options = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+    return [{ key: "all", label: "All cities", count: stationGeo.length }, ...options];
+  }, [regionFilter, stationGeo]);
+
+  const filteredStations = useMemo(() => {
+    return stationGeo.filter((item) => {
+      const matchesRegion =
+        regionFilter === "all" ||
+        item.regionKey === regionFilter ||
+        (!item.regionKey && cityFilter !== "all" && item.cityLabelKey === cityFilter);
+      const matchesCity = cityFilter === "all" || item.cityLabelKey === cityFilter;
+      return matchesRegion && matchesCity;
+    });
+  }, [cityFilter, regionFilter, stationGeo]);
+
+  const visibleSections = useMemo(() => {
+    if (isSuperAdmin || isStationExec) return sections;
+    return sections.filter((section) => ["overview", "queue", "inventory"].includes(section.id));
+  }, [isSuperAdmin, isStationExec]);
+
+  useEffect(() => {
+    if (visibleSections.some((section) => section.id === active)) return;
+    setActive("overview");
+  }, [active, visibleSections]);
+
+  useEffect(() => {
+    const validCityKeys = new Set(cityOptions.map((item) => item.key));
+    if (!validCityKeys.has(cityFilter)) {
+      setCityFilter("all");
+    }
+  }, [cityFilter, cityOptions]);
+
+  useEffect(() => {
+    if (!filteredStations.length) {
+      setStationId("");
+      return;
+    }
+    const hasCurrent = filteredStations.some((item) => String(item.id) === String(stationId));
+    if (!stationId || !hasCurrent) {
+      setStationId(String(filteredStations[0].id));
+    }
+  }, [filteredStations, stationId]);
 
   const sectionTitle = useMemo(() => {
     const section = sections.find((item) => item.id === active);
@@ -137,6 +423,33 @@ export default function Dashboard() {
       { label: "Pending payments", value: `${Number(queueSnapshot?.pendingCount || 0)}` }
     ];
   }, [queueSnapshot, station]);
+
+  const todayKey = localDateKey();
+  const ceoTasksStorageKey = stationId ? `ff_owner_ceo_tasks_v1:${stationId}:${todayKey}` : "";
+
+  const ceoTaskProgress = useMemo(() => {
+    const total = CEO_TASKS.length;
+    const completed = CEO_TASKS.reduce((count, task) => count + (ceoTasks?.[task.id] ? 1 : 0), 0);
+    return { completed, total };
+  }, [ceoTasks]);
+
+  useEffect(() => {
+    if (!ceoTasksStorageKey) return;
+    setCeoTasks(readStorageJSON(ceoTasksStorageKey, {}));
+  }, [ceoTasksStorageKey]);
+
+  const toggleCeoTask = (taskId) => {
+    if (!ceoTasksStorageKey) return;
+    setCeoTasks((prev) => {
+      const next = { ...(prev || {}), [taskId]: !Boolean(prev?.[taskId]) };
+      try {
+        localStorage.setItem(ceoTasksStorageKey, JSON.stringify(next));
+      } catch {
+        // Ignore storage failures (private mode, etc.)
+      }
+      return next;
+    });
+  };
 
   const filteredAdminUsers = useMemo(() => {
     const trimmedSearch = userSearch.trim().toLowerCase();
@@ -172,8 +485,23 @@ export default function Dashboard() {
         const data = await listOwnerStations();
         const list = data?.stations || [];
         setStations(list);
-        if (list.length && !stationId) {
-          setStationId(String(list[0].id || list[0]._id || ""));
+
+        if (!list.length) {
+          setStationId("");
+          return;
+        }
+
+        const firstId = String(list[0].id || list[0]._id || "");
+        if (actorRole === "station_manager") {
+          // Single-station CEO experience: lock to the first assigned station.
+          setStationId(firstId);
+          if (list.length > 1) {
+            setStatusMessage(
+              "Multiple stations are assigned to this CEO account. The console is locked to the first station; ask a super admin to fix station scope."
+            );
+          }
+        } else if (!stationId) {
+          setStationId(firstId);
         }
       } catch (error) {
         setStatusMessage(error.message);
@@ -183,7 +511,7 @@ export default function Dashboard() {
     };
 
     loadStations();
-  }, [session?.tokens?.accessToken]);
+  }, [actorRole, session?.tokens?.accessToken]);
 
   useEffect(() => {
     if (!session?.tokens?.accessToken || !stationId) return;
@@ -240,6 +568,101 @@ export default function Dashboard() {
     });
   }, [isSuperAdmin, stationId, station?.organizationId]);
 
+  useEffect(() => {
+    if (!canManageStations) return;
+
+    const fallbackOrganizationId = isSuperAdmin
+      ? String(createStationForm.organizationId || station?.organizationId || session?.user?.organizationId || "")
+      : String(session?.user?.organizationId || station?.organizationId || "");
+
+    setCreateStationForm((prev) => {
+      if (!prev) return buildCreateStationFormState(fallbackOrganizationId);
+      if (!String(prev.organizationId || "").trim()) {
+        return { ...prev, organizationId: fallbackOrganizationId };
+      }
+      return prev;
+    });
+  }, [
+    canManageStations,
+    createStationForm.organizationId,
+    isSuperAdmin,
+    session?.user?.organizationId,
+    station?.organizationId
+  ]);
+
+  useEffect(() => {
+    // When switching stations, clear station-scoped UI state.
+    setTeamUsers([]);
+    setTeamError("");
+    setTeamStatus("");
+    setCreateTeamError("");
+    setCreateTeamStatus("");
+    setIsCreatingTeam(false);
+    setEditTeamUserId("");
+    setEditTeamForm(null);
+    setEditTeamError("");
+    setEditTeamStatus("");
+    setIsSavingTeam(false);
+
+    setPaymentsSnapshot((prev) => ({
+      total: 0,
+      page: 1,
+      limit: prev?.limit || 25,
+      stationId: "",
+      summary: { amount: 0, platformFee: 0, stationPayout: 0 },
+      items: []
+    }));
+    setPaymentsError("");
+    setPaymentsFilters((prev) => ({ ...prev, page: 1 }));
+
+    setStationForm(null);
+    setStationFormDirty(false);
+    setStationFormError("");
+    setStationFormStatus("");
+    setIsSavingStation(false);
+    setCreateStationError("");
+    setCreateStationStatus("");
+    setIsCreatingStation(false);
+  }, [stationId]);
+
+  useEffect(() => {
+    if (!stationId || !station) return;
+
+    const next = buildStationFormState(stationId, station);
+
+    setStationForm((prev) => {
+      if (!prev || prev._stationId !== stationId) return next;
+      if (stationFormDirty) return prev;
+
+      if (
+        prev.name === next.name &&
+        prev.address === next.address &&
+        prev.contact === next.contact &&
+        prev.paymentProviderName === next.paymentProviderName &&
+        prev.paymentAccountName === next.paymentAccountName &&
+        prev.paymentAccountNumber === next.paymentAccountNumber &&
+        prev.paymentPhoneNumber === next.paymentPhoneNumber &&
+        prev.paymentInstructions === next.paymentInstructions &&
+        prev.isActive === next.isActive
+      ) {
+        return prev;
+      }
+      return { ...prev, ...next };
+    });
+  }, [
+    station?.address,
+    station?.contact,
+    station?.isActive,
+    station?.name,
+    station?.paymentDetails?.accountName,
+    station?.paymentDetails?.accountNumber,
+    station?.paymentDetails?.instructions,
+    station?.paymentDetails?.phoneNumber,
+    station?.paymentDetails?.providerName,
+    stationFormDirty,
+    stationId
+  ]);
+
   const loadAdminDirectory = async () => {
     if (!isSuperAdmin) return;
     setAdminUsersLoading(true);
@@ -256,11 +679,85 @@ export default function Dashboard() {
     }
   };
 
+  const loadOrganizationOptionsOnly = async () => {
+    if (!isSuperAdmin) return;
+    try {
+      const orgData = await listOrganizationOptions();
+      setOrganizationOptions(orgData?.organizations || []);
+    } catch (_error) {
+      // Keep the form usable with manual organization IDs if this request fails.
+    }
+  };
+
   useEffect(() => {
     if (!session?.tokens?.accessToken || !isSuperAdmin) return;
     if (active !== "staff") return;
     loadAdminDirectory();
   }, [active, isSuperAdmin, session?.tokens?.accessToken]);
+
+  useEffect(() => {
+    if (!session?.tokens?.accessToken || !isSuperAdmin) return;
+    if (active !== "settings") return;
+    if (organizationOptions.length) return;
+    loadOrganizationOptionsOnly();
+  }, [active, isSuperAdmin, organizationOptions.length, session?.tokens?.accessToken]);
+
+  const loadStationTeam = async () => {
+    if (!stationId) return;
+    setTeamLoading(true);
+    setTeamError("");
+    setTeamStatus("");
+    try {
+      const data = await listStationTeam(stationId);
+      setTeamUsers(data?.users || []);
+    } catch (error) {
+      setTeamError(error.message);
+    } finally {
+      setTeamLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!session?.tokens?.accessToken) return;
+    if (active !== "staff") return;
+    if (isSuperAdmin) return;
+    if (!isStationExec) return;
+    if (!stationId) return;
+    loadStationTeam();
+  }, [active, isStationExec, isSuperAdmin, session?.tokens?.accessToken, stationId]);
+
+  const loadStationPayments = async (filters) => {
+    if (!stationId) return;
+    setPaymentsLoading(true);
+    setPaymentsError("");
+    try {
+      const data = await listStationPayments(stationId, filters);
+      setPaymentsSnapshot({
+        total: Number(data?.total || 0),
+        page: Number(data?.page || 1),
+        limit: Number(data?.limit || filters?.limit || 25),
+        stationId: String(data?.stationId || stationId),
+        summary: {
+          amount: Number(data?.summary?.amount || 0),
+          platformFee: Number(data?.summary?.platformFee || 0),
+          stationPayout: Number(data?.summary?.stationPayout || 0)
+        },
+        items: Array.isArray(data?.items) ? data.items : []
+      });
+    } catch (error) {
+      setPaymentsError(error.message);
+    } finally {
+      setPaymentsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!session?.tokens?.accessToken) return;
+    if (active !== "cashflow") return;
+    if (!isStationExec) return;
+    if (!stationId) return;
+    loadStationPayments(paymentsFilters);
+  }, [active, isStationExec, session?.tokens?.accessToken, stationId]);
 
   const handleCreateUser = async (event) => {
     event.preventDefault();
@@ -409,6 +906,259 @@ export default function Dashboard() {
     }
   };
 
+  const allowedTeamRoles = useMemo(() => {
+    if (actorRole === "station_manager") return ["staff"];
+    if (actorRole === "org_admin" || actorRole === "super_admin") return ["staff", "station_manager"];
+    return [];
+  }, [actorRole]);
+
+  const handleCreateTeamUser = async (event) => {
+    event.preventDefault();
+    if (!isStationExec || isSuperAdmin) return;
+    if (!stationId) return;
+
+    setIsCreatingTeam(true);
+    setCreateTeamError("");
+    setCreateTeamStatus("");
+
+    try {
+      const payload = {
+        name: String(createTeamForm.name || "").trim(),
+        email: String(createTeamForm.email || "").trim().toLowerCase(),
+        phone: String(createTeamForm.phone || "").trim(),
+        password: String(createTeamForm.password || ""),
+        role: String(createTeamForm.role || "staff").trim().toLowerCase()
+      };
+
+      const result = await createStationTeamUser(stationId, payload);
+      setCreateTeamStatus(result?.message || "Team member created.");
+      await loadStationTeam();
+      setCreateTeamForm((prev) => ({ ...prev, name: "", email: "", phone: "", password: "" }));
+    } catch (error) {
+      setCreateTeamError(error.message);
+    } finally {
+      setIsCreatingTeam(false);
+    }
+  };
+
+  const startEditTeamUser = (user) => {
+    setEditTeamStatus("");
+    setEditTeamError("");
+    setEditTeamUserId(String(user?.id || ""));
+    setEditTeamForm({
+      name: String(user?.name || ""),
+      email: String(user?.email || ""),
+      phone: String(user?.phone || ""),
+      role: String(user?.role || "staff"),
+      isBlocked: Boolean(user?.isBlocked)
+    });
+  };
+
+  const stopEditTeamUser = () => {
+    setEditTeamUserId("");
+    setEditTeamForm(null);
+    setEditTeamStatus("");
+    setEditTeamError("");
+  };
+
+  const handleSaveTeamUser = async (event) => {
+    event.preventDefault();
+    if (!isStationExec || isSuperAdmin) return;
+    if (!stationId || !editTeamUserId) return;
+
+    setIsSavingTeam(true);
+    setEditTeamStatus("");
+    setEditTeamError("");
+
+    try {
+      const payload = {
+        name: String(editTeamForm?.name || "").trim(),
+        email: String(editTeamForm?.email || "").trim().toLowerCase(),
+        phone: String(editTeamForm?.phone || "").trim(),
+        role: String(editTeamForm?.role || "staff").trim().toLowerCase()
+      };
+
+      const result = await updateStationTeamUser(stationId, editTeamUserId, payload);
+      setEditTeamStatus(result?.message || "Team member updated.");
+      await loadStationTeam();
+      if (result?.user) startEditTeamUser(result.user);
+    } catch (error) {
+      setEditTeamError(error.message);
+    } finally {
+      setIsSavingTeam(false);
+    }
+  };
+
+  const handleToggleTeamBlock = async () => {
+    if (!isStationExec || isSuperAdmin) return;
+    if (!stationId || !editTeamUserId) return;
+
+    setIsSavingTeam(true);
+    setEditTeamStatus("");
+    setEditTeamError("");
+
+    try {
+      const nextValue = !Boolean(editTeamForm?.isBlocked);
+      const result = await setStationTeamUserBlocked(stationId, editTeamUserId, nextValue);
+      setEditTeamStatus(result?.message || (nextValue ? "User blocked." : "User unblocked."));
+      await loadStationTeam();
+
+      if (result?.user) {
+        startEditTeamUser(result.user);
+      } else {
+        setEditTeamForm((prev) => (prev ? { ...prev, isBlocked: nextValue } : prev));
+      }
+    } catch (error) {
+      setEditTeamError(error.message);
+    } finally {
+      setIsSavingTeam(false);
+    }
+  };
+
+  const handleForceLogoutTeamUser = async () => {
+    if (!isStationExec || isSuperAdmin) return;
+    if (!stationId || !editTeamUserId) return;
+
+    setIsSavingTeam(true);
+    setEditTeamStatus("");
+    setEditTeamError("");
+
+    try {
+      const result = await forceLogoutStationTeamUser(stationId, editTeamUserId);
+      setEditTeamStatus(result?.message || "User sessions revoked.");
+      await loadStationTeam();
+    } catch (error) {
+      setEditTeamError(error.message);
+    } finally {
+      setIsSavingTeam(false);
+    }
+  };
+
+  const applyPaymentsFilters = async (event) => {
+    event?.preventDefault?.();
+    if (!isStationExec || !stationId) return;
+    const nextFilters = { ...paymentsFilters, page: 1 };
+    setPaymentsFilters(nextFilters);
+    await loadStationPayments(nextFilters);
+  };
+
+  const goToPaymentsPage = async (nextPage) => {
+    if (!isStationExec || !stationId) return;
+    const resolvedPage = Math.max(1, Number(nextPage || 1));
+    const nextFilters = { ...paymentsFilters, page: resolvedPage };
+    setPaymentsFilters(nextFilters);
+    await loadStationPayments(nextFilters);
+  };
+
+  const resetCreateStationForm = () => {
+    const defaultOrganizationId = isSuperAdmin
+      ? String(station?.organizationId || session?.user?.organizationId || "")
+      : String(session?.user?.organizationId || station?.organizationId || "");
+    setCreateStationForm(buildCreateStationFormState(defaultOrganizationId));
+    setCreateStationError("");
+    setCreateStationStatus("");
+  };
+
+  const handleCreateStation = async (event) => {
+    event.preventDefault();
+    if (!canManageStations) return;
+
+    setIsCreatingStation(true);
+    setCreateStationError("");
+    setCreateStationStatus("");
+
+    try {
+      const payload = {
+        name: String(createStationForm.name || "").trim(),
+        address: String(createStationForm.address || "").trim(),
+        contact: String(createStationForm.contact || "").trim(),
+        latitude: Number(createStationForm.latitude),
+        longitude: Number(createStationForm.longitude),
+        fuelStatus: String(createStationForm.fuelStatus || "partial").trim().toLowerCase(),
+        isActive: Boolean(createStationForm.isActive),
+        organizationId: String(createStationForm.organizationId || "").trim() || null,
+        cityId: String(createStationForm.cityId || "").trim() || null,
+        branchId: String(createStationForm.branchId || "").trim() || null,
+        paymentDetails: {
+          providerName: String(createStationForm.paymentProviderName || "").trim(),
+          accountName: String(createStationForm.paymentAccountName || "").trim(),
+          accountNumber: String(createStationForm.paymentAccountNumber || "").trim(),
+          phoneNumber: String(createStationForm.paymentPhoneNumber || "").trim(),
+          instructions: String(createStationForm.paymentInstructions || "").trim()
+        }
+      };
+
+      const result = await createAdminStation(payload);
+      const createdStation = result?.station || null;
+      const refreshed = await listOwnerStations();
+      const nextStations = refreshed?.stations || [];
+      setStations(nextStations);
+
+      const nextStationId =
+        String(createdStation?.id || createdStation?._id || "") ||
+        String(nextStations[0]?.id || nextStations[0]?._id || "");
+
+      if (nextStationId) {
+        setStationId(nextStationId);
+      }
+
+      resetCreateStationForm();
+      setCreateStationStatus(result?.message || "Station created.");
+    } catch (error) {
+      setCreateStationError(error.message);
+    } finally {
+      setIsCreatingStation(false);
+    }
+  };
+
+  const handleSaveStationProfile = async (event) => {
+    event.preventDefault();
+    if (!isStationExec) return;
+    if (!stationId || !stationForm) return;
+
+    setIsSavingStation(true);
+    setStationFormError("");
+    setStationFormStatus("");
+
+    try {
+      const payload = {
+        name: String(stationForm.name || "").trim(),
+        address: String(stationForm.address || "").trim(),
+        contact: String(stationForm.contact || "").trim(),
+        paymentDetails: {
+          providerName: String(stationForm.paymentProviderName || "").trim(),
+          accountName: String(stationForm.paymentAccountName || "").trim(),
+          accountNumber: String(stationForm.paymentAccountNumber || "").trim(),
+          phoneNumber: String(stationForm.paymentPhoneNumber || "").trim(),
+          instructions: String(stationForm.paymentInstructions || "").trim()
+        },
+        isActive: Boolean(stationForm.isActive)
+      };
+      const result = canManageStations
+        ? await updateAdminStation(stationId, payload)
+        : await updateOwnerStation(stationId, payload);
+      const updatedStation = result?.station || null;
+      if (updatedStation) {
+        setStation(updatedStation);
+        setStationForm(buildStationFormState(stationId, updatedStation));
+        setStationFormDirty(false);
+      }
+      setStationFormStatus(result?.message || "Station updated.");
+    } catch (error) {
+      setStationFormError(error.message);
+    } finally {
+      setIsSavingStation(false);
+    }
+  };
+
+  const resetStationProfileForm = () => {
+    if (!stationId || !station) return;
+    setStationForm(buildStationFormState(stationId, station));
+    setStationFormDirty(false);
+    setStationFormError("");
+    setStationFormStatus("");
+  };
+
   const handleLogin = async (event) => {
     event.preventDefault();
     setAuthError("");
@@ -429,10 +1179,14 @@ export default function Dashboard() {
   const handleLogout = async () => {
     await logout();
     setSession(null);
+    setActive("overview");
     setStations([]);
     setStationId("");
     setStation(null);
+    setRegionFilter("all");
+    setCityFilter("all");
     setQueueSnapshot(null);
+    setStatusMessage("");
     setAdminUsers([]);
     setAdminUsersError("");
     setOrganizationOptions([]);
@@ -455,6 +1209,47 @@ export default function Dashboard() {
     setCreateUserStatus("");
     setIsCreatingUser(false);
     stopEditUser();
+
+    setCeoTasks({});
+    setPaymentsSnapshot({
+      total: 0,
+      page: 1,
+      limit: 25,
+      stationId: "",
+      summary: { amount: 0, platformFee: 0, stationPayout: 0 },
+      items: []
+    });
+    setPaymentsFilters({
+      provider: "",
+      status: "",
+      from: "",
+      to: "",
+      page: 1,
+      limit: 25
+    });
+    setPaymentsLoading(false);
+    setPaymentsError("");
+
+    setTeamUsers([]);
+    setTeamLoading(false);
+    setTeamError("");
+    setTeamStatus("");
+    setCreateTeamForm({ name: "", email: "", phone: "", password: "", role: "staff" });
+    setCreateTeamError("");
+    setCreateTeamStatus("");
+    setIsCreatingTeam(false);
+    stopEditTeamUser();
+    setIsSavingTeam(false);
+
+    setStationForm(null);
+    setStationFormDirty(false);
+    setStationFormError("");
+    setStationFormStatus("");
+    setIsSavingStation(false);
+    setCreateStationForm(buildCreateStationFormState(""));
+    setCreateStationError("");
+    setCreateStationStatus("");
+    setIsCreatingStation(false);
   };
 
   const handleFuelUpdate = async () => {
@@ -519,15 +1314,23 @@ export default function Dashboard() {
     );
   }
 
+  const canSwitchStation =
+    (isSuperAdmin || actorRole === "org_admin" || actorRole === "city_manager") && stations.length > 0;
+  const resolvedStationName =
+    station?.name ||
+    filteredStations.find((item) => String(item.id) === String(stationId))?.name ||
+    stations.find((item) => String(item.id) === String(stationId))?.name ||
+    (stationId ? `Station ${stationId}` : "Station");
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
           <h1>FuelFinder</h1>
-          <p>Owner Console · single-station view</p>
+          <p>Owner Console - station CEO view</p>
         </div>
         <nav className="nav">
-          {sections.map((section) => (
+          {visibleSections.map((section) => (
             <button
               key={section.id}
               className={active === section.id ? "active" : ""}
@@ -551,25 +1354,71 @@ export default function Dashboard() {
         <div className="topbar">
           <div>
             <h2>{sectionTitle}</h2>
-            <p className="section-title">FuelFinder Owner Website</p>
+            <p className="section-title">FuelFinder Owner Console</p>
           </div>
           <div className="station-chip">
             <strong>Station:</strong>
-            <select
-              value={stationId}
-              onChange={(event) => setStationId(event.target.value)}
-            >
-              {stations.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name || `Station ${item.id}`}
-                </option>
-              ))}
-            </select>
+            {canSwitchStation ? (
+              filteredStations.length ? (
+                <select value={stationId} onChange={(event) => setStationId(event.target.value)}>
+                  {filteredStations.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name || `Station ${item.id}`}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <select value="" disabled>
+                  <option value="">No stations for this filter</option>
+                </select>
+              )
+            ) : (
+              <span style={{ fontWeight: 700 }}>{resolvedStationName}</span>
+            )}
             <span className={`pill ${station?.isActive ? "" : "warn"}`}>
               {station?.isActive ? "Open" : "Inactive"}
             </span>
           </div>
         </div>
+
+        {isSuperAdmin && stations.length >= 1 && (
+          <div className="station-filters card">
+            <div className="form-row">
+              <label>
+                Region
+                <select
+                  value={regionFilter}
+                  onChange={(event) => {
+                    setRegionFilter(event.target.value);
+                    setCityFilter("all");
+                  }}
+                >
+                  {regionOptions.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                City
+                <select
+                  value={cityFilter}
+                  onChange={(event) => setCityFilter(event.target.value)}
+                  disabled={cityOptions.length <= 1}
+                >
+                  {cityOptions.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.count !== undefined ? `${option.label} (${option.count})` : option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="pill">{filteredStations.length} stations</div>
+            </div>
+            {!filteredStations.length && <span className="status-banner">No stations for this region/city.</span>}
+          </div>
+        )}
 
         {statusMessage && <div className="status-banner">{statusMessage}</div>}
 
@@ -587,6 +1436,40 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {isCeo && (
+              <div className="card full">
+                <h3>CEO checklist</h3>
+                <p className="section-title">
+                  {todayKey} - {ceoTaskProgress.completed}/{ceoTaskProgress.total} done
+                </p>
+                <div className="list">
+                  {CEO_TASKS.map((task) => {
+                    const done = Boolean(ceoTasks?.[task.id]);
+                    return (
+                      <div className="list-item" key={task.id}>
+                        <div>
+                          <strong>{task.title}</strong>
+                          <span>{task.note}</span>
+                        </div>
+                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                          <button className="btn small" type="button" onClick={() => setActive(task.section)}>
+                            Open
+                          </button>
+                          <button
+                            className={done ? "btn small" : "btn alt small"}
+                            type="button"
+                            onClick={() => toggleCeoTask(task.id)}
+                          >
+                            {done ? "Undo" : "Mark done"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="card wide">
               <h3>Live status</h3>
               <div className="form-row">
@@ -600,7 +1483,7 @@ export default function Dashboard() {
                 </label>
                 <label>
                   Last updated
-                  <input type="text" value={queueSnapshot?.fuelInventory?.updatedAt || "—"} readOnly />
+                  <input type="text" value={formatDateTime(queueSnapshot?.fuelInventory?.updatedAt)} readOnly />
                 </label>
                 <label>
                   Live queue length
@@ -657,7 +1540,7 @@ export default function Dashboard() {
                 </label>
                 <label>
                   Called now
-                  <input type="text" value={queueSnapshot?.called?.reservationCode || "—"} readOnly />
+                  <input type="text" value={queueSnapshot?.called?.reservationCode || "--"} readOnly />
                 </label>
               </div>
               <button className="btn alt" onClick={handleCallNext} disabled={isLoading}>
@@ -745,7 +1628,7 @@ export default function Dashboard() {
                 </label>
                 <label>
                   Last updated
-                  <input type="text" value={station?.fuelInventory?.updatedAt || "—"} readOnly />
+                  <input type="text" value={formatDateTime(station?.fuelInventory?.updatedAt)} readOnly />
                 </label>
               </div>
               <button className="btn alt" onClick={handleFuelUpdate} disabled={isLoading}>
@@ -794,6 +1677,172 @@ export default function Dashboard() {
           </div>
         )}
 
+        {active === "cashflow" && (
+          <div className="grid">
+            {!isStationExec ? (
+              <div className="card full">
+                <h3>Cashflow</h3>
+                <p className="section-title">Station CEO only</p>
+                <p>You do not have permission to view station payments.</p>
+              </div>
+            ) : (
+              <>
+                <div className="card wide">
+                  <h3>Payments</h3>
+                  <p className="section-title">Station transactions</p>
+
+                  <form onSubmit={applyPaymentsFilters} className="form-row">
+                    <label>
+                      Provider
+                      <select
+                        value={paymentsFilters.provider}
+                        onChange={(event) => setPaymentsFilters((prev) => ({ ...prev, provider: event.target.value }))}
+                      >
+                        <option value="">All</option>
+                        <option value="chapa">Chapa</option>
+                      </select>
+                    </label>
+                    <label>
+                      Status
+                      <select
+                        value={paymentsFilters.status}
+                        onChange={(event) => setPaymentsFilters((prev) => ({ ...prev, status: event.target.value }))}
+                      >
+                        <option value="">All</option>
+                        <option value="initialized">Initialized</option>
+                        <option value="pending">Pending</option>
+                        <option value="success">Success</option>
+                        <option value="failed">Failed</option>
+                        <option value="cancelled">Cancelled</option>
+                        <option value="expired">Expired</option>
+                      </select>
+                    </label>
+                    <label>
+                      From
+                      <input
+                        type="date"
+                        value={paymentsFilters.from}
+                        onChange={(event) => setPaymentsFilters((prev) => ({ ...prev, from: event.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      To
+                      <input
+                        type="date"
+                        value={paymentsFilters.to}
+                        onChange={(event) => setPaymentsFilters((prev) => ({ ...prev, to: event.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      Per page
+                      <select
+                        value={String(paymentsFilters.limit)}
+                        onChange={(event) =>
+                          setPaymentsFilters((prev) => ({ ...prev, limit: Number(event.target.value) || 25 }))
+                        }
+                      >
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                      </select>
+                    </label>
+                    <button className="btn" type="submit" disabled={paymentsLoading}>
+                      {paymentsLoading ? "Loading..." : "Apply filters"}
+                    </button>
+                    <button
+                      className="btn alt"
+                      type="button"
+                      onClick={() => loadStationPayments(paymentsFilters)}
+                      disabled={paymentsLoading}
+                    >
+                      Refresh
+                    </button>
+                  </form>
+
+                  {paymentsError && <span className="error-text">{paymentsError}</span>}
+
+                  <div className="list" style={{ marginTop: "12px" }}>
+                    {paymentsLoading && <span>Loading payments...</span>}
+                    {!paymentsLoading && !paymentsSnapshot.items.length && <span>No payments found.</span>}
+                    {!paymentsLoading &&
+                      paymentsSnapshot.items.map((item) => {
+                        const currency = item.currency || "ETB";
+                        const status = String(item.status || "");
+                        const pillClass = status === "success" ? "pill" : "pill warn";
+                        return (
+                          <div className="list-item" key={item.id}>
+                            <div>
+                              <strong>{formatMoney(item.stationPayout, currency)} payout</strong>
+                              <span>
+                                {formatMoney(item.amount, currency)} gross - {formatMoney(item.platformFee, currency)} fee -{" "}
+                                {String(item.provider || "").toUpperCase()} - {formatDateTime(item.createdAt)}
+                              </span>
+                            </div>
+                            <span className={pillClass}>{status || "unknown"}</span>
+                          </div>
+                        );
+                      })}
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: "12px",
+                      marginTop: "12px"
+                    }}
+                  >
+                    <button
+                      className="btn small"
+                      type="button"
+                      onClick={() => goToPaymentsPage(Number(paymentsSnapshot.page || 1) - 1)}
+                      disabled={paymentsLoading || Number(paymentsSnapshot.page || 1) <= 1}
+                    >
+                      Prev
+                    </button>
+                    <span className="section-title" style={{ fontSize: "12px" }}>
+                      Page {Number(paymentsSnapshot.page || 1)} of{" "}
+                      {Math.max(1, Math.ceil(Number(paymentsSnapshot.total || 0) / Number(paymentsSnapshot.limit || 25)))} (
+                      {Number(paymentsSnapshot.total || 0)} total)
+                    </span>
+                    <button
+                      className="btn small"
+                      type="button"
+                      onClick={() => goToPaymentsPage(Number(paymentsSnapshot.page || 1) + 1)}
+                      disabled={
+                        paymentsLoading ||
+                        Number(paymentsSnapshot.page || 1) * Number(paymentsSnapshot.limit || 25) >= Number(paymentsSnapshot.total || 0)
+                      }
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+
+                <div className="card narrow">
+                  <h3>Summary</h3>
+                  <p className="section-title">Filtered totals</p>
+                  <div className="metrics">
+                    <div className="metric">
+                      <span>Gross</span>
+                      <strong>{formatMoney(paymentsSnapshot.summary?.amount || 0, "ETB")}</strong>
+                    </div>
+                    <div className="metric">
+                      <span>Platform fee</span>
+                      <strong>{formatMoney(paymentsSnapshot.summary?.platformFee || 0, "ETB")}</strong>
+                    </div>
+                    <div className="metric">
+                      <span>Station payout</span>
+                      <strong>{formatMoney(paymentsSnapshot.summary?.stationPayout || 0, "ETB")}</strong>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {active === "pricing" && (
           <div className="grid">
             <div className="card wide">
@@ -826,7 +1875,7 @@ export default function Dashboard() {
                 <div className="list-item">
                   <div>
                     <strong>Happy Hour</strong>
-                    <span>-$0.10 / liter · 4-6 PM</span>
+                    <span>-$0.10 / liter - 4-6 PM</span>
                   </div>
                   <span className="pill">Draft</span>
                 </div>
@@ -1216,57 +2265,191 @@ export default function Dashboard() {
                   </div>
                 )}
               </>
+            ) : !isStationExec ? (
+              <div className="card full">
+                <h3>Team</h3>
+                <p className="section-title">Station CEO only</p>
+                <p>You do not have permission to manage station users.</p>
+              </div>
             ) : (
               <>
                 <div className="card wide">
-                  <h3>Staff roster</h3>
-                  <p className="section-title">Team management</p>
-                  <div className="list">
-                    {["Eden Tesfaye", "Dagmawi K.", "Selam W."].map((name) => (
-                      <div className="list-item" key={name}>
-                        <div>
-                          <strong>{name}</strong>
-                          <span>Role: attendant</span>
-                        </div>
-                        <button className="btn">Manage</button>
-                      </div>
-                    ))}
+                  <h3>Team roster</h3>
+                  <p className="section-title">Accounts assigned to this station</p>
+
+                  <div className="form-row" style={{ alignItems: "end" }}>
+                    <button className="btn" type="button" onClick={loadStationTeam} disabled={teamLoading}>
+                      {teamLoading ? "Refreshing..." : "Refresh"}
+                    </button>
                   </div>
-                </div>
-                <div className="card narrow">
-                  <h3>Add staff</h3>
-                  <label>
-                    Name
-                    <input type="text" placeholder="Full name" />
-                  </label>
-                  <label>
-                    Role
-                    <select defaultValue="attendant">
-                      <option value="attendant">Attendant</option>
-                      <option value="manager">Manager</option>
-                      <option value="cashier">Cashier</option>
-                    </select>
-                  </label>
-                  <button className="btn alt" disabled>
-                    Invite staff (coming soon)
-                  </button>
-                </div>
-                <div className="card full">
-                  <h3>Shift checklist</h3>
+
+                  {teamError && <span className="error-text">{teamError}</span>}
+
                   <div className="list">
-                    {["Confirm fuel status update", "Inspect pump availability", "Respond to driver reports"].map(
-                      (task) => (
-                        <div className="list-item" key={task}>
+                    {teamLoading && <span>Loading team...</span>}
+                    {!teamLoading && !teamUsers.length && <span>No team members yet.</span>}
+                    {!teamLoading &&
+                      teamUsers.map((user) => (
+                        <div className="list-item" key={user.id}>
                           <div>
-                            <strong>{task}</strong>
-                            <span>Assigned to shift lead</span>
+                            <strong>{user.name || user.email}</strong>
+                            <span>
+                              {(roleLabels[user.role] || user.role) + " - " + String(user.email || "")}
+                              {user.phone ? " - " + String(user.phone) : ""}
+                              {user.isBlocked ? " - Blocked" : ""}
+                            </span>
                           </div>
-                          <button className="btn">Mark done</button>
+                          <button className="btn small" type="button" onClick={() => startEditTeamUser(user)}>
+                            Manage
+                          </button>
                         </div>
-                      )
-                    )}
+                      ))}
                   </div>
                 </div>
+
+                <div className="card narrow">
+                  <h3>Add team member</h3>
+                  <p className="section-title">Station-scoped access</p>
+                  <form onSubmit={handleCreateTeamUser} className="login-form">
+                    <label>
+                      Name
+                      <input
+                        value={createTeamForm.name}
+                        onChange={(event) => setCreateTeamForm((prev) => ({ ...prev, name: event.target.value }))}
+                        placeholder="Full name"
+                        required
+                      />
+                    </label>
+                    <label>
+                      Email
+                      <input
+                        value={createTeamForm.email}
+                        onChange={(event) => setCreateTeamForm((prev) => ({ ...prev, email: event.target.value }))}
+                        type="email"
+                        placeholder="staff@station.com"
+                        required
+                      />
+                    </label>
+                    <label>
+                      Phone
+                      <input
+                        value={createTeamForm.phone}
+                        onChange={(event) => setCreateTeamForm((prev) => ({ ...prev, phone: event.target.value }))}
+                        placeholder="+2519... (optional)"
+                      />
+                    </label>
+                    <label>
+                      Password
+                      <input
+                        value={createTeamForm.password}
+                        onChange={(event) => setCreateTeamForm((prev) => ({ ...prev, password: event.target.value }))}
+                        type="password"
+                        placeholder="StrongP@ssw0rd"
+                        required
+                      />
+                    </label>
+                    <label>
+                      Role
+                      <select
+                        value={createTeamForm.role}
+                        onChange={(event) => setCreateTeamForm((prev) => ({ ...prev, role: event.target.value }))}
+                      >
+                        {allowedTeamRoles.includes("staff") && <option value="staff">Staff</option>}
+                        {allowedTeamRoles.includes("station_manager") && (
+                          <option value="station_manager">Station CEO</option>
+                        )}
+                      </select>
+                    </label>
+
+                    {createTeamError && <span className="error-text">{createTeamError}</span>}
+                    {createTeamStatus && <span className="status-banner">{createTeamStatus}</span>}
+
+                    <button className="btn alt" type="submit" disabled={isCreatingTeam}>
+                      {isCreatingTeam ? "Creating..." : "Create user"}
+                    </button>
+                    <small>Password must include upper/lower/number/special and be 8+ chars.</small>
+                  </form>
+                </div>
+
+                {editTeamForm && (
+                  <div className="card full">
+                    <div className="topbar">
+                      <div>
+                        <h3>Manage team member</h3>
+                        <p className="section-title">{editTeamForm.email || editTeamUserId}</p>
+                      </div>
+                      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        <button
+                          className="btn"
+                          type="button"
+                          onClick={handleForceLogoutTeamUser}
+                          disabled={isSavingTeam}
+                        >
+                          Force logout
+                        </button>
+                        <button className="btn alt" type="button" onClick={handleToggleTeamBlock} disabled={isSavingTeam}>
+                          {editTeamForm.isBlocked ? "Unblock user" : "Block user"}
+                        </button>
+                        <button className="btn" type="button" onClick={stopEditTeamUser} disabled={isSavingTeam}>
+                          Close
+                        </button>
+                      </div>
+                    </div>
+
+                    <form onSubmit={handleSaveTeamUser} className="form-row" style={{ alignItems: "end" }}>
+                      <label>
+                        Name
+                        <input
+                          value={editTeamForm.name}
+                          onChange={(event) =>
+                            setEditTeamForm((prev) => (prev ? { ...prev, name: event.target.value } : prev))
+                          }
+                          required
+                        />
+                      </label>
+                      <label>
+                        Email
+                        <input
+                          value={editTeamForm.email}
+                          onChange={(event) =>
+                            setEditTeamForm((prev) => (prev ? { ...prev, email: event.target.value } : prev))
+                          }
+                          type="email"
+                          required
+                        />
+                      </label>
+                      <label>
+                        Phone
+                        <input
+                          value={editTeamForm.phone}
+                          onChange={(event) =>
+                            setEditTeamForm((prev) => (prev ? { ...prev, phone: event.target.value } : prev))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Role
+                        <select
+                          value={editTeamForm.role}
+                          onChange={(event) =>
+                            setEditTeamForm((prev) => (prev ? { ...prev, role: event.target.value } : prev))
+                          }
+                        >
+                          {allowedTeamRoles.includes("staff") && <option value="staff">Staff</option>}
+                          {allowedTeamRoles.includes("station_manager") && (
+                            <option value="station_manager">Station CEO</option>
+                          )}
+                        </select>
+                      </label>
+                      <button className="btn alt" type="submit" disabled={isSavingTeam}>
+                        {isSavingTeam ? "Saving..." : "Save changes"}
+                      </button>
+                    </form>
+
+                    {editTeamError && <span className="error-text">{editTeamError}</span>}
+                    {editTeamStatus && <span className="status-banner">{editTeamStatus}</span>}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1274,67 +2457,450 @@ export default function Dashboard() {
 
         {active === "settings" && (
           <div className="grid">
-            <div className="card wide">
-              <h3>Station profile</h3>
-              <div className="form-row">
-                <label>
-                  Station name
-                  <input type="text" defaultValue={station?.name || ""} />
-                </label>
-                <label>
-                  Address
-                  <input type="text" defaultValue={station?.address || ""} />
-                </label>
-                <label>
-                  Manager contact
-                  <input type="text" defaultValue={station?.contact || ""} />
-                </label>
-                <label>
-                  Support email
-                  <input type="text" defaultValue={session?.user?.email || ""} />
-                </label>
+            {!isStationExec ? (
+              <div className="card full">
+                <h3>Station settings</h3>
+                <p className="section-title">Station CEO only</p>
+                <p>You do not have permission to edit station profile settings.</p>
               </div>
-              <button className="btn" disabled>
-                Update profile (coming soon)
-              </button>
-            </div>
-            <div className="card narrow">
-              <h3>Notification rules</h3>
-              <label>
-                Alert threshold
-                <select defaultValue="15">
-                  <option value="10">10% tank remaining</option>
-                  <option value="15">15% tank remaining</option>
-                  <option value="20">20% tank remaining</option>
-                </select>
-              </label>
-              <label>
-                Queue spike alerts
-                <select defaultValue="on">
-                  <option value="on">On</option>
-                  <option value="off">Off</option>
-                </select>
-              </label>
-              <button className="btn alt" disabled>
-                Save settings (coming soon)
-              </button>
-            </div>
-            <div className="card full">
-              <h3>Integrations</h3>
-              <div className="list">
-                {["POS system", "Pump telemetry", "Sentry alerts"].map((item) => (
-                  <div className="list-item" key={item}>
-                    <div>
-                      <strong>{item}</strong>
-                      <span>Connect to unlock automation</span>
-                    </div>
-                    <button className="btn" disabled>
-                      Connect
-                    </button>
+            ) : (
+              <>
+                {canManageStations && (
+                  <div className="card full">
+                    <h3>Create station</h3>
+                    <p className="section-title">Admin station creation + payment details</p>
+
+                    <form onSubmit={handleCreateStation}>
+                      <div className="form-row">
+                        <label>
+                          Station name
+                          <input
+                            type="text"
+                            value={createStationForm.name}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({ ...prev, name: event.target.value }))
+                            }
+                            required
+                          />
+                        </label>
+                        <label>
+                          Address
+                          <input
+                            type="text"
+                            value={createStationForm.address}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({ ...prev, address: event.target.value }))
+                            }
+                            required
+                          />
+                        </label>
+                        <label>
+                          Manager contact
+                          <input
+                            type="text"
+                            value={createStationForm.contact}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({ ...prev, contact: event.target.value }))
+                            }
+                            placeholder="+2519... (optional)"
+                          />
+                        </label>
+                        <label>
+                          Latitude
+                          <input
+                            type="number"
+                            step="any"
+                            value={createStationForm.latitude}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({ ...prev, latitude: event.target.value }))
+                            }
+                            placeholder="8.9806"
+                            required
+                          />
+                        </label>
+                        <label>
+                          Longitude
+                          <input
+                            type="number"
+                            step="any"
+                            value={createStationForm.longitude}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({ ...prev, longitude: event.target.value }))
+                            }
+                            placeholder="38.7578"
+                            required
+                          />
+                        </label>
+                        <label>
+                          Fuel status
+                          <select
+                            value={createStationForm.fuelStatus}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({ ...prev, fuelStatus: event.target.value }))
+                            }
+                          >
+                            <option value="full">Full</option>
+                            <option value="partial">Partial</option>
+                            <option value="empty">Empty</option>
+                          </select>
+                        </label>
+                        <label>
+                          Station status
+                          <select
+                            value={createStationForm.isActive ? "open" : "inactive"}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({
+                                ...prev,
+                                isActive: event.target.value === "open"
+                              }))
+                            }
+                          >
+                            <option value="open">Open</option>
+                            <option value="inactive">Inactive</option>
+                          </select>
+                        </label>
+                        {isSuperAdmin ? (
+                          organizationOptions.length ? (
+                            <label>
+                              Organization
+                              <select
+                                value={createStationForm.organizationId}
+                                onChange={(event) =>
+                                  setCreateStationForm((prev) => ({
+                                    ...prev,
+                                    organizationId: event.target.value
+                                  }))
+                                }
+                              >
+                                <option value="">No organization</option>
+                                {organizationOptions.map((item) => (
+                                  <option key={String(item.id || item._id || item.value)} value={String(item.id || item._id || item.value)}>
+                                    {item.name || item.label || item.email || String(item.id || item._id || item.value)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          ) : (
+                            <label>
+                              Organization ID
+                              <input
+                                type="text"
+                                value={createStationForm.organizationId}
+                                onChange={(event) =>
+                                  setCreateStationForm((prev) => ({
+                                    ...prev,
+                                    organizationId: event.target.value
+                                  }))
+                                }
+                                placeholder="Optional organization ObjectId"
+                              />
+                            </label>
+                          )
+                        ) : null}
+                        <label>
+                          City ID
+                          <input
+                            type="text"
+                            value={createStationForm.cityId}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({ ...prev, cityId: event.target.value }))
+                            }
+                            placeholder="Optional city ObjectId"
+                          />
+                        </label>
+                        <label>
+                          Branch ID
+                          <input
+                            type="text"
+                            value={createStationForm.branchId}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({ ...prev, branchId: event.target.value }))
+                            }
+                            placeholder="Optional branch ObjectId"
+                          />
+                        </label>
+                        <label>
+                          Payment provider
+                          <input
+                            type="text"
+                            value={createStationForm.paymentProviderName}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({
+                                ...prev,
+                                paymentProviderName: event.target.value
+                              }))
+                            }
+                            placeholder="Telebirr, CBE Birr, bank name..."
+                          />
+                        </label>
+                        <label>
+                          Payment phone
+                          <input
+                            type="text"
+                            value={createStationForm.paymentPhoneNumber}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({
+                                ...prev,
+                                paymentPhoneNumber: event.target.value
+                              }))
+                            }
+                            placeholder="+2519... (optional)"
+                          />
+                        </label>
+                        <label>
+                          Account name
+                          <input
+                            type="text"
+                            value={createStationForm.paymentAccountName}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({
+                                ...prev,
+                                paymentAccountName: event.target.value
+                              }))
+                            }
+                            placeholder="Station or business account name"
+                          />
+                        </label>
+                        <label>
+                          Account number
+                          <input
+                            type="text"
+                            value={createStationForm.paymentAccountNumber}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({
+                                ...prev,
+                                paymentAccountNumber: event.target.value
+                              }))
+                            }
+                            placeholder="Bank or wallet account number"
+                          />
+                        </label>
+                        <label>
+                          Customer payment note
+                          <textarea
+                            value={createStationForm.paymentInstructions}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({
+                                ...prev,
+                                paymentInstructions: event.target.value
+                              }))
+                            }
+                            placeholder="Shown on the customer page so they do not need to remember station payment details."
+                          />
+                        </label>
+                      </div>
+
+                      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "12px" }}>
+                        <button className="btn alt" type="submit" disabled={isCreatingStation}>
+                          {isCreatingStation ? "Creating..." : "Create station"}
+                        </button>
+                        <button className="btn" type="button" onClick={resetCreateStationForm} disabled={isCreatingStation}>
+                          Reset
+                        </button>
+                      </div>
+                    </form>
+
+                    {createStationError && <span className="error-text">{createStationError}</span>}
+                    {createStationStatus && <span className="status-banner">{createStationStatus}</span>}
                   </div>
-                ))}
-              </div>
-            </div>
+                )}
+
+                <div className="card wide">
+                  <h3>{canManageStations ? "Edit selected station" : "Station profile"}</h3>
+                  <p className="section-title">Public details + customer payment details</p>
+
+                  {!stationForm ? (
+                    <span>Loading station profile...</span>
+                  ) : (
+                    <>
+                      <form onSubmit={handleSaveStationProfile}>
+                        <div className="form-row">
+                          <label>
+                            Station name
+                            <input
+                              type="text"
+                              value={stationForm.name}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) => (prev ? { ...prev, name: event.target.value } : prev));
+                              }}
+                              required
+                            />
+                          </label>
+                          <label>
+                            Address
+                            <input
+                              type="text"
+                              value={stationForm.address}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) => (prev ? { ...prev, address: event.target.value } : prev));
+                              }}
+                              required
+                            />
+                          </label>
+                          <label>
+                            Manager contact
+                            <input
+                              type="text"
+                              value={stationForm.contact}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) => (prev ? { ...prev, contact: event.target.value } : prev));
+                              }}
+                              placeholder="+2519... (optional)"
+                            />
+                          </label>
+                          <label>
+                            Payment provider
+                            <input
+                              type="text"
+                              value={stationForm.paymentProviderName}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) =>
+                                  prev ? { ...prev, paymentProviderName: event.target.value } : prev
+                                );
+                              }}
+                              placeholder="Telebirr, CBE Birr, bank name..."
+                            />
+                          </label>
+                          <label>
+                            Payment phone
+                            <input
+                              type="text"
+                              value={stationForm.paymentPhoneNumber}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) =>
+                                  prev ? { ...prev, paymentPhoneNumber: event.target.value } : prev
+                                );
+                              }}
+                              placeholder="+2519... (optional)"
+                            />
+                          </label>
+                          <label>
+                            Account name
+                            <input
+                              type="text"
+                              value={stationForm.paymentAccountName}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) =>
+                                  prev ? { ...prev, paymentAccountName: event.target.value } : prev
+                                );
+                              }}
+                              placeholder="Station or business account name"
+                            />
+                          </label>
+                          <label>
+                            Account number
+                            <input
+                              type="text"
+                              value={stationForm.paymentAccountNumber}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) =>
+                                  prev ? { ...prev, paymentAccountNumber: event.target.value } : prev
+                                );
+                              }}
+                              placeholder="Bank or wallet account number"
+                            />
+                          </label>
+                          <label>
+                            Customer payment note
+                            <textarea
+                              value={stationForm.paymentInstructions}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) =>
+                                  prev ? { ...prev, paymentInstructions: event.target.value } : prev
+                                );
+                              }}
+                              placeholder="Shown on the customer page so they do not need to remember station payment details."
+                            />
+                          </label>
+                          <label>
+                            Station status
+                            <select
+                              value={stationForm.isActive ? "open" : "inactive"}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) =>
+                                  prev ? { ...prev, isActive: event.target.value === "open" } : prev
+                                );
+                              }}
+                            >
+                              <option value="open">Open</option>
+                              <option value="inactive">Inactive</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "12px" }}>
+                          <button className="btn alt" type="submit" disabled={isSavingStation || !stationFormDirty}>
+                            {isSavingStation ? "Saving..." : "Save changes"}
+                          </button>
+                          <button
+                            className="btn"
+                            type="button"
+                            onClick={resetStationProfileForm}
+                            disabled={isSavingStation || !stationFormDirty}
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      </form>
+
+                      {stationFormError && <span className="error-text">{stationFormError}</span>}
+                      {stationFormStatus && <span className="status-banner">{stationFormStatus}</span>}
+                    </>
+                  )}
+                </div>
+
+                <div className="card narrow">
+                  <h3>Station info</h3>
+                  <p className="section-title">Read-only</p>
+                  <div className="list">
+                    <div className="list-item">
+                      <div>
+                        <strong>Station ID</strong>
+                        <span>{station?.id || stationId || "--"}</span>
+                      </div>
+                    </div>
+                    <div className="list-item">
+                      <div>
+                        <strong>Profile updated</strong>
+                        <span>{formatDateTime(station?.updatedAt)}</span>
+                      </div>
+                    </div>
+                    <div className="list-item">
+                      <div>
+                        <strong>Fuel updated</strong>
+                        <span>{formatDateTime(station?.fuelInventory?.updatedAt)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="card full">
+                  <h3>Integrations</h3>
+                  <div className="list">
+                    {["POS system", "Pump telemetry", "Sentry alerts"].map((item) => (
+                      <div className="list-item" key={item}>
+                        <div>
+                          <strong>{item}</strong>
+                          <span>Connect to unlock automation</span>
+                        </div>
+                        <button className="btn" disabled>
+                          Connect
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
       </main>

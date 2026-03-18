@@ -26,6 +26,10 @@ function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
 
+function normalizePhone(phone) {
+  return String(phone || "").trim().replace(/[^\d+]/g, "");
+}
+
 function buildAuthPayload(user) {
   return {
     sub: String(user._id),
@@ -318,7 +322,7 @@ exports.logout = async (req, res) => {
 exports.me = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "_id name email phone isBlocked role organizationId cityIds stationIds branchIds createdAt"
+      "_id name email phone phoneVerified authProvider isBlocked role organizationId cityIds stationIds branchIds createdAt"
     );
     if (!user) return res.status(404).json({ message: "User not found." });
 
@@ -327,6 +331,98 @@ exports.me = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load profile." });
+  }
+};
+
+exports.updateProfile = async (req, res) => {
+  try {
+    const name = String(req.body.name || "").trim();
+    const email = normalizeEmail(req.body.email);
+    const phone = normalizePhone(req.body.phone);
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+
+    const nextEmailChanged = email !== normalizeEmail(user.email);
+    if (nextEmailChanged && String(user.authProvider || "local") === "google") {
+      return res.status(400).json({ message: "Google accounts cannot change email from the app." });
+    }
+
+    if (nextEmailChanged) {
+      const existingUser = await User.findOne({ email, _id: { $ne: user._id } }).select("_id");
+      if (existingUser) {
+        return res.status(409).json({ message: "Email already registered." });
+      }
+      user.email = email;
+    }
+
+    const nextPhoneChanged = phone !== normalizePhone(user.phone);
+    user.name = name;
+    user.phone = phone;
+
+    if (nextPhoneChanged) {
+      user.phoneVerified = !phone;
+      user.phoneVerificationHash = "";
+      user.phoneVerificationExpiresAt = null;
+      user.phoneVerificationAttempts = 0;
+      user.phoneVerificationLastSentAt = null;
+    }
+
+    await user.save();
+
+    return res.json({
+      user: buildUserResponse(user),
+      message: "Profile updated successfully."
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to update profile." });
+  }
+};
+
+exports.changePassword = async (req, res) => {
+  try {
+    const currentPassword = String(req.body.currentPassword || "");
+    const newPassword = String(req.body.newPassword || "");
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+
+    const isGoogleAccount = String(user.authProvider || "local") === "google";
+    if (!isGoogleAccount) {
+      if (!currentPassword) {
+        return res.status(400).json({ message: "Current password is required." });
+      }
+
+      const currentPasswordMatch = await bcrypt.compare(currentPassword, user.passwordHash);
+      if (!currentPasswordMatch) {
+        return res.status(401).json({ message: "Current password is incorrect." });
+      }
+    } else if (currentPassword) {
+      const currentPasswordMatch = await bcrypt.compare(currentPassword, user.passwordHash);
+      if (!currentPasswordMatch) {
+        return res.status(401).json({ message: "Current password is incorrect." });
+      }
+    }
+
+    const isSamePassword = await bcrypt.compare(newPassword, user.passwordHash);
+    if (isSamePassword) {
+      return res.status(400).json({ message: "Choose a new password that is different from your current one." });
+    }
+
+    user.passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    await user.save();
+
+    return res.json({
+      message: isGoogleAccount ? "Password added successfully." : "Password changed successfully."
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to change password." });
   }
 };
 
