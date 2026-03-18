@@ -7,6 +7,8 @@ const {
   validateLogin,
   validateRefresh,
   validateBootstrapSuperAdmin,
+  validateBiometricLogin,
+  validateBiometricRegister,
   validateChangePassword,
   validatePhoneVerification,
   validatePhoneResend,
@@ -26,10 +28,13 @@ router.post(
 router.post("/login", authLimiter, validateLogin, authController.login);
 router.post("/refresh", authLimiter, validateRefresh, authController.refresh);
 router.post("/google", authLimiter, validateGoogleAuth, authController.googleAuth);
+router.post("/biometric/login", authLimiter, validateBiometricLogin, authController.biometricLogin);
 router.post("/logout", auth, authController.logout);
 router.get("/me", auth, authController.me);
 router.patch("/me", auth, validateUpdateProfile, authController.updateProfile);
 router.post("/change-password", auth, validateChangePassword, authController.changePassword);
+router.post("/biometric/register", auth, validateBiometricRegister, authController.registerBiometricDevice);
+router.post("/biometric/unregister", auth, validateBiometricRegister, authController.unregisterBiometricDevice);
 router.post("/two-factor/start", auth, authController.startTwoFactor);
 router.post("/two-factor/verify", authLimiter, validatePhoneVerification, authController.verifyTwoFactor);
 router.post("/two-factor/resend", authLimiter, validatePhoneResend, authController.resendTwoFactorOtp);

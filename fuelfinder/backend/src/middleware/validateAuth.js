@@ -199,3 +199,41 @@ exports.validateChangePassword = (req, res, next) => {
   req.body.newPassword = newPassword;
   return next();
 };
+
+exports.validateBiometricRegister = (req, res, next) => {
+  const deviceId = normalize(req.body.deviceId);
+  const deviceLabel = normalize(req.body.deviceLabel);
+
+  if (!deviceId) {
+    return sendValidationError(res, "deviceId is required.");
+  }
+  if (deviceId.length > 160) {
+    return sendValidationError(res, "deviceId is too long.");
+  }
+  if (deviceLabel.length > 120) {
+    return sendValidationError(res, "deviceLabel is too long.");
+  }
+
+  req.body.deviceId = deviceId;
+  req.body.deviceLabel = deviceLabel;
+  return next();
+};
+
+exports.validateBiometricLogin = (req, res, next) => {
+  const deviceId = normalize(req.body.deviceId);
+  const biometricSecret = normalize(req.body.biometricSecret);
+
+  if (!deviceId || !biometricSecret) {
+    return sendValidationError(res, "deviceId and biometricSecret are required.");
+  }
+  if (deviceId.length > 160) {
+    return sendValidationError(res, "deviceId is too long.");
+  }
+  if (biometricSecret.length > 255) {
+    return sendValidationError(res, "biometricSecret is too long.");
+  }
+
+  req.body.deviceId = deviceId;
+  req.body.biometricSecret = biometricSecret;
+  return next();
+};

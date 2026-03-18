@@ -28,7 +28,12 @@ import StationDetails from "./src/component/screens/home/StationDetails";
 import LoginScreen from "./src/component/screens/auth/LoginScreen";
 import RegisterScreen from "./src/component/screens/auth/RegisterScreen";
 import PhoneVerifyScreen from "./src/component/screens/auth/PhoneVerifyScreen";
-import { changeMyPassword, updateMyProfile } from "./src/component/services/authService";
+import {
+  changeMyPassword,
+  registerBiometricLogin,
+  unregisterBiometricLogin,
+  updateMyProfile,
+} from "./src/component/services/authService";
 import {
   loadSavedStations,
   loadVehicles,
@@ -38,6 +43,13 @@ import {
   saveVehicles,
   upsertVehicle,
 } from "./src/component/services/accountStorage";
+import {
+  buildBiometricDeviceLabel,
+  clearBiometricLoginCredential,
+  getOrCreateBiometricDeviceId,
+  saveBiometricLoginCredential,
+  updateBiometricLoginMeta,
+} from "./src/component/services/biometricService";
 import * as Location from "expo-location";
 import * as LocalAuthentication from "expo-local-authentication";
 import { AuthProvider, useAuth } from "./src/component/context/AuthContext";
@@ -393,11 +405,23 @@ function ProfileScreen() {
 
   const handleBiometricToggle = React.useCallback(async () => {
     if (prefs.biometricUnlock) {
+      try {
+        const deviceId = await getOrCreateBiometricDeviceId();
+        await unregisterBiometricLogin({
+          deviceId,
+          deviceLabel: buildBiometricDeviceLabel(),
+        });
+      } catch (_error) {
+        // If backend cleanup fails we still clear the local device credential.
+      }
+      await clearBiometricLoginCredential();
       setPrefs((current) => ({ ...current, biometricUnlock: false }));
       await persistBool(PREF_KEYS.biometricUnlock, false);
       Alert.alert(
         t("done"),
-        t("biometricDisabledMessage", { defaultValue: "Biometric unlock has been turned off for this device." })
+        t("biometricDisabledMessage", {
+          defaultValue: "Biometric unlock and biometric login have been turned off for this device.",
+        })
       );
       return;
     }
@@ -458,18 +482,29 @@ function ProfileScreen() {
         return;
       }
 
+      const deviceId = await getOrCreateBiometricDeviceId();
+      const registration = await registerBiometricLogin({
+        deviceId,
+        deviceLabel: buildBiometricDeviceLabel(),
+      });
+      await saveBiometricLoginCredential({
+        deviceId: registration?.deviceId || deviceId,
+        biometricSecret: registration?.biometricSecret || "",
+        email: user?.email || "",
+        displayName: user?.name || "",
+      });
       setPrefs((current) => ({ ...current, biometricUnlock: true }));
       await persistBool(PREF_KEYS.biometricUnlock, true);
       Alert.alert(
         t("done"),
         t("biometricEnabledMessage", {
-          defaultValue: "Biometric unlock is now enabled for this device.",
+          defaultValue: "Biometric unlock and biometric sign-in are now enabled for this device.",
         })
       );
     } catch (_error) {
       Alert.alert(t("somethingWentWrong"));
     }
-  }, [PREF_KEYS.biometricUnlock, persistBool, prefs.biometricUnlock, t]);
+  }, [PREF_KEYS.biometricUnlock, persistBool, prefs.biometricUnlock, t, user?.email, user?.name]);
 
   const resetVehicleEditor = React.useCallback(() => {
     setVehicleEditorVisible(false);
@@ -656,6 +691,12 @@ function ProfileScreen() {
     try {
       const data = await updateMyProfile(payload);
       await replaceUser(data.user);
+      if (prefs.biometricUnlock) {
+        await updateBiometricLoginMeta({
+          email: data?.user?.email || payload.email,
+          displayName: data?.user?.name || payload.name,
+        });
+      }
       Alert.alert(
         t("done"),
         data?.message || t("profileUpdated", { defaultValue: "Profile updated successfully." })
@@ -669,7 +710,7 @@ function ProfileScreen() {
     } finally {
       setAccountBusy(false);
     }
-  }, [closeAccountModal, profileForm.email, profileForm.name, profileForm.phone, replaceUser, t]);
+  }, [closeAccountModal, prefs.biometricUnlock, profileForm.email, profileForm.name, profileForm.phone, replaceUser, t]);
 
   const savePasswordChanges = React.useCallback(async () => {
     const currentPassword = String(passwordForm.currentPassword || "");
@@ -1973,6 +2014,7 @@ function AppNavigator() {
       const availability = await getBiometricAvailability();
       if (!availability.hasHardware || !availability.isEnrolled) {
         await AsyncStorage.setItem(BIOMETRIC_PREF_KEY, "0");
+        await clearBiometricLoginCredential();
         setRequiresBiometricUnlock(false);
         Alert.alert(
           t("biometricResetTitle", { defaultValue: "Biometric unlock turned off" }),

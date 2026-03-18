@@ -25,6 +25,21 @@ export async function updateMyProfile(payload) {
   return data;
 }
 
+export async function registerBiometricLogin(payload) {
+  const { data } = await api.post("/auth/biometric/register", payload);
+  return data;
+}
+
+export async function biometricLogin(payload) {
+  const { data } = await api.post("/auth/biometric/login", payload);
+  return data;
+}
+
+export async function unregisterBiometricLogin(payload) {
+  const { data } = await api.post("/auth/biometric/unregister", payload);
+  return data;
+}
+
 export async function logoutUser() {
   const { data } = await api.post("/auth/logout");
   return data;

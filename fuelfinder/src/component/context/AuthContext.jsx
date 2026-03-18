@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import api, { setApiAccessToken } from "../services/api";
 import {
+  biometricLogin,
   disableTwoFactorAuth,
   getMyProfile,
   loginUser,
@@ -284,6 +285,19 @@ export function AuthProvider({ children }) {
     [persistSession]
   );
 
+  const signInWithBiometric = useCallback(
+    async ({ deviceId, biometricSecret }) => {
+      const data = await biometricLogin({ deviceId, biometricSecret });
+      await persistSession(
+        data.user,
+        data.tokens.accessToken,
+        data.tokens.refreshToken
+      );
+      return data;
+    },
+    [persistSession]
+  );
+
   const value = useMemo(
     () => ({
       user,
@@ -302,6 +316,7 @@ export function AuthProvider({ children }) {
       resendTwoFactorCode,
       beginTwoFactorSetup,
       turnOffTwoFactor,
+      signInWithBiometric,
       signInWithGoogle,
     }),
     [
@@ -320,6 +335,7 @@ export function AuthProvider({ children }) {
       resendTwoFactorCode,
       beginTwoFactorSetup,
       turnOffTwoFactor,
+      signInWithBiometric,
       signInWithGoogle,
     ]
   );

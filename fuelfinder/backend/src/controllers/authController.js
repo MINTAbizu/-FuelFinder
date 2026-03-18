@@ -93,6 +93,20 @@ function clearTwoFactorChallenge(user) {
   user.twoFactorOtpLastSentAt = null;
 }
 
+function upsertBiometricDevice(user, device) {
+  const currentDevices = Array.isArray(user.biometricDevices) ? user.biometricDevices : [];
+  const nextDevices = currentDevices.filter(
+    (item) => String(item.deviceId || "") !== String(device.deviceId || "")
+  );
+  nextDevices.push(device);
+  user.biometricDevices = nextDevices;
+}
+
+function findBiometricDevice(user, deviceId) {
+  const devices = Array.isArray(user?.biometricDevices) ? user.biometricDevices : [];
+  return devices.find((item) => String(item.deviceId || "") === String(deviceId || ""));
+}
+
 async function issuePhoneVerification(user, { enforceCooldown = false } = {}) {
   const now = new Date();
   const cooldownRemaining = getPhoneOtpCooldownRemainingSeconds(user);
@@ -412,6 +426,43 @@ exports.logout = async (req, res) => {
   }
 };
 
+exports.biometricLogin = async (req, res) => {
+  try {
+    const deviceId = String(req.body.deviceId || "").trim();
+    const biometricSecret = String(req.body.biometricSecret || "").trim();
+
+    const user = await User.findOne({ "biometricDevices.deviceId": deviceId });
+    if (!user) {
+      return res.status(401).json({ message: "Biometric login is not available for this device." });
+    }
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+
+    const biometricDevice = findBiometricDevice(user, deviceId);
+    if (!biometricDevice?.secretHash) {
+      return res.status(401).json({ message: "Biometric login is not available for this device." });
+    }
+
+    const secretMatch = await bcrypt.compare(biometricSecret, biometricDevice.secretHash);
+    if (!secretMatch) {
+      return res.status(401).json({ message: "Biometric login failed." });
+    }
+
+    biometricDevice.lastUsedAt = new Date();
+    user.markModified("biometricDevices");
+    await user.save();
+
+    const { accessToken, refreshToken } = await issueTokenPair(user);
+    return res.json({
+      user: buildUserResponse(user),
+      tokens: { accessToken, refreshToken }
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Biometric login failed." });
+  }
+};
+
 exports.me = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
@@ -518,6 +569,64 @@ exports.changePassword = async (req, res) => {
     });
   } catch (_error) {
     return res.status(500).json({ message: "Failed to change password." });
+  }
+};
+
+exports.registerBiometricDevice = async (req, res) => {
+  try {
+    const deviceId = String(req.body.deviceId || "").trim();
+    const deviceLabel = String(req.body.deviceLabel || "").trim();
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+
+    const biometricSecret = crypto.randomBytes(32).toString("hex");
+    const secretHash = await bcrypt.hash(biometricSecret, SALT_ROUNDS);
+
+    upsertBiometricDevice(user, {
+      deviceId,
+      label: deviceLabel,
+      secretHash,
+      createdAt: new Date(),
+      lastUsedAt: null
+    });
+
+    await user.save();
+
+    return res.json({
+      deviceId,
+      deviceLabel,
+      biometricSecret,
+      message: "Biometric login enabled for this device."
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to enable biometric login." });
+  }
+};
+
+exports.unregisterBiometricDevice = async (req, res) => {
+  try {
+    const deviceId = String(req.body.deviceId || "").trim();
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+
+    user.biometricDevices = (Array.isArray(user.biometricDevices) ? user.biometricDevices : []).filter(
+      (item) => String(item.deviceId || "") !== deviceId
+    );
+    await user.save();
+
+    return res.json({
+      message: "Biometric login removed from this device."
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to disable biometric login." });
   }
 };
 

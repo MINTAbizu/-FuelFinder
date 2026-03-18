@@ -14,6 +14,15 @@ const userSchema = new mongoose.Schema(
     twoFactorOtpExpiresAt: { type: Date, default: null, index: true },
     twoFactorOtpAttempts: { type: Number, default: 0 },
     twoFactorOtpLastSentAt: { type: Date, default: null },
+    biometricDevices: [
+      {
+        deviceId: { type: String, required: true, trim: true },
+        label: { type: String, trim: true, default: "" },
+        secretHash: { type: String, required: true },
+        createdAt: { type: Date, default: Date.now },
+        lastUsedAt: { type: Date, default: null }
+      }
+    ],
     email: { type: String, required: true, trim: true, lowercase: true, unique: true },
     authProvider: { type: String, enum: ["local", "google"], default: "local" },
     googleSub: { type: String, default: "" },

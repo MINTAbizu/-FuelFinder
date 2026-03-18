@@ -18,6 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as WebBrowser from "expo-web-browser";
 import { makeRedirectUri } from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
+import { useFocusEffect } from "@react-navigation/native";
 
 import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
 
@@ -25,13 +26,18 @@ import { useAuth } from "../../context/AuthContext";
 import { useLanguage } from "../../context/LanguageContext";
 
 import { API_BASE_URL } from "../../services/api";
+import {
+  clearBiometricLoginCredential,
+  loadBiometricLoginCredential,
+  loadBiometricLoginMeta,
+} from "../../services/biometricService";
 import { firebaseAuth } from "../../services/firebase";
 import i18n from "../../../i18n/i18n";
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen({ navigation }) {
 
-const { signIn, signInWithGoogle } = useAuth();
+const { signIn, signInWithGoogle, signInWithBiometric } = useAuth();
 const { language, changeLanguage, supportedLanguages, t } = useLanguage();
 
 const [email,setEmail]=useState("");
@@ -41,9 +47,34 @@ const [showPassword,setShowPassword]=useState(false);
 const [error,setError]=useState("");
 const [loading,setLoading]=useState(false);
 const [googleLoading,setGoogleLoading]=useState(false);
+const [biometricLoading,setBiometricLoading]=useState(false);
+const [biometricMeta,setBiometricMeta]=useState(null);
 
 const [languageMenuOpen,setLanguageMenuOpen]=useState(false);
 const [languageQuery,setLanguageQuery]=useState("");
+
+useFocusEffect(
+useMemo(()=>()=>{
+let mounted = true;
+
+(async()=>{
+try{
+const meta = await loadBiometricLoginMeta();
+if(mounted){
+setBiometricMeta(meta);
+}
+}catch(_error){
+if(mounted){
+setBiometricMeta(null);
+}
+}
+})();
+
+return()=>{
+mounted = false;
+};
+},[])
+);
 
 /* GOOGLE CONFIG */
 
@@ -198,6 +229,52 @@ setError(`${t("auth.login.cannotConnect")} (${API_BASE_URL})`);
 
 }finally{
 setLoading(false);
+}
+
+};
+
+const onBiometricLogin = async()=>{
+
+setError("");
+setBiometricLoading(true);
+
+try{
+
+const credential = await loadBiometricLoginCredential();
+
+if(!credential?.deviceId || !credential?.biometricSecret){
+await clearBiometricLoginCredential();
+setBiometricMeta(null);
+setError(t("biometricMissingCredential",{defaultValue:"Biometric login is not available on this device anymore."}));
+return;
+}
+
+await signInWithBiometric({
+deviceId:credential.deviceId,
+biometricSecret:credential.biometricSecret
+});
+
+}catch(err){
+
+const backendMessage = err?.response?.data?.message;
+
+if(err?.message?.toLowerCase?.().includes("authentication")){
+setError(t("biometricCanceled",{defaultValue:"Biometric authentication was canceled."}));
+}else if(backendMessage){
+if(
+backendMessage.includes("Biometric login is not available") ||
+backendMessage.includes("Biometric login failed")
+){
+await clearBiometricLoginCredential();
+setBiometricMeta(null);
+}
+setError(backendMessage);
+}else{
+setError(t("biometricLoginFailed",{defaultValue:"Biometric login failed. Please try your password instead."}));
+}
+
+}finally{
+setBiometricLoading(false);
 }
 
 };
@@ -405,6 +482,29 @@ color="#777"
 
 {error ? <Text style={styles.error}>{error}</Text> : null}
 
+{biometricMeta ? (
+<Pressable
+style={styles.biometricBtn}
+onPress={onBiometricLogin}
+disabled={biometricLoading}
+>
+{biometricLoading
+? <ActivityIndicator color="#0F766E"/>
+: <>
+<Ionicons name="finger-print-outline" size={20} color="#0F766E"/>
+<View style={styles.biometricTextWrap}>
+<Text style={styles.biometricText}>
+{t("biometricLoginCta",{defaultValue:"Use biometric login"})}
+</Text>
+<Text style={styles.biometricSubText}>
+{biometricMeta?.email || biometricMeta?.displayName || t("profile")}
+</Text>
+</View>
+</>
+}
+</Pressable>
+) : null}
+
 <Pressable
 style={styles.loginBtn}
 onPress={onLogin}
@@ -552,6 +652,23 @@ marginBottom:15
 },
 
 passwordInput:{flex:1},
+
+biometricBtn:{
+borderWidth:1,
+borderColor:"#99F6E4",
+backgroundColor:"#ECFEFF",
+borderRadius:22,
+paddingVertical:12,
+paddingHorizontal:14,
+flexDirection:"row",
+alignItems:"center",
+gap:10,
+marginBottom:14
+},
+
+biometricTextWrap:{flex:1},
+biometricText:{fontWeight:"800",color:"#0F766E"},
+biometricSubText:{fontSize:12,color:"#475569",marginTop:2},
 
 loginBtn:{
 backgroundColor:"#0F766E",
