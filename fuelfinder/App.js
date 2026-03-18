@@ -5,6 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -38,6 +39,7 @@ import {
   upsertVehicle,
 } from "./src/component/services/accountStorage";
 import * as Location from "expo-location";
+import * as LocalAuthentication from "expo-local-authentication";
 import { AuthProvider, useAuth } from "./src/component/context/AuthContext";
 import { LanguageProvider, useLanguage } from "./src/component/context/LanguageContext";
 
@@ -45,6 +47,7 @@ const queryClient = new QueryClient();
 const RootStack = createNativeStackNavigator();
 const HomeStack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+const BIOMETRIC_PREF_KEY = "ff_pref_biometric_unlock";
 
 import * as Sentry from "@sentry/react-native";
 // Unlike Sentry on other platforms, you do not need to import anything to use tracing on React Native
@@ -100,6 +103,44 @@ function getVehicleFuelLabel(t, fuelType) {
   return t("fuelGasoline");
 }
 
+async function getBiometricAvailability() {
+  const [hasHardware, isEnrolled, authTypes] = await Promise.all([
+    LocalAuthentication.hasHardwareAsync(),
+    LocalAuthentication.isEnrolledAsync(),
+    LocalAuthentication.supportedAuthenticationTypesAsync(),
+  ]);
+
+  return {
+    hasHardware,
+    isEnrolled,
+    authTypes: Array.isArray(authTypes) ? authTypes : [],
+  };
+}
+
+function getBiometricMethodLabel(t, authTypes) {
+  if (authTypes.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)) {
+    return t("biometricMethodFace", { defaultValue: "Face ID" });
+  }
+  if (authTypes.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)) {
+    return t("biometricMethodFingerprint", { defaultValue: "fingerprint" });
+  }
+  if (authTypes.includes(LocalAuthentication.AuthenticationType.IRIS)) {
+    return t("biometricMethodIris", { defaultValue: "iris" });
+  }
+  return t("biometricMethodGeneric", { defaultValue: "biometrics" });
+}
+
+async function requestBiometricAuthentication(t, authTypes, promptOverride) {
+  return LocalAuthentication.authenticateAsync({
+    promptMessage:
+      promptOverride ||
+      t("biometricPromptMessage", { defaultValue: "Confirm your identity" }),
+    cancelLabel: t("cancel"),
+    fallbackLabel: t("biometricFallbackLabel", { defaultValue: "Use passcode" }),
+    disableDeviceFallback: false,
+  });
+}
+
 function ProfileScreen() {
   const {
     user,
@@ -120,7 +161,7 @@ function ProfileScreen() {
       emailNotifs: "ff_pref_email_notifs",
       priceAlerts: "ff_pref_price_alerts",
       locationSharing: "ff_pref_location_sharing",
-      biometricUnlock: "ff_pref_biometric_unlock",
+      biometricUnlock: BIOMETRIC_PREF_KEY,
       dataSaver: "ff_pref_data_saver",
       autoRefreshPrices: "ff_pref_auto_refresh_prices",
       units: "ff_pref_units",
@@ -354,22 +395,80 @@ function ProfileScreen() {
     if (prefs.biometricUnlock) {
       setPrefs((current) => ({ ...current, biometricUnlock: false }));
       await persistBool(PREF_KEYS.biometricUnlock, false);
+      Alert.alert(
+        t("done"),
+        t("biometricDisabledMessage", { defaultValue: "Biometric unlock has been turned off for this device." })
+      );
       return;
     }
 
-    Alert.alert(
-      t("biometricSetupTitle", { defaultValue: "Biometric unlock needs a native module" }),
-      t("biometricSetupBody", {
-        defaultValue: "Add Expo Local Authentication to this app build before enabling Face ID or fingerprint unlock.",
-      }),
-      [
-        { text: t("cancel"), style: "cancel" },
-        {
-          text: t("openSettingsAction", { defaultValue: "Open settings" }),
-          onPress: () => Linking.openSettings?.(),
-        },
-      ]
-    );
+    try {
+      const availability = await getBiometricAvailability();
+      if (!availability.hasHardware) {
+        Alert.alert(
+          t("biometricUnavailableTitle", { defaultValue: "Biometric unlock unavailable" }),
+          t("biometricUnavailableBody", {
+            defaultValue: "This device does not support fingerprint, face, or iris authentication.",
+          })
+        );
+        return;
+      }
+
+      if (!availability.isEnrolled) {
+        Alert.alert(
+          t("biometricEnrollTitle", { defaultValue: "Set up biometrics first" }),
+          t("biometricEnrollBody", {
+            defaultValue: "Add a fingerprint, face scan, or device passcode in system settings before enabling biometric unlock.",
+          }),
+          [
+            { text: t("cancel"), style: "cancel" },
+            {
+              text: t("openSettingsAction", { defaultValue: "Open settings" }),
+              onPress: () => Linking.openSettings?.(),
+            },
+          ]
+        );
+        return;
+      }
+
+      const methodLabel = getBiometricMethodLabel(t, availability.authTypes);
+      const result = await requestBiometricAuthentication(
+        t,
+        availability.authTypes,
+        t("biometricEnablePrompt", {
+          defaultValue: `Use ${methodLabel} to enable biometric unlock`,
+        })
+      );
+
+      if (!result.success) {
+        if (
+          result.error === "user_cancel" ||
+          result.error === "system_cancel" ||
+          result.error === "app_cancel"
+        ) {
+          return;
+        }
+
+        Alert.alert(
+          t("biometricFailedTitle", { defaultValue: "Biometric check failed" }),
+          t("biometricFailedBody", {
+            defaultValue: "We could not confirm your identity. Please try again.",
+          })
+        );
+        return;
+      }
+
+      setPrefs((current) => ({ ...current, biometricUnlock: true }));
+      await persistBool(PREF_KEYS.biometricUnlock, true);
+      Alert.alert(
+        t("done"),
+        t("biometricEnabledMessage", {
+          defaultValue: "Biometric unlock is now enabled for this device.",
+        })
+      );
+    } catch (_error) {
+      Alert.alert(t("somethingWentWrong"));
+    }
   }, [PREF_KEYS.biometricUnlock, persistBool, prefs.biometricUnlock, t]);
 
   const resetVehicleEditor = React.useCallback(() => {
@@ -1852,7 +1951,112 @@ function AuthStack() {
 }
 
 function AppNavigator() {
-  const { isLoading, isAuthenticated } = useAuth();
+  const { isLoading, isAuthenticated, signOut } = useAuth();
+  const { t } = useLanguage();
+  const [requiresBiometricUnlock, setRequiresBiometricUnlock] = React.useState(false);
+  const [isUnlocking, setIsUnlocking] = React.useState(false);
+  const appStateRef = React.useRef(AppState.currentState);
+
+  const runBiometricUnlock = React.useCallback(async () => {
+    if (!isAuthenticated) {
+      setRequiresBiometricUnlock(false);
+      return;
+    }
+
+    try {
+      const enabled = (await AsyncStorage.getItem(BIOMETRIC_PREF_KEY)) === "1";
+      if (!enabled) {
+        setRequiresBiometricUnlock(false);
+        return;
+      }
+
+      const availability = await getBiometricAvailability();
+      if (!availability.hasHardware || !availability.isEnrolled) {
+        await AsyncStorage.setItem(BIOMETRIC_PREF_KEY, "0");
+        setRequiresBiometricUnlock(false);
+        Alert.alert(
+          t("biometricResetTitle", { defaultValue: "Biometric unlock turned off" }),
+          t("biometricResetBody", {
+            defaultValue: "Biometric unlock was disabled because this device is not ready for biometric authentication.",
+          })
+        );
+        return;
+      }
+
+      setRequiresBiometricUnlock(true);
+      setIsUnlocking(true);
+      const methodLabel = getBiometricMethodLabel(t, availability.authTypes);
+      const result = await requestBiometricAuthentication(
+        t,
+        availability.authTypes,
+        t("biometricUnlockPrompt", {
+          defaultValue: `Unlock FuelFinder with ${methodLabel}`,
+        })
+      );
+
+      if (result.success) {
+        setRequiresBiometricUnlock(false);
+        return;
+      }
+
+      if (
+        result.error &&
+        !["user_cancel", "system_cancel", "app_cancel"].includes(result.error)
+      ) {
+        Alert.alert(
+          t("biometricFailedTitle", { defaultValue: "Biometric check failed" }),
+          t("biometricRetryBody", {
+            defaultValue: "Unlock with biometrics to continue using the app.",
+          })
+        );
+      }
+    } catch (_error) {
+      Alert.alert(t("somethingWentWrong"));
+    } finally {
+      setIsUnlocking(false);
+    }
+  }, [isAuthenticated, t]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!isAuthenticated) {
+        if (!cancelled) {
+          setRequiresBiometricUnlock(false);
+          setIsUnlocking(false);
+        }
+        return;
+      }
+
+      const enabled = (await AsyncStorage.getItem(BIOMETRIC_PREF_KEY)) === "1";
+      if (!enabled || cancelled) {
+        if (!cancelled) setRequiresBiometricUnlock(false);
+        return;
+      }
+
+      await runBiometricUnlock();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, runBiometricUnlock]);
+
+  React.useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      const prevAppState = appStateRef.current;
+      appStateRef.current = nextAppState;
+      if (
+        isAuthenticated &&
+        (prevAppState === "inactive" || prevAppState === "background") &&
+        nextAppState === "active"
+      ) {
+        runBiometricUnlock();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [isAuthenticated, runBiometricUnlock]);
 
   if (isLoading) {
     return <LoadingScreen />;
@@ -1860,7 +2064,44 @@ function AppNavigator() {
 
   return (
     <NavigationContainer>
-      {isAuthenticated ? <AppTabs /> : <AuthStack />}
+      <View style={styles.navigatorRoot}>
+        {isAuthenticated ? <AppTabs /> : <AuthStack />}
+        {isAuthenticated && requiresBiometricUnlock ? (
+          <View style={styles.biometricOverlay}>
+            <View style={styles.biometricCard}>
+              <View style={styles.biometricIconWrap}>
+                <Ionicons name="shield-checkmark-outline" size={30} color="#0F766E" />
+              </View>
+              <Text style={styles.biometricTitle}>
+                {t("biometricOverlayTitle", { defaultValue: "Unlock FuelFinder" })}
+              </Text>
+              <Text style={styles.biometricSubtitle}>
+                {t("biometricOverlayBody", {
+                  defaultValue: "Use your device biometrics to unlock the app and continue securely.",
+                })}
+              </Text>
+              <Pressable
+                style={[styles.biometricPrimaryButton, isUnlocking && styles.modalButtonDisabled]}
+                onPress={runBiometricUnlock}
+                disabled={isUnlocking}
+              >
+                {isUnlocking ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.biometricPrimaryButtonText}>
+                    {t("biometricRetryCta", { defaultValue: "Unlock now" })}
+                  </Text>
+                )}
+              </Pressable>
+              <Pressable style={styles.biometricSecondaryButton} onPress={signOut}>
+                <Text style={styles.biometricSecondaryButtonText}>
+                  {t("logout")}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+      </View>
     </NavigationContainer>
   );
 }
