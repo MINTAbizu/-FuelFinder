@@ -23,11 +23,13 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import FuelAlertMonitor from "./src/component/alerts/FuelAlertMonitor";
 import HomeScreen from "./src/component/screens/home/HomeScreen";
 import StationDetails from "./src/component/screens/home/StationDetails";
 import LoginScreen from "./src/component/screens/auth/LoginScreen";
 import RegisterScreen from "./src/component/screens/auth/RegisterScreen";
 import PhoneVerifyScreen from "./src/component/screens/auth/PhoneVerifyScreen";
+import AlertsScreen from "./src/component/screens/alerts/AlertsScreen";
 import {
   changeMyPassword,
   registerBiometricLogin,
@@ -50,6 +52,11 @@ import {
   saveBiometricLoginCredential,
   updateBiometricLoginMeta,
 } from "./src/component/services/biometricService";
+import {
+  ensureFuelAlertNotificationPermissionsAsync,
+  FUEL_ALERT_PREF_KEYS,
+  resetFuelAlertState,
+} from "./src/component/services/fuelAlertService";
 import * as Location from "expo-location";
 import * as LocalAuthentication from "expo-local-authentication";
 import { AuthProvider, useAuth } from "./src/component/context/AuthContext";
@@ -169,15 +176,16 @@ function ProfileScreen() {
   const PREF_KEYS = React.useMemo(
     () => ({
       darkMode: "ff_pref_dark_mode",
-      pushNotifs: "ff_pref_push_notifs",
+      pushNotifs: FUEL_ALERT_PREF_KEYS.pushNotifications,
+      nearbyFuelAlerts: FUEL_ALERT_PREF_KEYS.nearbyFuelAlerts,
       emailNotifs: "ff_pref_email_notifs",
       priceAlerts: "ff_pref_price_alerts",
-      locationSharing: "ff_pref_location_sharing",
+      locationSharing: FUEL_ALERT_PREF_KEYS.locationSharing,
       biometricUnlock: BIOMETRIC_PREF_KEY,
       dataSaver: "ff_pref_data_saver",
       autoRefreshPrices: "ff_pref_auto_refresh_prices",
       units: "ff_pref_units",
-      preferredFuel: "ff_pref_preferred_fuel",
+      preferredFuel: FUEL_ALERT_PREF_KEYS.preferredFuel,
     }),
     []
   );
@@ -185,6 +193,7 @@ function ProfileScreen() {
   const [prefs, setPrefs] = React.useState({
     darkMode: false,
     pushNotifs: true,
+    nearbyFuelAlerts: true,
     emailNotifs: true,
     priceAlerts: true,
     locationSharing: true,
@@ -238,6 +247,7 @@ function ProfileScreen() {
         const next = {
           darkMode: readBool(PREF_KEYS.darkMode, false),
           pushNotifs: readBool(PREF_KEYS.pushNotifs, true),
+          nearbyFuelAlerts: readBool(PREF_KEYS.nearbyFuelAlerts, true),
           emailNotifs: readBool(PREF_KEYS.emailNotifs, true),
           priceAlerts: readBool(PREF_KEYS.priceAlerts, true),
           locationSharing: readBool(PREF_KEYS.locationSharing, true),
@@ -343,9 +353,11 @@ function ProfileScreen() {
       try {
         qc.clear();
         await AsyncStorage.multiRemove(Object.values(PREF_KEYS));
+        await resetFuelAlertState();
         setPrefs({
           darkMode: false,
           pushNotifs: true,
+          nearbyFuelAlerts: true,
           emailNotifs: true,
           priceAlerts: true,
           locationSharing: true,
@@ -369,13 +381,38 @@ function ProfileScreen() {
     });
   }, [confirmAction, signOut, t]);
 
-  const handleLocationSharingToggle = React.useCallback(async () => {
-    const nextValue = !prefs.locationSharing;
-    if (!nextValue) {
-      setPrefs((current) => ({ ...current, locationSharing: false }));
-      await persistBool(PREF_KEYS.locationSharing, false);
-      return;
+  const enablePushNotificationsPreference = React.useCallback(async () => {
+    try {
+      const granted = await ensureFuelAlertNotificationPermissionsAsync();
+      if (!granted) {
+        Alert.alert(
+          t("pushPermissionTitle", { defaultValue: "Push notifications needed" }),
+          t("pushPermissionBody", {
+            defaultValue:
+              "Allow notifications so FuelFinder can alert you when your preferred fuel is available nearby.",
+          }),
+          [
+            { text: t("cancel"), style: "cancel" },
+            {
+              text: t("openSettingsAction", { defaultValue: "Open settings" }),
+              onPress: () => Linking.openSettings?.(),
+            },
+          ]
+        );
+        return false;
+      }
+
+      setPrefs((current) => ({ ...current, pushNotifs: true }));
+      await persistBool(PREF_KEYS.pushNotifs, true);
+      return true;
+    } catch (_error) {
+      Alert.alert(t("somethingWentWrong"));
+      return false;
     }
+  }, [PREF_KEYS.pushNotifs, persistBool, t]);
+
+  const ensureLocationSharingEnabled = React.useCallback(async () => {
+    if (prefs.locationSharing) return true;
 
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
@@ -393,15 +430,77 @@ function ProfileScreen() {
             },
           ]
         );
-        return;
+        return false;
       }
 
       setPrefs((current) => ({ ...current, locationSharing: true }));
       await persistBool(PREF_KEYS.locationSharing, true);
+      return true;
     } catch (_error) {
       Alert.alert(t("somethingWentWrong"));
+      return false;
     }
   }, [PREF_KEYS.locationSharing, persistBool, prefs.locationSharing, t]);
+
+  const handlePushNotificationsToggle = React.useCallback(async () => {
+    if (prefs.pushNotifs) {
+      setPrefs((current) => ({
+        ...current,
+        pushNotifs: false,
+        nearbyFuelAlerts: false,
+      }));
+      await persistBool(PREF_KEYS.pushNotifs, false);
+      await persistBool(PREF_KEYS.nearbyFuelAlerts, false);
+      return;
+    }
+
+    await enablePushNotificationsPreference();
+  }, [
+    PREF_KEYS.nearbyFuelAlerts,
+    PREF_KEYS.pushNotifs,
+    enablePushNotificationsPreference,
+    persistBool,
+    prefs.pushNotifs,
+  ]);
+
+  const handleLocationSharingToggle = React.useCallback(async () => {
+    const nextValue = !prefs.locationSharing;
+    if (!nextValue) {
+      setPrefs((current) => ({ ...current, locationSharing: false }));
+      await persistBool(PREF_KEYS.locationSharing, false);
+      return;
+    }
+
+    await ensureLocationSharingEnabled();
+  }, [
+    PREF_KEYS.locationSharing,
+    ensureLocationSharingEnabled,
+    persistBool,
+    prefs.locationSharing,
+  ]);
+
+  const handleNearbyFuelAlertsToggle = React.useCallback(async () => {
+    if (prefs.nearbyFuelAlerts) {
+      setPrefs((current) => ({ ...current, nearbyFuelAlerts: false }));
+      await persistBool(PREF_KEYS.nearbyFuelAlerts, false);
+      return;
+    }
+
+    const pushReady = await enablePushNotificationsPreference();
+    if (!pushReady) return;
+
+    const locationReady = await ensureLocationSharingEnabled();
+    if (!locationReady) return;
+
+    setPrefs((current) => ({ ...current, nearbyFuelAlerts: true }));
+    await persistBool(PREF_KEYS.nearbyFuelAlerts, true);
+  }, [
+    PREF_KEYS.nearbyFuelAlerts,
+    enablePushNotificationsPreference,
+    ensureLocationSharingEnabled,
+    persistBool,
+    prefs.nearbyFuelAlerts,
+  ]);
 
   const handleBiometricToggle = React.useCallback(async () => {
     if (prefs.biometricUnlock) {
@@ -1692,11 +1791,36 @@ function ProfileScreen() {
           icon="notifications-outline"
           title={t("pushNotifications")}
           subtitle={t("pushNotificationsSubtitle")}
-          onPress={() => togglePref("pushNotifs", PREF_KEYS.pushNotifs)}
+          onPress={handlePushNotificationsToggle}
           right={
             <Switch
               value={prefs.pushNotifs}
-              onValueChange={() => togglePref("pushNotifs", PREF_KEYS.pushNotifs)}
+              onValueChange={handlePushNotificationsToggle}
+            />
+          }
+        />
+        <SettingRow
+          icon="navigate-outline"
+          title={t("nearbyFuelAlerts", { defaultValue: "Nearby fuel alerts" })}
+          subtitle={
+            !prefs.pushNotifs
+              ? t("nearbyFuelAlertsNeedsPush", {
+                  defaultValue: "Turn on push notifications to receive nearby fuel alerts.",
+                })
+              : !prefs.locationSharing
+                ? t("nearbyFuelAlertsNeedsLocation", {
+                    defaultValue: "Keep location sharing enabled so FuelFinder can spot stations near your route.",
+                  })
+                : t("nearbyFuelAlertsSubtitle", {
+                    defaultValue:
+                      "Notify me when my preferred fuel is available at a nearby station while I travel.",
+                  })
+          }
+          onPress={handleNearbyFuelAlertsToggle}
+          right={
+            <Switch
+              value={prefs.nearbyFuelAlerts}
+              onValueChange={handleNearbyFuelAlertsToggle}
             />
           }
         />
@@ -1974,7 +2098,7 @@ function AppTabs() {
       <Tab.Screen
         name="Alerts"
         options={{ title: t("alerts") }}
-        children={() => <PlaceholderScreen title={t("alerts")} />}
+        component={AlertsScreen}
       />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: t("profile") }} />
     </Tab.Navigator>
@@ -2108,6 +2232,7 @@ function AppNavigator() {
     <NavigationContainer>
       <View style={styles.navigatorRoot}>
         {isAuthenticated ? <AppTabs /> : <AuthStack />}
+        <FuelAlertMonitor enabled={isAuthenticated && !requiresBiometricUnlock} />
         {isAuthenticated && requiresBiometricUnlock ? (
           <View style={styles.biometricOverlay}>
             <View style={styles.biometricCard}>

@@ -67,31 +67,38 @@ function getQueueLength(station) {
   return value;
 }
 
-function getInventoryLiters(station, fuelType) {
+function getInventoryAmount(station, fuelType) {
   const inventory = station?.fuelInventory || {};
   if (fuelType === "diesel") return Number(inventory?.dieselLiters || 0);
-  if (fuelType === "electric") return Number(inventory?.electricUnits || inventory?.electricCount || 0);
+  if (fuelType === "electric") {
+    return Number(inventory?.electricUnits || inventory?.electricCount || 0);
+  }
   return Number(inventory?.gasolineLiters || 0);
 }
 
 function stationSupportsPreferredFuel(station, fuelType) {
   const supportedFuels = station?.supportedFuels || {};
   if (fuelType === "diesel") {
-    return supportedFuels.diesel === true || getInventoryLiters(station, "diesel") > 0;
+    return supportedFuels.diesel === true || getInventoryAmount(station, "diesel") > 0;
   }
   if (fuelType === "electric") {
-    return supportedFuels.electric === true || getInventoryLiters(station, "electric") > 0;
+    const electricInventory = Number(
+      station?.fuelInventory?.electricUnits ||
+        station?.fuelInventory?.electricCount ||
+        (supportedFuels.electric === true ? station?.fuelInventory?.otherLiters || 0 : 0)
+    );
+    return supportedFuels.electric === true || electricInventory > 0;
   }
-  return supportedFuels.gasoline === true || getInventoryLiters(station, "gasoline") > 0;
+  return supportedFuels.gasoline === true || getInventoryAmount(station, "gasoline") > 0;
 }
 
 function stationHasAvailablePreferredFuel(station, fuelType) {
   const status = String(station?.fuel_status || station?.fuelStatus || "").trim().toLowerCase();
-  const liters = getInventoryLiters(station, fuelType);
+  const amount = getInventoryAmount(station, fuelType);
   if (fuelType === "electric") {
     return stationSupportsPreferredFuel(station, fuelType) && status !== "empty";
   }
-  if (liters > 0) return true;
+  if (amount > 0) return true;
   return stationSupportsPreferredFuel(station, fuelType) && (status === "available" || status === "limited");
 }
 
@@ -101,19 +108,57 @@ function getFuelLabel(preferredFuel) {
   return "Gasoline";
 }
 
+function getAvailabilityLabel(statusValue) {
+  const status = String(statusValue || "").trim().toLowerCase();
+  if (status === "available") return "Available now";
+  if (status === "limited") return "Limited stock";
+  if (status === "empty") return "Out of stock";
+  return "Live update";
+}
+
 function formatDistance(distanceKm) {
   if (!Number.isFinite(distanceKm)) return "nearby";
   if (distanceKm < 1) return `${Math.max(100, Math.round(distanceKm * 1000))} m`;
   return `${distanceKm.toFixed(1)} km`;
 }
 
+function buildInventorySummary(station, preferredFuel) {
+  const inventory = station?.fuelInventory || {};
+  if (preferredFuel === "diesel") {
+    const liters = Number(inventory?.dieselLiters || 0);
+    return liters > 0 ? `~${Math.round(liters)} L remaining` : "";
+  }
+  if (preferredFuel === "electric") {
+    const units = Number(
+      inventory?.electricUnits ||
+        inventory?.electricCount ||
+        (station?.supportedFuels?.electric ? inventory?.otherLiters || 0 : 0)
+    );
+    return units > 0 ? `~${Math.round(units)} charging spots ready` : "";
+  }
+  const liters = Number(inventory?.gasolineLiters || 0);
+  return liters > 0 ? `~${Math.round(liters)} L remaining` : "";
+}
+
+function buildQueueSummary(queueLength) {
+  if (queueLength > 0) return `${queueLength}-car queue`;
+  return "Queue looks light";
+}
+
 function buildAlertBody(station, preferredFuel, distanceKm) {
   const queueLength = getQueueLength(station);
   const distanceText = formatDistance(distanceKm);
-  const queueText = queueLength > 0 ? `Queue ${queueLength} cars` : "Queue looks light";
+  const queueText = buildQueueSummary(queueLength);
+  const inventorySummary = buildInventorySummary(station, preferredFuel);
+  const availabilityText = getAvailabilityLabel(station?.fuel_status || station?.fuelStatus);
   const address = String(station?.address || "").trim();
-  const addressText = address ? ` • ${address}` : "";
-  return `${getFuelLabel(preferredFuel)} is available ${distanceText} away at ${station?.name || "a nearby station"}. ${queueText}${addressText}`;
+  const detailParts = [
+    `${getFuelLabel(preferredFuel)} ${availabilityText.toLowerCase()}`,
+    `${distanceText} away`,
+    inventorySummary,
+    queueText,
+  ].filter(Boolean);
+  return `${station?.name || "Nearby station"}: ${detailParts.join(" - ")}${address ? ` - ${address}` : ""}`;
 }
 
 function buildAlertCandidate(station, preferredFuel, currentLocation) {
@@ -258,6 +303,10 @@ export async function clearFuelAlertHistory() {
   return [];
 }
 
+export async function resetFuelAlertState() {
+  await AsyncStorage.multiRemove([ALERT_HISTORY_KEY, ALERT_LEDGER_KEY]);
+}
+
 export async function markFuelAlertsRead() {
   const alerts = await loadFuelAlertHistory();
   const nextAlerts = alerts.map((alert) => ({ ...alert, readAt: alert.readAt || new Date().toISOString() }));
@@ -301,6 +350,10 @@ export async function triggerPreferredFuelAlert(candidate) {
 
   const title = `${getFuelLabel(candidate.preferredFuel)} nearby`;
   const body = buildAlertBody(candidate.station, candidate.preferredFuel, candidate.distanceKm);
+  const queueSummary = buildQueueSummary(candidate.queueLength);
+  const availabilityLabel = getAvailabilityLabel(
+    candidate.station?.fuel_status || candidate.station?.fuelStatus
+  );
   const event = {
     id: `fuel_alert_${Date.now()}`,
     type: "preferred_fuel_nearby",
@@ -312,9 +365,13 @@ export async function triggerPreferredFuelAlert(candidate) {
     stationName: String(candidate.station?.name || "Fuel Station"),
     preferredFuel: candidate.preferredFuel,
     distanceKm: Number(candidate.distanceKm.toFixed(2)),
+    distanceLabel: formatDistance(candidate.distanceKm),
     queueLength: candidate.queueLength,
+    queueSummary,
     availability: String(candidate.station?.fuel_status || candidate.station?.fuelStatus || ""),
+    availabilityLabel,
     address: String(candidate.station?.address || ""),
+    inventorySummary: buildInventorySummary(candidate.station, candidate.preferredFuel),
     triggeredAt: new Date().toISOString(),
     readAt: null,
   };
@@ -323,19 +380,23 @@ export async function triggerPreferredFuelAlert(candidate) {
   await saveFuelAlertHistory([event, ...history]);
 
   await configureFuelAlertNotificationsAsync();
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title,
-      body,
-      sound: "default",
-      data: {
-        type: event.type,
-        stationId: event.stationId,
-        preferredFuel: event.preferredFuel,
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        sound: "default",
+        data: {
+          type: event.type,
+          stationId: event.stationId,
+          preferredFuel: event.preferredFuel,
+        },
       },
-    },
-    trigger: null,
-  });
+      trigger: null,
+    });
+  } catch (_error) {
+    // Preserve the alert in-app even if the OS notification cannot be shown.
+  }
 
   ledger[ledgerKey] = Date.now();
   await saveFuelAlertLedger(ledger);

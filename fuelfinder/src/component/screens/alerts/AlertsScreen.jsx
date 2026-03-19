@@ -24,13 +24,19 @@ function formatAlertTime(value) {
   return date.toLocaleString();
 }
 
+function formatFuelLabel(value) {
+  if (value === "diesel") return "Diesel";
+  if (value === "electric") return "Electric";
+  return "Gasoline";
+}
+
 export default function AlertsScreen() {
   const { t } = useLanguage();
   const [alerts, setAlerts] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
 
-  const refreshAlerts = useCallback(async () => {
-    const nextAlerts = await loadFuelAlertHistory();
+  const refreshAlerts = useCallback(async (markRead = false) => {
+    const nextAlerts = markRead ? await markFuelAlertsRead() : await loadFuelAlertHistory();
     setAlerts(nextAlerts);
   }, []);
 
@@ -39,7 +45,9 @@ export default function AlertsScreen() {
       let mounted = true;
       (async () => {
         const nextAlerts = await markFuelAlertsRead();
-        if (mounted) setAlerts(nextAlerts);
+        if (mounted) {
+          setAlerts(nextAlerts);
+        }
       })();
 
       return () => {
@@ -51,7 +59,7 @@ export default function AlertsScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await refreshAlerts();
+      await refreshAlerts(false);
     } finally {
       setRefreshing(false);
     }
@@ -74,7 +82,7 @@ export default function AlertsScreen() {
           <Text style={styles.title}>{t("alerts")}</Text>
           <Text style={styles.subtitle}>
             {t("alertsInboxSubtitle", {
-              defaultValue: "Nearby preferred-fuel alerts and important delivery moments appear here.",
+              defaultValue: "Preferred-fuel alerts appear here with live station details while you travel.",
             })}
           </Text>
         </View>
@@ -95,7 +103,8 @@ export default function AlertsScreen() {
           </Text>
           <Text style={styles.emptySubtitle}>
             {t("alertsEmptyBody", {
-              defaultValue: "Enable preferred-fuel alerts and keep location sharing on to get nearby station notifications.",
+              defaultValue:
+                "Turn on nearby fuel alerts, keep location sharing enabled, and FuelFinder will notify you when your preferred fuel is available nearby.",
             })}
           </Text>
         </View>
@@ -104,7 +113,7 @@ export default function AlertsScreen() {
       {alerts.map((alert) => (
         <View key={alert.id} style={[styles.alertCard, !alert.readAt && styles.alertCardUnread]}>
           <View style={styles.alertIconWrap}>
-            <Ionicons name="car-sport-outline" size={18} color="#0F766E" />
+            <Ionicons name="flash-outline" size={18} color="#0F766E" />
           </View>
           <View style={styles.alertBody}>
             <View style={styles.alertTopRow}>
@@ -112,6 +121,7 @@ export default function AlertsScreen() {
               <Text style={styles.alertTime}>{formatAlertTime(alert.triggeredAt)}</Text>
             </View>
             <Text style={styles.alertText}>{alert.body}</Text>
+
             <View style={styles.metaRow}>
               {alert.stationName ? (
                 <View style={styles.metaChip}>
@@ -120,13 +130,36 @@ export default function AlertsScreen() {
               ) : null}
               {alert.preferredFuel ? (
                 <View style={styles.metaChip}>
-                  <Text style={styles.metaChipText}>{alert.preferredFuel}</Text>
+                  <Text style={styles.metaChipText}>{formatFuelLabel(alert.preferredFuel)}</Text>
                 </View>
               ) : null}
-              {Number.isFinite(Number(alert.distanceKm)) ? (
+              {alert.distanceLabel ? (
                 <View style={styles.metaChip}>
-                  <Text style={styles.metaChipText}>{Number(alert.distanceKm).toFixed(1)} km</Text>
+                  <Text style={styles.metaChipText}>{alert.distanceLabel}</Text>
                 </View>
+              ) : null}
+            </View>
+
+            <View style={styles.detailStack}>
+              {alert.availabilityLabel ? (
+                <Text style={styles.detailText}>
+                  {t("alertsAvailabilityLabel", { defaultValue: "Availability" })}: {alert.availabilityLabel}
+                </Text>
+              ) : null}
+              {alert.inventorySummary ? (
+                <Text style={styles.detailText}>
+                  {t("alertsInventoryLabel", { defaultValue: "Fuel details" })}: {alert.inventorySummary}
+                </Text>
+              ) : null}
+              {alert.queueSummary ? (
+                <Text style={styles.detailText}>
+                  {t("alertsQueueLabel", { defaultValue: "Queue" })}: {alert.queueSummary}
+                </Text>
+              ) : null}
+              {alert.address ? (
+                <Text style={styles.detailText}>
+                  {t("alertsAddressLabel", { defaultValue: "Address" })}: {alert.address}
+                </Text>
               ) : null}
             </View>
           </View>
@@ -268,5 +301,15 @@ const styles = StyleSheet.create({
     color: "#1D4ED8",
     fontSize: 11,
     fontWeight: "800",
+  },
+  detailStack: {
+    marginTop: 10,
+    gap: 4,
+  },
+  detailText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#475569",
+    fontWeight: "700",
   },
 });

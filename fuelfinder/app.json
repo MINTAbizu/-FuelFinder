@@ -44,6 +44,7 @@
           "faceIDPermission": "Allow FuelFinder to use Face ID to unlock your account securely."
         }
       ],
+      "expo-notifications",
       "expo-secure-store",
       "./plugins/withAndroidX",
       [
