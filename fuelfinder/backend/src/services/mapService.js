@@ -16,6 +16,7 @@ const MAX_CACHE_ENTRIES = 200;
 
 const nearbyStationsCache = new Map();
 const routeCache = new Map();
+const nearbyStationsInflightRequests = new Map();
 
 function getValidCacheEntry(cache, key) {
   const entry = cache.get(key);
@@ -135,6 +136,10 @@ async function fetchNearbyFuelStations(lat, lon, radiusMeters = 12000) {
     return cachedStations;
   }
 
+  if (nearbyStationsInflightRequests.has(cacheKey)) {
+    return nearbyStationsInflightRequests.get(cacheKey);
+  }
+
   const staleStations = getStaleCacheEntry(nearbyStationsCache, cacheKey);
   const query = `
 [out:json][timeout:25];
@@ -146,57 +151,67 @@ async function fetchNearbyFuelStations(lat, lon, radiusMeters = 12000) {
 out center tags;
 `;
 
-  let lastErr;
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: query
-      });
-      if (!response.ok) throw new Error(`Overpass request failed: ${response.status}`);
+  const requestPromise = (async () => {
+    let lastErr;
+    for (const endpoint of OVERPASS_ENDPOINTS) {
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain" },
+          body: query
+        });
+        if (!response.ok) throw new Error(`Overpass request failed: ${response.status}`);
 
-      const data = await response.json();
-      const elements = Array.isArray(data?.elements) ? data.elements : [];
-      const stations = elements
-        .map((element) => {
-          const tags = element?.tags || {};
-          const latitude = Number(element?.lat ?? element?.center?.lat);
-          const longitude = Number(element?.lon ?? element?.center?.lon);
-          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+        const data = await response.json();
+        const elements = Array.isArray(data?.elements) ? data.elements : [];
+        const stations = elements
+          .map((element) => {
+            const tags = element?.tags || {};
+            const latitude = Number(element?.lat ?? element?.center?.lat);
+            const longitude = Number(element?.lon ?? element?.center?.lon);
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
 
-          return {
-            id: `${String(element.type || "node")}-${String(element.id || Math.random())}`,
-            stationId: "",
-            name: String(tags.name || tags.brand || "Fuel Station"),
-            latitude,
-            longitude,
-            fuel_status: "available",
-            queue_length: 0,
-            supportedFuels: resolveSupportedFuels(tags),
-            image: "",
-            address: buildAddress(tags, latitude, longitude),
-            contact: tags.phone || tags["contact:phone"] || ""
-          };
-        })
-        .filter(Boolean);
+            return {
+              id: `${String(element.type || "node")}-${String(element.id || Math.random())}`,
+              stationId: "",
+              name: String(tags.name || tags.brand || "Fuel Station"),
+              latitude,
+              longitude,
+              fuel_status: "available",
+              queue_length: 0,
+              supportedFuels: resolveSupportedFuels(tags),
+              image: "",
+              address: buildAddress(tags, latitude, longitude),
+              contact: tags.phone || tags["contact:phone"] || ""
+            };
+          })
+          .filter(Boolean);
 
-      return setCacheEntry(
-        nearbyStationsCache,
-        cacheKey,
-        stations,
-        NEARBY_STATIONS_CACHE_TTL_MS
-      );
-    } catch (err) {
-      lastErr = err;
+        return setCacheEntry(
+          nearbyStationsCache,
+          cacheKey,
+          stations,
+          NEARBY_STATIONS_CACHE_TTL_MS
+        );
+      } catch (err) {
+        lastErr = err;
+      }
     }
-  }
 
-  if (staleStations) {
-    return staleStations;
-  }
+    if (staleStations) {
+      return staleStations;
+    }
 
-  throw lastErr || new Error("Failed to load fuel stations.");
+    throw lastErr || new Error("Failed to load fuel stations.");
+  })();
+
+  nearbyStationsInflightRequests.set(cacheKey, requestPromise);
+
+  try {
+    return await requestPromise;
+  } finally {
+    nearbyStationsInflightRequests.delete(cacheKey);
+  }
 }
 
 async function fetchDrivingRoute(fromLat, fromLon, toLat, toLon) {

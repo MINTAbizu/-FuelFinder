@@ -55,7 +55,9 @@ import {
 import {
   ensureFuelAlertNotificationPermissionsAsync,
   FUEL_ALERT_PREF_KEYS,
+  loadUnreadFuelAlertCount,
   resetFuelAlertState,
+  subscribeToFuelAlertHistory,
 } from "./src/component/services/fuelAlertService";
 import * as Location from "expo-location";
 import * as LocalAuthentication from "expo-local-authentication";
@@ -2063,6 +2065,40 @@ function AppTabs() {
   const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const tabBarHeight = 64 + insets.bottom;
+  const [alertBadgeCount, setAlertBadgeCount] = React.useState(0);
+
+  React.useEffect(() => {
+    let mounted = true;
+
+    const syncUnreadCount = async () => {
+      try {
+        const unreadCount = await loadUnreadFuelAlertCount();
+        if (mounted) {
+          setAlertBadgeCount(unreadCount);
+        }
+      } catch (_error) {
+        if (mounted) {
+          setAlertBadgeCount(0);
+        }
+      }
+    };
+
+    syncUnreadCount();
+    const unsubscribe = subscribeToFuelAlertHistory((alerts) => {
+      if (!mounted) return;
+      const unreadCount = (alerts || []).reduce(
+        (count, alert) => count + (alert?.readAt ? 0 : 1),
+        0
+      );
+      setAlertBadgeCount(unreadCount);
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -2097,7 +2133,11 @@ function AppTabs() {
       />
       <Tab.Screen
         name="Alerts"
-        options={{ title: t("alerts") }}
+        options={{
+          title: t("alerts"),
+          tabBarBadge: alertBadgeCount > 0 ? (alertBadgeCount > 99 ? "99+" : alertBadgeCount) : undefined,
+          tabBarBadgeStyle: styles.alertTabBadge,
+        }}
         component={AlertsScreen}
       />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: t("profile") }} />
@@ -2373,6 +2413,15 @@ const styles = StyleSheet.create({
     color: "#0F172A",
     fontSize: 14,
     fontWeight: "800",
+  },
+  alertTabBadge: {
+    backgroundColor: "#DC2626",
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "900",
+    minWidth: 18,
+    height: 18,
+    lineHeight: 12,
   },
   placeholderScreen: {
     flex: 1,

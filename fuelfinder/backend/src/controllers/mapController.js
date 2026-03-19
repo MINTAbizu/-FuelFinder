@@ -40,21 +40,6 @@ function setCachedNearbyResponse(cacheKey, value) {
   }
 }
 
-function normalizeStationName(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
-}
-
-function areLikelySameStation(sourceName, dbName) {
-  const a = normalizeStationName(sourceName);
-  const b = normalizeStationName(dbName);
-  if (!a || !b) return false;
-  if (a === b) return true;
-  return a.includes(b) || b.includes(a);
-}
-
 function isPlaceholderAddress(value) {
   const text = String(value || "").trim().toLowerCase();
   if (!text) return true;
@@ -69,24 +54,15 @@ function mapFuelStatusForClient(value) {
   return "empty";
 }
 
-async function findNearbyCanonicalStation(station) {
-  const lat = Number(station?.latitude);
-  const lon = Number(station?.longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+function hasMeaningfulCoordinateChange(currentLat, currentLon, nextLat, nextLon) {
+  if (!Number.isFinite(currentLat) || !Number.isFinite(currentLon)) return true;
+  return Math.abs(currentLat - nextLat) > 0.00001 || Math.abs(currentLon - nextLon) > 0.00001;
+}
 
-  const nearby = await Station.find({
-    location: {
-      $near: {
-        $geometry: { type: "Point", coordinates: [lon, lat] },
-        $maxDistance: 120
-      }
-    }
-  })
-    .select(STATION_SYNC_SELECT)
-    .limit(10)
-    .lean();
-
-  return nearby.find((item) => areLikelySameStation(station?.name, item?.name)) || nearby[0] || null;
+function isDuplicateKeyBulkWriteError(error) {
+  if (error?.code === 11000) return true;
+  if (!Array.isArray(error?.writeErrors)) return false;
+  return error.writeErrors.every((writeError) => writeError?.code === 11000);
 }
 
 function buildClientStationPayload(doc, fallback = {}) {
@@ -112,6 +88,21 @@ function buildClientStationPayload(doc, fallback = {}) {
     latitude: Number.isFinite(docLat) ? docLat : (Number.isFinite(fallbackLat) ? fallbackLat : null),
     longitude: Number.isFinite(docLon) ? docLon : (Number.isFinite(fallbackLon) ? fallbackLon : null),
     stationId: String(doc?._id || fallback?.stationId || "")
+  };
+}
+
+function buildStationInsertPayload(station, sourceId, lat, lon) {
+  const incomingAddress = String(station?.address || "").trim();
+
+  return {
+    name: String(station?.name || "Fuel Station").trim(),
+    address: incomingAddress || "Address not listed",
+    contact: String(station?.contact || "").trim(),
+    externalSource: "osm",
+    externalSourceId: sourceId,
+    fuelStatus: "partial",
+    isActive: true,
+    location: { type: "Point", coordinates: [lon, lat] }
   };
 }
 
@@ -146,7 +137,7 @@ function buildStationSyncPatch(doc, station, sourceId, lat, lon) {
     patch.contact = nextContact;
   }
 
-  if (!Number.isFinite(currentLat) || !Number.isFinite(currentLon) || currentLat !== lat || currentLon !== lon) {
+  if (hasMeaningfulCoordinateChange(currentLat, currentLon, lat, lon)) {
     patch.location = { type: "Point", coordinates: [lon, lat] };
   }
 
@@ -158,10 +149,23 @@ function buildStationSyncPatch(doc, station, sourceId, lat, lon) {
 }
 
 async function attachBackendStationIds(stations) {
+  const normalizedStations = (stations || []).map((station) => {
+    const sourceId = String(station?.id || "").trim();
+    const lat = Number(station?.latitude);
+    const lon = Number(station?.longitude);
+
+    return {
+      station,
+      sourceId,
+      lat,
+      lon
+    };
+  });
+
   const sourceIds = Array.from(
     new Set(
-      (stations || [])
-        .map((station) => String(station?.id || "").trim())
+      normalizedStations
+        .map((entry) => entry.sourceId)
         .filter(Boolean)
     )
   );
@@ -179,62 +183,92 @@ async function attachBackendStationIds(stations) {
     existingDocs.map((doc) => [String(doc?.externalSourceId || "").trim(), doc])
   );
 
-  const mappedStations = await Promise.all(
-    (stations || []).map(async (station) => {
-      const lat = Number(station?.latitude);
-      const lon = Number(station?.longitude);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return station;
+  const createOperations = [];
+  const missingSourceIds = [];
+  const missingSourceIdSet = new Set();
 
-      const sourceId = String(station?.id || "").trim();
-      if (!sourceId) return station;
+  normalizedStations.forEach(({ station, sourceId, lat, lon }) => {
+    if (!sourceId || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    if (docsBySourceId.has(sourceId)) return;
+    if (missingSourceIdSet.has(sourceId)) return;
 
-      let doc = docsBySourceId.get(sourceId) || null;
-
-      if (!doc) {
-        doc = await findNearbyCanonicalStation(station);
-      }
-
-      if (!doc) {
-        const incomingAddress = String(station?.address || "").trim();
-        const createdDoc = await Station.create({
-          name: String(station?.name || "Fuel Station").trim(),
-          address: incomingAddress || "Address not listed",
-          contact: String(station?.contact || "").trim(),
+    missingSourceIdSet.add(sourceId);
+    missingSourceIds.push(sourceId);
+    createOperations.push({
+      updateOne: {
+        filter: {
           externalSource: "osm",
-          externalSourceId: sourceId,
-          fuelStatus: "partial",
-          isActive: true,
-          location: { type: "Point", coordinates: [lon, lat] }
-        });
-
-        const normalizedCreatedDoc =
-          typeof createdDoc?.toObject === "function" ? createdDoc.toObject() : createdDoc;
-        docsBySourceId.set(sourceId, normalizedCreatedDoc);
-
-        return buildClientStationPayload(normalizedCreatedDoc, {
-          ...station,
-          latitude: lat,
-          longitude: lon
-        });
+          externalSourceId: sourceId
+        },
+        update: {
+          $setOnInsert: buildStationInsertPayload(station, sourceId, lat, lon)
+        },
+        upsert: true
       }
+    });
+  });
 
-      const patch = buildStationSyncPatch(doc, station, sourceId, lat, lon);
-      if (patch) {
-        await Station.updateOne({ _id: doc._id }, { $set: patch });
-        doc = { ...doc, ...patch };
+  if (createOperations.length) {
+    try {
+      await Station.bulkWrite(createOperations, { ordered: false });
+    } catch (error) {
+      if (!isDuplicateKeyBulkWriteError(error)) {
+        throw error;
       }
+    }
 
-      docsBySourceId.set(sourceId, doc);
-
-      return buildClientStationPayload(doc, {
-        ...station,
-        latitude: lat,
-        longitude: lon
-      });
+    const createdDocs = await Station.find({
+      externalSource: "osm",
+      externalSourceId: { $in: missingSourceIds }
     })
-  );
+      .select(STATION_SYNC_SELECT)
+      .lean();
 
-  return mappedStations;
+    createdDocs.forEach((doc) => {
+      docsBySourceId.set(String(doc?.externalSourceId || "").trim(), doc);
+    });
+  }
+
+  const updateOperations = [];
+  normalizedStations.forEach(({ station, sourceId, lat, lon }) => {
+    if (!sourceId || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+    const doc = docsBySourceId.get(sourceId);
+    if (!doc) return;
+
+    const patch = buildStationSyncPatch(doc, station, sourceId, lat, lon);
+    if (!patch) return;
+
+    updateOperations.push({
+      updateOne: {
+        filter: { _id: doc._id },
+        update: { $set: patch }
+      }
+    });
+
+    docsBySourceId.set(sourceId, { ...doc, ...patch });
+  });
+
+  if (updateOperations.length) {
+    await Station.bulkWrite(updateOperations, { ordered: false });
+  }
+
+  return normalizedStations.map(({ station, sourceId, lat, lon }) => {
+    const doc = docsBySourceId.get(sourceId);
+    if (!doc) {
+      return {
+        ...station,
+        latitude: Number.isFinite(lat) ? lat : station?.latitude,
+        longitude: Number.isFinite(lon) ? lon : station?.longitude
+      };
+    }
+
+    return buildClientStationPayload(doc, {
+      ...station,
+      latitude: lat,
+      longitude: lon
+    });
+  });
 }
 
 exports.getNearbyFuelStations = async (req, res) => {

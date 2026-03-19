@@ -1,4 +1,5 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
   FlatList,
@@ -33,8 +34,90 @@ const DEFAULT_REGION = {
 const STATUS_FILTERS = ["all", "available", "limited", "empty"];
 const FUEL_FILTERS = ["any", "gasoline", "diesel", "other"];
 const SORT_OPTIONS = ["distance", "queue", "name"];
+const HOME_STATIONS_CACHE_KEY = "ff_home_nearby_stations_v1";
+const HOME_STATIONS_CACHE_TTL_MS = 1000 * 60 * 10;
+const HOME_STATIONS_MEMORY_TTL_MS = 1000 * 45;
+const LOCATION_REFRESH_THRESHOLD_DEGREES = 0.01;
+const nearbyStationsMemoryCache = new Map();
+const nearbyStationsInflightRequests = new Map();
 
 // Translations are handled by i18next (`src/i18n/locales/*.json`).
+
+function buildNearbyStationsCacheKey(basePoint, radiusMeters = 12000) {
+  const lat = Number(basePoint?.latitude);
+  const lon = Number(basePoint?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return "";
+
+  return [lat.toFixed(3), lon.toFixed(3), Math.round(Number(radiusMeters) || 0)].join(":");
+}
+
+function getNearbyStationsFromMemory(cacheKey) {
+  const entry = nearbyStationsMemoryCache.get(cacheKey);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    nearbyStationsMemoryCache.delete(cacheKey);
+    return null;
+  }
+  return entry.stations;
+}
+
+function setNearbyStationsInMemory(cacheKey, stations) {
+  if (!cacheKey) return;
+
+  nearbyStationsMemoryCache.set(cacheKey, {
+    stations,
+    expiresAt: Date.now() + HOME_STATIONS_MEMORY_TTL_MS,
+  });
+}
+
+async function readCachedNearbyStations() {
+  try {
+    const raw = await AsyncStorage.getItem(HOME_STATIONS_CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.savedAt <= Date.now() - HOME_STATIONS_CACHE_TTL_MS) {
+      return null;
+    }
+
+    if (!Array.isArray(parsed.stations)) {
+      return null;
+    }
+
+    if (parsed.cacheKey) {
+      setNearbyStationsInMemory(parsed.cacheKey, parsed.stations);
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function saveCachedNearbyStations(basePoint, stations, radiusMeters = 12000) {
+  const cacheKey = buildNearbyStationsCacheKey(basePoint, radiusMeters);
+  if (!cacheKey || !Array.isArray(stations)) return;
+
+  setNearbyStationsInMemory(cacheKey, stations);
+
+  try {
+    await AsyncStorage.setItem(
+      HOME_STATIONS_CACHE_KEY,
+      JSON.stringify({
+        cacheKey,
+        savedAt: Date.now(),
+        center: {
+          latitude: Number(basePoint?.latitude || 0),
+          longitude: Number(basePoint?.longitude || 0),
+        },
+        radiusMeters,
+        stations,
+      })
+    );
+  } catch {
+    // Ignore cache persistence failures and keep the live request path responsive.
+  }
+}
 
 const toDistanceKm = (from, to) => {
   if (!from || !to) return null;
@@ -49,12 +132,38 @@ const toDistanceKm = (from, to) => {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
-async function fetchNearbyFuelStations(basePoint, radiusMeters = 12000) {
+async function fetchNearbyFuelStations(basePoint, radiusMeters = 12000, { forceRefresh = false } = {}) {
   const lat = Number(basePoint?.latitude);
   const lon = Number(basePoint?.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
-  const { data } = await api.get("/map/nearby-fuel", { params: { lat, lon, radius: radiusMeters } });
-  return Array.isArray(data?.stations) ? data.stations : [];
+
+  const cacheKey = buildNearbyStationsCacheKey(basePoint, radiusMeters);
+  if (!forceRefresh) {
+    const cachedStations = getNearbyStationsFromMemory(cacheKey);
+    if (cachedStations) {
+      return cachedStations;
+    }
+  }
+
+  if (nearbyStationsInflightRequests.has(cacheKey)) {
+    return nearbyStationsInflightRequests.get(cacheKey);
+  }
+
+  const requestPromise = api
+    .get("/map/nearby-fuel", { params: { lat, lon, radius: radiusMeters } })
+    .then(({ data }) => {
+      const nextStations = Array.isArray(data?.stations) ? data.stations : [];
+      setNearbyStationsInMemory(cacheKey, nextStations);
+      return nextStations;
+    });
+
+  nearbyStationsInflightRequests.set(cacheKey, requestPromise);
+
+  try {
+    return await requestPromise;
+  } finally {
+    nearbyStationsInflightRequests.delete(cacheKey);
+  }
 }
 
 async function fetchStationPromotions(stationIds, limit = 6) {
@@ -184,6 +293,29 @@ export default function HomeScreen({ navigation }) {
   );
 
   useEffect(() => {
+    let active = true;
+
+    (async () => {
+      const cached = await readCachedNearbyStations();
+      if (!active || !cached?.stations?.length) return;
+
+      setStations((current) => (current.length ? current : cached.stations));
+      const cachedLat = Number(cached?.center?.latitude);
+      const cachedLon = Number(cached?.center?.longitude);
+      if (Number.isFinite(cachedLat) && Number.isFinite(cachedLon)) {
+        setMapCenter({
+          latitude: cachedLat,
+          longitude: cachedLon,
+        });
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     let mounted = true;
     (async () => {
       try {
@@ -195,8 +327,37 @@ export default function HomeScreen({ navigation }) {
         }
 
         if (mounted) setHasLocationPermission(true);
+        const lastKnown = await Location.getLastKnownPositionAsync({
+          maxAge: 1000 * 60 * 15,
+          requiredAccuracy: 250,
+        });
+        if (mounted && lastKnown?.coords) {
+          setLocation(lastKnown.coords);
+          setMapCenter({
+            latitude: Number(lastKnown.coords.latitude || DEFAULT_REGION.latitude),
+            longitude: Number(lastKnown.coords.longitude || DEFAULT_REGION.longitude),
+          });
+        }
+
         const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        if (mounted) setLocation(current.coords);
+        if (mounted) {
+          const shouldRefreshFromCurrent =
+            !lastKnown?.coords ||
+            Math.abs(Number(lastKnown.coords.latitude || 0) - Number(current.coords.latitude || 0)) >
+              LOCATION_REFRESH_THRESHOLD_DEGREES ||
+            Math.abs(Number(lastKnown.coords.longitude || 0) - Number(current.coords.longitude || 0)) >
+              LOCATION_REFRESH_THRESHOLD_DEGREES;
+
+          if (shouldRefreshFromCurrent) {
+            loadedRef.current = false;
+          }
+
+          setLocation(current.coords);
+          setMapCenter({
+            latitude: Number(current.coords.latitude || DEFAULT_REGION.latitude),
+            longitude: Number(current.coords.longitude || DEFAULT_REGION.longitude),
+          });
+        }
 
         watcherRef.current = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.Balanced, timeInterval: 8000, distanceInterval: 30 },
@@ -217,9 +378,16 @@ export default function HomeScreen({ navigation }) {
     };
   }, [t]);
 
-  const loadNearbyStations = useCallback(async () => {
+  const loadNearbyStations = useCallback(async ({ forceRefresh = false } = {}) => {
     const basePoint = location;
     if (!basePoint) {
+      const cached = await readCachedNearbyStations();
+      if (cached?.stations?.length) {
+        setStations(cached.stations);
+        setStationsError("");
+        return;
+      }
+
       setStations([]);
       setStationsError(t("homeScreen.location.denied"));
       return;
@@ -228,10 +396,17 @@ export default function HomeScreen({ navigation }) {
     setLoadingStations(true);
     setStationsError("");
     try {
-      const next = await fetchNearbyFuelStations(basePoint, 12000);
+      const next = await fetchNearbyFuelStations(basePoint, 12000, { forceRefresh });
       setStations(next);
+      void saveCachedNearbyStations(basePoint, next, 12000);
     } catch (error) {
-      setStationsError(t("homeScreen.stations.loadFail"));
+      const cached = await readCachedNearbyStations();
+      if (cached?.stations?.length) {
+        setStations(cached.stations);
+        setStationsError("");
+      } else {
+        setStationsError(t("homeScreen.stations.loadFail"));
+      }
       console.error(
         "[Stations:loadNearbyStations:debug]",
         error?.response?.status,
@@ -252,7 +427,7 @@ export default function HomeScreen({ navigation }) {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await loadNearbyStations();
+      await loadNearbyStations({ forceRefresh: true });
     } finally {
       setRefreshing(false);
     }
@@ -470,6 +645,8 @@ export default function HomeScreen({ navigation }) {
     }, {});
   }, [stations]);
 
+  const visibleMapStations = useMemo(() => filteredStations.slice(0, 40), [filteredStations]);
+
   const openPromotion = useCallback(
     async (promotion) => {
       const externalUrl = String(
@@ -525,13 +702,18 @@ export default function HomeScreen({ navigation }) {
                         latitudeDelta: 0.05,
                         longitudeDelta: 0.05,
                       }
-                    : DEFAULT_REGION
+                    : {
+                        latitude: mapCenter.latitude,
+                        longitude: mapCenter.longitude,
+                        latitudeDelta: DEFAULT_REGION.latitudeDelta,
+                        longitudeDelta: DEFAULT_REGION.longitudeDelta,
+                      }
                 }
                 showsUserLocation={hasLocationPermission}
                 onRegionChangeComplete={onMapRegionChangeComplete}
               >
                 {routeCoords.length ? <Polyline coordinates={routeCoords} strokeWidth={5} strokeColor="#2563EB" /> : null}
-                {filteredStations.map((s) => (
+                {visibleMapStations.map((s) => (
                   <Marker
                     key={getStationRenderKey(s)}
                     coordinate={{ latitude: Number(s.latitude), longitude: Number(s.longitude) }}
@@ -555,7 +737,7 @@ export default function HomeScreen({ navigation }) {
                 </View>
               )}
               {location ? (
-                <Pressable style={[styles.button, styles.secondary]} onPress={loadNearbyStations}>
+                <Pressable style={[styles.button, styles.secondary]} onPress={() => loadNearbyStations({ forceRefresh: true })}>
                   <Text style={styles.buttonText}>{t("homeScreen.findNearby")}</Text>
                 </Pressable>
               ) : (

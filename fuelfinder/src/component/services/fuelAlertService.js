@@ -20,6 +20,17 @@ const ALERT_HISTORY_LIMIT = 60;
 const ALERT_COOLDOWN_MS = 1000 * 60 * 90;
 
 let notificationsConfigured = false;
+const alertHistoryListeners = new Set();
+
+function notifyAlertHistoryListeners(alerts) {
+  alertHistoryListeners.forEach((listener) => {
+    try {
+      listener(Array.isArray(alerts) ? alerts : []);
+    } catch (_error) {
+      // Ignore listener failures so alert persistence stays reliable.
+    }
+  });
+}
 
 function safeParse(rawValue, fallback) {
   if (!rawValue) return fallback;
@@ -292,19 +303,37 @@ export async function loadFuelAlertHistory() {
   return Array.isArray(alerts) ? alerts : [];
 }
 
+export async function loadUnreadFuelAlertCount() {
+  const alerts = await loadFuelAlertHistory();
+  return alerts.reduce((count, alert) => count + (alert?.readAt ? 0 : 1), 0);
+}
+
+export function subscribeToFuelAlertHistory(listener) {
+  if (typeof listener !== "function") {
+    return () => {};
+  }
+  alertHistoryListeners.add(listener);
+  return () => {
+    alertHistoryListeners.delete(listener);
+  };
+}
+
 export async function saveFuelAlertHistory(alerts) {
   const normalized = Array.isArray(alerts) ? alerts.slice(0, ALERT_HISTORY_LIMIT) : [];
   await AsyncStorage.setItem(ALERT_HISTORY_KEY, JSON.stringify(normalized));
+  notifyAlertHistoryListeners(normalized);
   return normalized;
 }
 
 export async function clearFuelAlertHistory() {
   await AsyncStorage.removeItem(ALERT_HISTORY_KEY);
+  notifyAlertHistoryListeners([]);
   return [];
 }
 
 export async function resetFuelAlertState() {
   await AsyncStorage.multiRemove([ALERT_HISTORY_KEY, ALERT_LEDGER_KEY]);
+  notifyAlertHistoryListeners([]);
 }
 
 export async function markFuelAlertsRead() {

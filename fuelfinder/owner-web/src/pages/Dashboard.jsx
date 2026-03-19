@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { startTransition, useEffect, useMemo, useState } from "react";
 import {
   callNextInQueue,
   createAdminStation,
@@ -455,6 +455,14 @@ export default function Dashboard() {
     });
   }, [stations]);
 
+  const stationGeoById = useMemo(() => {
+    const map = new Map();
+    stationGeo.forEach((item) => {
+      map.set(String(item.id || item._id || ""), item);
+    });
+    return map;
+  }, [stationGeo]);
+
   const regionOptions = useMemo(() => {
     const map = new Map();
     stationGeo.forEach(({ regionKey, regionLabel }) => {
@@ -497,8 +505,8 @@ export default function Dashboard() {
   }, [cityFilter, regionFilter, stationGeo]);
 
   const selectedStationGeo = useMemo(() => {
-    return stationGeo.find((item) => String(item.id) === String(stationId)) || null;
-  }, [stationGeo, stationId]);
+    return stationGeoById.get(String(stationId)) || null;
+  }, [stationGeoById, stationId]);
 
   const activePromotionCount = useMemo(() => {
     return promotions.filter((item) => Boolean(item?.isActive)).length;
@@ -719,6 +727,18 @@ export default function Dashboard() {
 
     return list;
   }, [adminUsers, limitToCurrentStation, roleFilter, stationId, userSearch]);
+
+  const openSection = (nextSection) => {
+    startTransition(() => {
+      setActive(nextSection);
+    });
+  };
+
+  const selectStation = (nextStationId) => {
+    startTransition(() => {
+      setStationId(String(nextStationId || ""));
+    });
+  };
 
   useEffect(() => {
     if (!session?.tokens?.accessToken) return;
@@ -944,10 +964,40 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!session?.tokens?.accessToken || !isSuperAdmin) return;
+
+    const timeoutId = window.setTimeout(() => {
+      void Promise.allSettled([listAdminUsers(), listOrganizationOptions()]);
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isSuperAdmin, session?.tokens?.accessToken]);
+
+  useEffect(() => {
+    if (!session?.tokens?.accessToken || !isSuperAdmin) return;
     if (active !== "settings") return;
     if (organizationOptions.length) return;
     loadOrganizationOptionsOnly();
   }, [active, isSuperAdmin, organizationOptions.length, session?.tokens?.accessToken]);
+
+  useEffect(() => {
+    if (!session?.tokens?.accessToken || !isSuperAdmin || !stationId) return;
+
+    const timeoutId = window.setTimeout(() => {
+      void Promise.allSettled([
+        listStationPayments(stationId, {
+          provider: "",
+          status: "",
+          from: "",
+          to: "",
+          page: 1,
+          limit: 25
+        }),
+        listStationPromotions(stationId)
+      ]);
+    }, 300);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isSuperAdmin, session?.tokens?.accessToken, stationId]);
 
   const loadStationTeam = async () => {
     if (!stationId) return;

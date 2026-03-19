@@ -5,6 +5,39 @@ const API_BASE = String(
 ).replace(/\/+$/, "");
 
 const STORAGE_KEY = "ff_owner_session_v1";
+const GET_CACHE = new Map();
+const INFLIGHT_GET_REQUESTS = new Map();
+const MAX_CACHE_ENTRIES = 200;
+
+function buildCacheKey(path, session) {
+  return `${String(session?.user?.id || "guest")}:${String(path || "")}`;
+}
+
+function getCachedResponse(cacheKey) {
+  const entry = GET_CACHE.get(cacheKey);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) return null;
+  return entry.value;
+}
+
+function setCachedResponse(cacheKey, value, ttlMs) {
+  GET_CACHE.set(cacheKey, {
+    value,
+    expiresAt: Date.now() + ttlMs
+  });
+
+  if (GET_CACHE.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = GET_CACHE.keys().next().value;
+    if (oldestKey) {
+      GET_CACHE.delete(oldestKey);
+    }
+  }
+}
+
+function clearRequestCache() {
+  GET_CACHE.clear();
+  INFLIGHT_GET_REQUESTS.clear();
+}
 
 export function loadSession() {
   try {
@@ -23,8 +56,22 @@ export function clearSession() {
   localStorage.removeItem(STORAGE_KEY);
 }
 
-async function apiRequest(path, options = {}, { auth = true, retry = true } = {}) {
+async function apiRequest(path, options = {}, { auth = true, retry = true, cacheTtlMs = 0 } = {}) {
   const session = loadSession();
+  const method = String(options.method || "GET").toUpperCase();
+  const cacheKey = method === "GET" && cacheTtlMs > 0 ? buildCacheKey(path, session) : "";
+
+  if (cacheKey) {
+    const cached = getCachedResponse(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    if (INFLIGHT_GET_REQUESTS.has(cacheKey)) {
+      return INFLIGHT_GET_REQUESTS.get(cacheKey);
+    }
+  }
+
+  const requestPromise = (async () => {
   const headers = {
     "Content-Type": "application/json",
     ...(options.headers || {})
@@ -38,6 +85,7 @@ async function apiRequest(path, options = {}, { auth = true, retry = true } = {}
   try {
     response = await fetch(`${API_BASE}${path}`, {
       ...options,
+      method,
       headers
     });
   } catch (_error) {
@@ -48,11 +96,14 @@ async function apiRequest(path, options = {}, { auth = true, retry = true } = {}
   }
 
   if (response.status === 401 && auth && retry && session?.tokens?.refreshToken) {
+    if (cacheKey) {
+      INFLIGHT_GET_REQUESTS.delete(cacheKey);
+    }
     const refreshed = await refreshToken(session.tokens.refreshToken);
     if (refreshed?.tokens?.accessToken) {
       const nextSession = { ...session, tokens: refreshed.tokens };
       saveSession(nextSession);
-      return apiRequest(path, options, { auth, retry: false });
+      return apiRequest(path, options, { auth, retry: false, cacheTtlMs });
     }
   }
 
@@ -61,10 +112,31 @@ async function apiRequest(path, options = {}, { auth = true, retry = true } = {}
     const message = payload?.message || "Request failed.";
     throw new Error(message);
   }
+
+   if (method !== "GET") {
+    clearRequestCache();
+  } else if (cacheKey) {
+    setCachedResponse(cacheKey, payload, cacheTtlMs);
+  }
+
   return payload;
+  })();
+
+  if (cacheKey) {
+    INFLIGHT_GET_REQUESTS.set(cacheKey, requestPromise);
+  }
+
+  try {
+    return await requestPromise;
+  } finally {
+    if (cacheKey) {
+      INFLIGHT_GET_REQUESTS.delete(cacheKey);
+    }
+  }
 }
 
 export async function login(email, password) {
+  clearRequestCache();
   const data = await apiRequest(
     "/auth/login",
     {
@@ -82,6 +154,7 @@ export async function logout() {
   try {
     await apiRequest("/auth/logout", { method: "POST" });
   } finally {
+    clearRequestCache();
     clearSession();
   }
 }
@@ -91,15 +164,19 @@ export async function getProfile() {
 }
 
 export async function listOwnerStations() {
-  return apiRequest("/owner/stations");
+  return apiRequest("/owner/stations", {}, { cacheTtlMs: 1000 * 60 });
 }
 
 export async function getOwnerStation(stationId) {
-  return apiRequest(`/owner/stations/${stationId}`);
+  return apiRequest(`/owner/stations/${stationId}`, {}, { cacheTtlMs: 1000 * 30 });
 }
 
 export async function getStationQueue(stationId) {
-  return apiRequest(`/queue/station/${stationId}?includePending=true`, {}, { auth: false });
+  return apiRequest(
+    `/queue/station/${stationId}?includePending=true`,
+    {},
+    { auth: false, cacheTtlMs: 1000 * 15 }
+  );
 }
 
 export async function updateFuelStock(stationId, payload) {
@@ -130,15 +207,15 @@ export async function listStationPayments(stationId, params = {}) {
     search.set(key, String(value));
   });
   const query = search.toString();
-  return apiRequest(`/owner/stations/${stationId}/payments${query ? `?${query}` : ""}`);
+  return apiRequest(`/owner/stations/${stationId}/payments${query ? `?${query}` : ""}`, {}, { cacheTtlMs: 1000 * 30 });
 }
 
 export async function listStationTeam(stationId) {
-  return apiRequest(`/owner/stations/${stationId}/team`);
+  return apiRequest(`/owner/stations/${stationId}/team`, {}, { cacheTtlMs: 1000 * 30 });
 }
 
 export async function listStationPromotions(stationId) {
-  return apiRequest(`/owner/stations/${stationId}/promotions`);
+  return apiRequest(`/owner/stations/${stationId}/promotions`, {}, { cacheTtlMs: 1000 * 30 });
 }
 
 export async function createStationPromotion(stationId, payload) {
@@ -181,7 +258,7 @@ export async function forceLogoutStationTeamUser(stationId, userId) {
 }
 
 export async function listAdminUsers() {
-  return apiRequest("/admin/users");
+  return apiRequest("/admin/users", {}, { cacheTtlMs: 1000 * 30 });
 }
 
 export async function createAdminUser(payload) {
@@ -210,7 +287,7 @@ export async function forceLogoutAdminUser(userId) {
 }
 
 export async function listOrganizationOptions() {
-  return apiRequest("/admin/organizations/options");
+  return apiRequest("/admin/organizations/options", {}, { cacheTtlMs: 1000 * 60 * 10 });
 }
 
 export async function createAdminStation(payload) {
