@@ -2,6 +2,11 @@ const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const Station = require("../models/Station");
 const User = require("../models/User");
+const {
+  getAssignedStationIds,
+  hasAssignedStationAccess,
+  isAssignedStationOnlyRole
+} = require("../utils/stationScope");
 
 const SALT_ROUNDS = 12;
 
@@ -39,9 +44,13 @@ async function canAccessStation(user, stationId) {
   if (!user) return false;
   if (String(user.role || "") === "super_admin") return true;
 
-  const allowedStationIds = Array.isArray(user.stationIds) ? user.stationIds.map(String) : [];
+  const allowedStationIds = getAssignedStationIds(user);
   if (allowedStationIds.length) {
-    return allowedStationIds.includes(String(stationId));
+    return hasAssignedStationAccess(user, stationId);
+  }
+
+  if (isAssignedStationOnlyRole(user)) {
+    return false;
   }
 
   const station = await Station.findById(stationId)
@@ -329,4 +338,3 @@ exports.forceLogoutStationTeamUser = async (req, res) => {
     return res.status(500).json({ message: "Failed to revoke user sessions." });
   }
 };
-

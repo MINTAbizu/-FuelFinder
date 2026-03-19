@@ -3,9 +3,41 @@ const { fetchNearbyFuelStations, fetchDrivingRoute } = require("../services/mapS
 const Station = require("../models/Station");
 const { normalizePaymentDetails } = require("../utils/stationPaymentDetails");
 
+const STATION_SYNC_SELECT =
+  "_id name address contact externalSource externalSourceId fuelStatus fuelInventory paymentDetails isActive location";
+const NEARBY_RESPONSE_CACHE_TTL_MS = 1000 * 45;
+const MAX_NEARBY_RESPONSE_CACHE_ENTRIES = 120;
+
+const nearbyStationsResponseCache = new Map();
+
 function parseNumber(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+}
+
+function buildNearbyResponseCacheKey(lat, lon, radius) {
+  return [Number(lat).toFixed(3), Number(lon).toFixed(3), Math.round(Number(radius) || 0)].join(":");
+}
+
+function getCachedNearbyResponse(cacheKey) {
+  const entry = nearbyStationsResponseCache.get(cacheKey);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) return null;
+  return entry.value;
+}
+
+function setCachedNearbyResponse(cacheKey, value) {
+  nearbyStationsResponseCache.set(cacheKey, {
+    value,
+    expiresAt: Date.now() + NEARBY_RESPONSE_CACHE_TTL_MS
+  });
+
+  if (nearbyStationsResponseCache.size > MAX_NEARBY_RESPONSE_CACHE_ENTRIES) {
+    const oldestKey = nearbyStationsResponseCache.keys().next().value;
+    if (oldestKey) {
+      nearbyStationsResponseCache.delete(oldestKey);
+    }
+  }
 }
 
 function normalizeStationName(value) {
@@ -37,40 +69,6 @@ function mapFuelStatusForClient(value) {
   return "empty";
 }
 
-function buildAddressFromReversePayload(data) {
-  const addr = data?.address || {};
-  const line1 = [addr.house_number, addr.road].filter(Boolean).join(" ").trim();
-  const locality =
-    addr.neighbourhood ||
-    addr.suburb ||
-    addr.city_district ||
-    addr.county ||
-    "";
-  const city = addr.city || addr.town || addr.village || addr.municipality || "";
-  const region = addr.state || addr.region || "";
-  const country = addr.country || "";
-  const parts = [line1, locality, city, region, country]
-    .map((item) => String(item || "").trim())
-    .filter(Boolean);
-  if (parts.length) return parts.join(", ");
-  return String(data?.display_name || "").trim();
-}
-
-async function reverseGeocodeAddress(lat, lon) {
-  const url =
-    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}` +
-    `&lon=${encodeURIComponent(lon)}&zoom=18&addressdetails=1&accept-language=en`;
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      "User-Agent": "fuelfinder-backend/1.0"
-    }
-  });
-  if (!response.ok) return "";
-  const data = await response.json();
-  return buildAddressFromReversePayload(data);
-}
-
 async function findNearbyCanonicalStation(station) {
   const lat = Number(station?.latitude);
   const lon = Number(station?.longitude);
@@ -84,15 +82,11 @@ async function findNearbyCanonicalStation(station) {
       }
     }
   })
-    .select("_id name externalSource externalSourceId")
+    .select(STATION_SYNC_SELECT)
     .limit(10)
     .lean();
 
-  return (
-    nearby.find((item) => areLikelySameStation(station?.name, item?.name)) ||
-    nearby[0] ||
-    null
-  );
+  return nearby.find((item) => areLikelySameStation(station?.name, item?.name)) || nearby[0] || null;
 }
 
 function buildClientStationPayload(doc, fallback = {}) {
@@ -121,34 +115,88 @@ function buildClientStationPayload(doc, fallback = {}) {
   };
 }
 
+function buildStationSyncPatch(doc, station, sourceId, lat, lon) {
+  const patch = {};
+  const nextName = String(station?.name || doc?.name || "Fuel Station").trim();
+  const nextContact = String(station?.contact || doc?.contact || "").trim();
+  const incomingAddress = String(station?.address || "").trim();
+  const currentAddress = String(doc?.address || "").trim();
+  const currentCoords = Array.isArray(doc?.location?.coordinates) ? doc.location.coordinates : [];
+  const currentLon = Number(currentCoords[0]);
+  const currentLat = Number(currentCoords[1]);
+
+  if (nextName && nextName !== String(doc?.name || "").trim()) {
+    patch.name = nextName;
+  }
+
+  if (!String(doc?.externalSource || "").trim() || !String(doc?.externalSourceId || "").trim()) {
+    patch.externalSource = "osm";
+    patch.externalSourceId = sourceId;
+  }
+
+  if (!isPlaceholderAddress(incomingAddress)) {
+    if (incomingAddress !== currentAddress) {
+      patch.address = incomingAddress;
+    }
+  } else if (!currentAddress) {
+    patch.address = incomingAddress || "Address not listed";
+  }
+
+  if (nextContact !== String(doc?.contact || "").trim()) {
+    patch.contact = nextContact;
+  }
+
+  if (!Number.isFinite(currentLat) || !Number.isFinite(currentLon) || currentLat !== lat || currentLon !== lon) {
+    patch.location = { type: "Point", coordinates: [lon, lat] };
+  }
+
+  if (doc?.isActive !== true) {
+    patch.isActive = true;
+  }
+
+  return Object.keys(patch).length ? patch : null;
+}
+
 async function attachBackendStationIds(stations) {
-  const mapped = await Promise.all(
+  const sourceIds = Array.from(
+    new Set(
+      (stations || [])
+        .map((station) => String(station?.id || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  const existingDocs = sourceIds.length
+    ? await Station.find({
+        externalSource: "osm",
+        externalSourceId: { $in: sourceIds }
+      })
+        .select(STATION_SYNC_SELECT)
+        .lean()
+    : [];
+
+  const docsBySourceId = new Map(
+    existingDocs.map((doc) => [String(doc?.externalSourceId || "").trim(), doc])
+  );
+
+  const mappedStations = await Promise.all(
     (stations || []).map(async (station) => {
       const lat = Number(station?.latitude);
       const lon = Number(station?.longitude);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return station;
+
       const sourceId = String(station?.id || "").trim();
       if (!sourceId) return station;
 
-      let doc = await Station.findOne({
-        externalSource: "osm",
-        externalSourceId: sourceId
-      });
+      let doc = docsBySourceId.get(sourceId) || null;
 
       if (!doc) {
-        const canonical = await findNearbyCanonicalStation(station);
-        if (canonical) {
-          doc = await Station.findById(canonical._id);
-          if (doc && (!doc.externalSource || !doc.externalSourceId)) {
-            doc.externalSource = "osm";
-            doc.externalSourceId = sourceId;
-          }
-        }
+        doc = await findNearbyCanonicalStation(station);
       }
 
       if (!doc) {
         const incomingAddress = String(station?.address || "").trim();
-        doc = await Station.create({
+        const createdDoc = await Station.create({
           name: String(station?.name || "Fuel Station").trim(),
           address: incomingAddress || "Address not listed",
           contact: String(station?.contact || "").trim(),
@@ -158,33 +206,25 @@ async function attachBackendStationIds(stations) {
           isActive: true,
           location: { type: "Point", coordinates: [lon, lat] }
         });
-      } else {
-        const incomingAddress = String(station?.address || "").trim();
-        doc.name = String(station?.name || doc.name || "Fuel Station").trim();
-        if (!isPlaceholderAddress(incomingAddress)) {
-          doc.address = incomingAddress;
-        } else if (!String(doc.address || "").trim()) {
-          doc.address = incomingAddress || "Address not listed";
-        }
-        doc.contact = String(station?.contact || doc.contact || "").trim();
-        doc.location = { type: "Point", coordinates: [lon, lat] };
-        doc.isActive = true;
 
-        // Self-heal legacy placeholder addresses using reverse geocoding.
-        if (isPlaceholderAddress(doc.address)) {
-          try {
-            // eslint-disable-next-line no-await-in-loop
-            const resolvedAddress = await reverseGeocodeAddress(lat, lon);
-            if (resolvedAddress && !isPlaceholderAddress(resolvedAddress)) {
-              doc.address = resolvedAddress;
-            }
-          } catch (_err) {
-            // keep current address if reverse geocoding fails
-          }
-        }
+        const normalizedCreatedDoc =
+          typeof createdDoc?.toObject === "function" ? createdDoc.toObject() : createdDoc;
+        docsBySourceId.set(sourceId, normalizedCreatedDoc);
 
-        await doc.save();
+        return buildClientStationPayload(normalizedCreatedDoc, {
+          ...station,
+          latitude: lat,
+          longitude: lon
+        });
       }
+
+      const patch = buildStationSyncPatch(doc, station, sourceId, lat, lon);
+      if (patch) {
+        await Station.updateOne({ _id: doc._id }, { $set: patch });
+        doc = { ...doc, ...patch };
+      }
+
+      docsBySourceId.set(sourceId, doc);
 
       return buildClientStationPayload(doc, {
         ...station,
@@ -194,7 +234,7 @@ async function attachBackendStationIds(stations) {
     })
   );
 
-  return mapped;
+  return mappedStations;
 }
 
 exports.getNearbyFuelStations = async (req, res) => {
@@ -206,8 +246,15 @@ exports.getNearbyFuelStations = async (req, res) => {
       return res.status(400).json({ message: "lat and lon are required numeric query params." });
     }
 
+    const cacheKey = buildNearbyResponseCacheKey(lat, lon, radius);
+    const cachedStations = getCachedNearbyResponse(cacheKey);
+    if (cachedStations) {
+      return res.json({ stations: cachedStations });
+    }
+
     const stations = await fetchNearbyFuelStations(lat, lon, radius);
     const withBackendIds = await attachBackendStationIds(stations);
+    setCachedNearbyResponse(cacheKey, withBackendIds);
     return res.json({ stations: withBackendIds });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load nearby fuel stations." });

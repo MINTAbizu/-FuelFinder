@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -30,6 +30,9 @@ const DEFAULT_REGION = {
   latitudeDelta: 0.05,
   longitudeDelta: 0.05,
 };
+const STATUS_FILTERS = ["all", "available", "limited", "empty"];
+const FUEL_FILTERS = ["any", "gasoline", "diesel", "other"];
+const SORT_OPTIONS = ["distance", "queue", "name"];
 
 // Translations are handled by i18next (`src/i18n/locales/*.json`).
 
@@ -107,6 +110,29 @@ function markerColor(status) {
   return "gray";
 }
 
+function getStationIdentity(station) {
+  return String(station?.stationId || station?._id || station?.id || "").trim();
+}
+
+function getStationRenderKey(station) {
+  const identity = getStationIdentity(station);
+  const externalId = String(station?.id || "").trim();
+  if (identity && externalId && identity !== externalId) {
+    return `${identity}:${externalId}`;
+  }
+  return identity;
+}
+
+function toSavedStationMap(stations) {
+  return (stations || []).reduce((accumulator, station) => {
+    const key = String(station?.id || "").trim();
+    if (key) {
+      accumulator[key] = true;
+    }
+    return accumulator;
+  }, {});
+}
+
 export default function HomeScreen({ navigation }) {
   const { t } = useLanguage();
 
@@ -139,16 +165,12 @@ export default function HomeScreen({ navigation }) {
   const [promotions, setPromotions] = useState([]);
   const [promotionsLoading, setPromotionsLoading] = useState(false);
   const [promotionIndex, setPromotionIndex] = useState(0);
+  const deferredSearchText = useDeferredValue(searchText);
 
   const refreshSavedStations = useCallback(async () => {
     try {
       const nextSavedStations = await loadSavedStations();
-      setSavedStationIds(
-        nextSavedStations.reduce((accumulator, station) => {
-          accumulator[String(station.id || "")] = true;
-          return accumulator;
-        }, {})
-      );
+      setSavedStationIds(toSavedStationMap(nextSavedStations));
     } catch (_error) {
       // Ignore local saved-station refresh failures and keep the screen usable.
     }
@@ -281,6 +303,29 @@ export default function HomeScreen({ navigation }) {
     setTimeout(() => setCenterNotice(""), 1200);
   }, [location, t]);
 
+  const onMapRegionChangeComplete = useCallback(
+    (region) => {
+      if (location) return;
+
+      setMapCenter((current) => {
+        const nextCenter = {
+          latitude: Number(region?.latitude || DEFAULT_REGION.latitude),
+          longitude: Number(region?.longitude || DEFAULT_REGION.longitude),
+        };
+
+        if (
+          Math.abs(current.latitude - nextCenter.latitude) < 0.0005 &&
+          Math.abs(current.longitude - nextCenter.longitude) < 0.0005
+        ) {
+          return current;
+        }
+
+        return nextCenter;
+      });
+    },
+    [location]
+  );
+
   const drawRouteToStation = useCallback(
     async (station) => {
       listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
@@ -315,7 +360,7 @@ export default function HomeScreen({ navigation }) {
           distanceKm: Number(data?.distanceKm || 0),
           durationMin: Number(data?.durationMin || 0),
         });
-        setActiveRouteStationId(String(station.id || ""));
+        setActiveRouteStationId(getStationIdentity(station));
 
         mapRef.current?.fitToCoordinates(
           [{ latitude: fromLat, longitude: fromLon }, { latitude: toLat, longitude: toLon }],
@@ -334,22 +379,60 @@ export default function HomeScreen({ navigation }) {
 
   const filteredStations = useMemo(() => {
     const base = location || mapCenter;
-    const query = searchText.trim().toLowerCase();
+    const query = deferredSearchText.trim().toLowerCase();
+    const next = [];
+    let topStationId = "";
+    let topStationScore = Number.NEGATIVE_INFINITY;
 
-    const next = stations
-      .filter((s) => String(s.name || "").toLowerCase().includes(query))
-      .filter((s) => statusFilter === "all" || s.fuel_status === statusFilter)
-      .filter(
-        (s) =>
-          fuelFilter === "any" ||
-          s?.supportedFuels?.[fuelFilter] === true ||
-          s?.supportedFuels?.unknown === true
-      )
-      .map((s) => ({
-        ...s,
-        distanceKm: toDistanceKm(base, { latitude: s.latitude, longitude: s.longitude }),
-        waitMins: Math.max(2, Number(s.queue_length || 0) * 3),
-      }));
+    for (const station of stations) {
+      const stationName = String(station?.name || "").toLowerCase();
+      if (query && !stationName.includes(query)) continue;
+      if (statusFilter !== "all" && station?.fuel_status !== statusFilter) continue;
+      if (
+        fuelFilter !== "any" &&
+        station?.supportedFuels?.[fuelFilter] !== true &&
+        station?.supportedFuels?.unknown !== true
+      ) {
+        continue;
+      }
+
+      const distanceKm = toDistanceKm(base, {
+        latitude: Number(station?.latitude),
+        longitude: Number(station?.longitude),
+      });
+      const queueLength = Number(station?.queue_length || 0);
+      const waitMins = Math.max(2, queueLength * 3);
+      const statusPenalty =
+        station?.fuel_status === "available" ? 0 : station?.fuel_status === "limited" ? 12 : 30;
+      const distancePenalty = distanceKm != null ? distanceKm * 3 : 8;
+      const queuePenalty = queueLength * 1.8;
+      const smartScore = Math.max(1, Math.round(100 - (statusPenalty + distancePenalty + queuePenalty)));
+
+      let reason = t("homeScreen.balancedOption");
+      if (station?.fuel_status === "available" && queueLength <= 6) {
+        reason = t("homeScreen.fastLineReason");
+      } else if (station?.fuel_status === "limited") {
+        reason = t("homeScreen.limitedReason");
+      } else if (queueLength >= 15) {
+        reason = t("homeScreen.highDemandReason");
+      }
+
+      const enrichedStation = {
+        ...station,
+        distanceKm,
+        waitMins,
+        smartScore,
+        reason,
+      };
+
+      next.push(enrichedStation);
+
+      const stationKey = getStationIdentity(enrichedStation);
+      if (stationKey && smartScore > topStationScore) {
+        topStationScore = smartScore;
+        topStationId = stationKey;
+      }
+    }
 
     if (sortBy === "queue") {
       next.sort((a, b) => Number(a.queue_length || 0) - Number(b.queue_length || 0));
@@ -359,51 +442,17 @@ export default function HomeScreen({ navigation }) {
       next.sort((a, b) => (a.distanceKm ?? Number.POSITIVE_INFINITY) - (b.distanceKm ?? Number.POSITIVE_INFINITY));
     }
 
-    const scored = next.map((station) => {
-      const statusPenalty =
-        station.fuel_status === "available" ? 0 : station.fuel_status === "limited" ? 12 : 30;
-      const distancePenalty = station.distanceKm != null ? station.distanceKm * 3 : 8;
-      const queuePenalty = Number(station.queue_length || 0) * 1.8;
-      const score = 100 - (statusPenalty + distancePenalty + queuePenalty);
-
-      let reason = t("homeScreen.balancedOption");
-      if (station.fuel_status === "available" && Number(station.queue_length || 0) <= 6) {
-        reason = t("homeScreen.fastLineReason");
-      } else if (station.fuel_status === "limited") {
-        reason = t("homeScreen.limitedReason");
-      } else if (Number(station.queue_length || 0) >= 15) {
-        reason = t("homeScreen.highDemandReason");
-      }
-
-      return {
-        ...station,
-        smartScore: Math.max(1, Math.round(score)),
-        reason,
-      };
-    });
-
-    const topId = scored.reduce((bestId, current) => {
-      if (!bestId) return current.id;
-      const best = scored.find((item) => item.id === bestId);
-      return current.smartScore > best.smartScore ? current.id : bestId;
-    }, null);
-
-    return scored.map((station) => ({
+    return next.map((station) => ({
       ...station,
-      isTopPick: station.id === topId,
+      isTopPick: getStationIdentity(station) === topStationId,
     }));
-  }, [stations, location, mapCenter, searchText, statusFilter, fuelFilter, sortBy, t]);
+  }, [stations, location, mapCenter, deferredSearchText, statusFilter, fuelFilter, sortBy, t]);
 
   const onToggleSavedStation = useCallback(
     async (station) => {
       try {
         const nextSavedStations = await toggleSavedStation(station);
-        setSavedStationIds(
-          nextSavedStations.reduce((accumulator, savedStation) => {
-            accumulator[String(savedStation.id || "")] = true;
-            return accumulator;
-          }, {})
-        );
+        setSavedStationIds(toSavedStationMap(nextSavedStations));
       } catch (_error) {
         setStationsError(t("somethingWentWrong"));
       }
@@ -449,9 +498,13 @@ export default function HomeScreen({ navigation }) {
       <FlatList
         ref={listRef}
         data={filteredStations}
-        keyExtractor={(item) => String(item.id)}
+        keyExtractor={(item) => getStationRenderKey(item)}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
+        initialNumToRender={6}
+        maxToRenderPerBatch={8}
+        windowSize={5}
+        removeClippedSubviews={Platform.OS === "android"}
         refreshControl={<RefreshControl refreshing={refreshing || loadingStations} onRefresh={onRefresh} />}
         onScrollToIndexFailed={() => listRef.current?.scrollToOffset?.({ offset: 0, animated: true })}
         ListHeaderComponent={
@@ -475,15 +528,17 @@ export default function HomeScreen({ navigation }) {
                     : DEFAULT_REGION
                 }
                 showsUserLocation={hasLocationPermission}
-                onRegionChangeComplete={(region) => setMapCenter({ latitude: region.latitude, longitude: region.longitude })}
+                onRegionChangeComplete={onMapRegionChangeComplete}
               >
                 {routeCoords.length ? <Polyline coordinates={routeCoords} strokeWidth={5} strokeColor="#2563EB" /> : null}
                 {filteredStations.map((s) => (
                   <Marker
-                    key={String(s.id)}
+                    key={getStationRenderKey(s)}
                     coordinate={{ latitude: Number(s.latitude), longitude: Number(s.longitude) }}
                     title={s.name}
                     description={`${t("homeScreen.queue")}: ${s.queue_length} ${t("homeScreen.units.cars")}`}
+                    pinColor={markerColor(s.fuel_status)}
+                    tracksViewChanges={false}
                   />
                 ))}
               </MapView>
@@ -548,7 +603,7 @@ export default function HomeScreen({ navigation }) {
 
             <Text style={styles.section}>{t("homeScreen.filter")}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-              {["all", "available", "limited", "empty"].map((value) => (
+              {STATUS_FILTERS.map((value) => (
                 <TouchableOpacity
                   key={value}
                   style={[styles.chip, statusFilter === value && styles.chipActive]}
@@ -561,7 +616,7 @@ export default function HomeScreen({ navigation }) {
 
             <Text style={styles.section}>{t("homeScreen.fuel.label")}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-              {["any", "gasoline", "diesel", "other"].map((value) => (
+              {FUEL_FILTERS.map((value) => (
                 <TouchableOpacity
                   key={value}
                   style={[styles.chip, fuelFilter === value && styles.chipActive]}
@@ -574,7 +629,7 @@ export default function HomeScreen({ navigation }) {
 
             <Text style={styles.section}>{t("homeScreen.sort.sortBy")}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-              {["distance", "queue", "name"].map((value) => (
+              {SORT_OPTIONS.map((value) => (
                 <TouchableOpacity key={value} style={[styles.chip, sortBy === value && styles.chipActive]} onPress={() => setSortBy(value)}>
                   <Text style={[styles.chipText, sortBy === value && styles.chipTextActive]}>
                     {t("homeScreen.sort.label")}: {sortLabel(t, value)}
@@ -633,7 +688,7 @@ export default function HomeScreen({ navigation }) {
                   <Pressable
                     style={[
                       styles.saveStationButton,
-                      savedStationIds[String(item.id || "")] && styles.saveStationButtonActive,
+                      savedStationIds[getStationIdentity(item)] && styles.saveStationButtonActive,
                     ]}
                     onPress={(event) => {
                       event.stopPropagation?.();
@@ -641,15 +696,15 @@ export default function HomeScreen({ navigation }) {
                     }}
                     accessibilityRole="button"
                     accessibilityLabel={
-                      savedStationIds[String(item.id || "")]
+                      savedStationIds[getStationIdentity(item)]
                         ? t("unsaveStationLabel", { defaultValue: "Remove station from saved list" })
                         : t("saveStationLabel", { defaultValue: "Save station" })
                     }
                   >
                     <Ionicons
-                      name={savedStationIds[String(item.id || "")] ? "bookmark" : "bookmark-outline"}
+                      name={savedStationIds[getStationIdentity(item)] ? "bookmark" : "bookmark-outline"}
                       size={16}
-                      color={savedStationIds[String(item.id || "")] ? "#0F766E" : "#475569"}
+                      color={savedStationIds[getStationIdentity(item)] ? "#0F766E" : "#475569"}
                     />
                   </Pressable>
                   <Pressable style={[styles.statusPill, { borderColor: markerColor(item.fuel_status) }]}>
@@ -686,7 +741,7 @@ export default function HomeScreen({ navigation }) {
               </View>
               <Pressable style={styles.routeBtn} onPress={() => drawRouteToStation(item)}>
                 <Text style={styles.routeBtnText}>
-                  {activeRouteStationId === String(item.id || "")
+                  {activeRouteStationId === getStationIdentity(item)
                     ? t("homeScreen.route.shown")
                     : t("homeScreen.route.show")}
                 </Text>

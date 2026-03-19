@@ -10,6 +10,57 @@ const ROUTE_ENDPOINTS = [
     `https://routing.openstreetmap.de/routed-car/route/v1/driving/${fromLon},${fromLat};${toLon},${toLat}?overview=full&geometries=geojson`
 ];
 
+const NEARBY_STATIONS_CACHE_TTL_MS = 1000 * 45;
+const ROUTE_CACHE_TTL_MS = 1000 * 60 * 5;
+const MAX_CACHE_ENTRIES = 200;
+
+const nearbyStationsCache = new Map();
+const routeCache = new Map();
+
+function getValidCacheEntry(cache, key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) return null;
+  return entry.value;
+}
+
+function getStaleCacheEntry(cache, key) {
+  return cache.get(key)?.value || null;
+}
+
+function setCacheEntry(cache, key, value, ttlMs) {
+  cache.set(key, {
+    value,
+    expiresAt: Date.now() + ttlMs
+  });
+
+  if (cache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey) {
+      cache.delete(oldestKey);
+    }
+  }
+
+  return value;
+}
+
+function buildNearbyCacheKey(lat, lon, radiusMeters) {
+  return [
+    Number(lat).toFixed(3),
+    Number(lon).toFixed(3),
+    Math.round(Number(radiusMeters) || 0)
+  ].join(":");
+}
+
+function buildRouteCacheKey(fromLat, fromLon, toLat, toLon) {
+  return [
+    Number(fromLat).toFixed(4),
+    Number(fromLon).toFixed(4),
+    Number(toLat).toFixed(4),
+    Number(toLon).toFixed(4)
+  ].join(":");
+}
+
 function parseTagBoolean(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return null;
@@ -30,7 +81,8 @@ function resolveSupportedFuels(tags) {
     parseTagBoolean(tags["fuel:cng"]) ??
     parseTagBoolean(tags["fuel:electricity"]) ??
     null;
-  const known = [gasoline, diesel, other].some((v) => v !== null);
+  const known = [gasoline, diesel, other].some((value) => value !== null);
+
   return {
     gasoline: gasoline === true,
     diesel: diesel === true,
@@ -57,11 +109,7 @@ function buildAddress(tags, latitude, longitude) {
     .map((item) => String(item || "").trim())
     .find(Boolean);
 
-  const region = [
-    tags["addr:state"],
-    tags["addr:province"],
-    tags["is_in:state"]
-  ]
+  const region = [tags["addr:state"], tags["addr:province"], tags["is_in:state"]]
     .map((item) => String(item || "").trim())
     .find(Boolean);
 
@@ -76,10 +124,18 @@ function buildAddress(tags, latitude, longitude) {
   if (Number.isFinite(lat) && Number.isFinite(lon)) {
     return `Approx location (${lat.toFixed(5)}, ${lon.toFixed(5)})`;
   }
+
   return "Address not listed";
 }
 
 async function fetchNearbyFuelStations(lat, lon, radiusMeters = 12000) {
+  const cacheKey = buildNearbyCacheKey(lat, lon, radiusMeters);
+  const cachedStations = getValidCacheEntry(nearbyStationsCache, cacheKey);
+  if (cachedStations) {
+    return cachedStations;
+  }
+
+  const staleStations = getStaleCacheEntry(nearbyStationsCache, cacheKey);
   const query = `
 [out:json][timeout:25];
 (
@@ -102,12 +158,13 @@ out center tags;
 
       const data = await response.json();
       const elements = Array.isArray(data?.elements) ? data.elements : [];
-      return elements
+      const stations = elements
         .map((element) => {
           const tags = element?.tags || {};
           const latitude = Number(element?.lat ?? element?.center?.lat);
           const longitude = Number(element?.lon ?? element?.center?.lon);
           if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
           return {
             id: `${String(element.type || "node")}-${String(element.id || Math.random())}`,
             stationId: "",
@@ -123,36 +180,64 @@ out center tags;
           };
         })
         .filter(Boolean);
+
+      return setCacheEntry(
+        nearbyStationsCache,
+        cacheKey,
+        stations,
+        NEARBY_STATIONS_CACHE_TTL_MS
+      );
     } catch (err) {
       lastErr = err;
     }
+  }
+
+  if (staleStations) {
+    return staleStations;
   }
 
   throw lastErr || new Error("Failed to load fuel stations.");
 }
 
 async function fetchDrivingRoute(fromLat, fromLon, toLat, toLon) {
+  const cacheKey = buildRouteCacheKey(fromLat, fromLon, toLat, toLon);
+  const cachedRoute = getValidCacheEntry(routeCache, cacheKey);
+  if (cachedRoute) {
+    return cachedRoute;
+  }
+
+  const staleRoute = getStaleCacheEntry(routeCache, cacheKey);
   let lastErr;
+
   for (const buildUrl of ROUTE_ENDPOINTS) {
     try {
       const response = await fetch(buildUrl(fromLon, fromLat, toLon, toLat));
       if (!response.ok) throw new Error(`Route API failed: ${response.status}`);
+
       const data = await response.json();
       const route = data?.routes?.[0];
       const geometry = route?.geometry?.coordinates || [];
       const coordinates = geometry
         .map(([lon, lat]) => ({ latitude: Number(lat), longitude: Number(lon) }))
-        .filter((point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude));
+        .filter(
+          (point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude)
+        );
       if (!coordinates.length) throw new Error("No drivable route found.");
 
-      return {
+      const normalizedRoute = {
         coordinates,
         distanceKm: Number(route.distance || 0) / 1000,
         durationMin: Number(route.duration || 0) / 60
       };
+
+      return setCacheEntry(routeCache, cacheKey, normalizedRoute, ROUTE_CACHE_TTL_MS);
     } catch (err) {
       lastErr = err;
     }
+  }
+
+  if (staleRoute) {
+    return staleRoute;
   }
 
   throw lastErr || new Error("Failed to load route.");

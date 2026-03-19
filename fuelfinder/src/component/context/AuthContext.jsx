@@ -1,4 +1,12 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import api, { setApiAccessToken } from "../services/api";
@@ -7,15 +15,15 @@ import {
   disableTwoFactorAuth,
   getMyProfile,
   loginUser,
+  loginWithGoogle,
   logoutUser,
   refreshUserToken,
   registerUser,
   resendPhoneOtp,
   resendTwoFactorOtp,
-  loginWithGoogle,
   startTwoFactorSetup,
-  verifyTwoFactorOtp,
   verifyPhoneOtp,
+  verifyTwoFactorOtp,
 } from "../services/authService";
 
 const AuthContext = createContext(null);
@@ -23,6 +31,24 @@ const AuthContext = createContext(null);
 const ACCESS_TOKEN_KEY = "ff_access_token";
 const REFRESH_TOKEN_KEY = "ff_refresh_token";
 const USER_KEY = "ff_user";
+const SESSION_STORAGE_KEYS = [ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, USER_KEY];
+
+function parseStoredUser(rawValue) {
+  if (!rawValue) return null;
+  try {
+    return JSON.parse(rawValue);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function buildSessionStorageEntries(nextUser, nextAccessToken, nextRefreshToken) {
+  return [
+    [ACCESS_TOKEN_KEY, String(nextAccessToken || "")],
+    [REFRESH_TOKEN_KEY, String(nextRefreshToken || "")],
+    [USER_KEY, JSON.stringify(nextUser || null)],
+  ];
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -30,47 +56,77 @@ export function AuthProvider({ children }) {
   const [refreshToken, setRefreshToken] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const accessTokenRef = useRef("");
+  const refreshTokenRef = useRef("");
+  const userRef = useRef(null);
   const refreshPromiseRef = useRef(null);
 
-  const persistSession = useCallback(async (nextUser, nextAccessToken, nextRefreshToken) => {
-    setUser(nextUser);
-    setAccessToken(nextAccessToken);
-    setRefreshToken(nextRefreshToken);
-    setApiAccessToken(nextAccessToken);
-    await AsyncStorage.setItem(ACCESS_TOKEN_KEY, nextAccessToken);
-    await AsyncStorage.setItem(REFRESH_TOKEN_KEY, nextRefreshToken);
-    await AsyncStorage.setItem(USER_KEY, JSON.stringify(nextUser));
+  const applySession = useCallback((nextUser, nextAccessToken = "", nextRefreshToken = "") => {
+    userRef.current = nextUser || null;
+    accessTokenRef.current = nextAccessToken || "";
+    refreshTokenRef.current = nextRefreshToken || "";
+
+    setUser(nextUser || null);
+    setAccessToken(nextAccessToken || "");
+    setRefreshToken(nextRefreshToken || "");
+    setApiAccessToken(nextAccessToken || "");
   }, []);
+
+  const persistSessionStorage = useCallback(async (nextUser, nextAccessToken, nextRefreshToken) => {
+    await AsyncStorage.multiSet(
+      buildSessionStorageEntries(nextUser, nextAccessToken, nextRefreshToken)
+    );
+  }, []);
+
+  const persistSession = useCallback(
+    async (nextUser, nextAccessToken, nextRefreshToken) => {
+      applySession(nextUser, nextAccessToken, nextRefreshToken);
+      try {
+        await persistSessionStorage(nextUser, nextAccessToken, nextRefreshToken);
+      } catch (_error) {
+        // Keep the in-memory session usable even if local persistence fails.
+      }
+    },
+    [applySession, persistSessionStorage]
+  );
 
   const clearSession = useCallback(async () => {
-    setUser(null);
-    setAccessToken("");
-    setRefreshToken("");
-    setApiAccessToken("");
-    await AsyncStorage.removeItem(ACCESS_TOKEN_KEY);
-    await AsyncStorage.removeItem(REFRESH_TOKEN_KEY);
-    await AsyncStorage.removeItem(USER_KEY);
-  }, []);
+    applySession(null, "", "");
+    try {
+      await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
+    } catch (_error) {
+      // The session is already cleared in memory.
+    }
+  }, [applySession]);
 
   const replaceUser = useCallback(async (nextUser) => {
-    setUser(nextUser);
-    await AsyncStorage.setItem(USER_KEY, JSON.stringify(nextUser));
+    userRef.current = nextUser || null;
+    setUser(nextUser || null);
+    try {
+      await AsyncStorage.setItem(USER_KEY, JSON.stringify(nextUser || null));
+    } catch (_error) {
+      // Ignore local persistence failures and keep the current session active.
+    }
   }, []);
 
   const refreshSession = useCallback(async () => {
-    if (!refreshToken) throw new Error("Missing refresh token");
+    const currentRefreshToken = refreshTokenRef.current;
+    if (!currentRefreshToken) throw new Error("Missing refresh token");
     if (refreshPromiseRef.current) return refreshPromiseRef.current;
 
     setIsRefreshing(true);
     refreshPromiseRef.current = (async () => {
-      const data = await refreshUserToken(refreshToken);
+      const data = await refreshUserToken(currentRefreshToken);
       const nextAccessToken = data?.tokens?.accessToken;
       const nextRefreshToken = data?.tokens?.refreshToken;
+      const nextUser = data?.user || userRef.current;
+
       if (!nextAccessToken || !nextRefreshToken) {
         throw new Error("Invalid refresh response");
       }
-      const profile = await getMyProfile();
-      await persistSession(profile.user, nextAccessToken, nextRefreshToken);
+
+      await persistSession(nextUser, nextAccessToken, nextRefreshToken);
       return nextAccessToken;
     })();
 
@@ -80,12 +136,14 @@ export function AuthProvider({ children }) {
       refreshPromiseRef.current = null;
       setIsRefreshing(false);
     }
-  }, [persistSession, refreshToken]);
+  }, [persistSession]);
 
   useEffect(() => {
     const reqId = api.interceptors.request.use((config) => {
-      if (accessToken) {
-        config.headers.Authorization = `Bearer ${accessToken}`;
+      const currentAccessToken = accessTokenRef.current;
+      if (currentAccessToken) {
+        config.headers = config.headers || {};
+        config.headers.Authorization = `Bearer ${currentAccessToken}`;
       }
       return config;
     });
@@ -95,11 +153,11 @@ export function AuthProvider({ children }) {
       async (error) => {
         const original = error?.config;
         const status = error?.response?.status;
+
         if (!original || status !== 401 || original._retry) {
           return Promise.reject(error);
         }
 
-        // Do not retry auth endpoints (except /auth/me).
         const isAuthMutation =
           original.url?.includes("/auth/login") ||
           original.url?.includes("/auth/register") ||
@@ -114,6 +172,7 @@ export function AuthProvider({ children }) {
         try {
           original._retry = true;
           const nextAccessToken = await refreshSession();
+          original.headers = original.headers || {};
           original.headers.Authorization = `Bearer ${nextAccessToken}`;
           return api(original);
         } catch (refreshErr) {
@@ -127,53 +186,76 @@ export function AuthProvider({ children }) {
       api.interceptors.request.eject(reqId);
       api.interceptors.response.eject(resId);
     };
-  }, [accessToken, clearSession, refreshSession]);
+  }, [clearSession, refreshSession]);
 
   useEffect(() => {
-    (async () => {
+    let active = true;
+
+    const restoreSession = async () => {
       try {
-        const storedAccessToken = (await AsyncStorage.getItem(ACCESS_TOKEN_KEY)) || "";
-        const storedRefreshToken = (await AsyncStorage.getItem(REFRESH_TOKEN_KEY)) || "";
-        const storedUserRaw = (await AsyncStorage.getItem(USER_KEY)) || "";
-        const storedUser = storedUserRaw ? JSON.parse(storedUserRaw) : null;
+        const storedEntries = await AsyncStorage.multiGet(SESSION_STORAGE_KEYS);
+        const storedValues = Object.fromEntries(storedEntries);
+        const storedAccessToken = storedValues[ACCESS_TOKEN_KEY] || "";
+        const storedRefreshToken = storedValues[REFRESH_TOKEN_KEY] || "";
+        const storedUser = parseStoredUser(storedValues[USER_KEY]);
 
         if (!storedAccessToken || !storedRefreshToken) {
-          setIsLoading(false);
+          if (active) setIsLoading(false);
           return;
         }
 
-        setAccessToken(storedAccessToken);
-        setRefreshToken(storedRefreshToken);
-        if (storedUser) setUser(storedUser);
-        setApiAccessToken(storedAccessToken);
+        applySession(storedUser, storedAccessToken, storedRefreshToken);
+
+        if (storedUser && active) {
+          setIsLoading(false);
+        }
 
         try {
           const profile = await getMyProfile();
-          setUser(profile.user);
-          await AsyncStorage.setItem(USER_KEY, JSON.stringify(profile.user));
-        } catch (_err) {
+          if (!active) return;
+          if (!profile?.user) {
+            throw new Error("Profile restore failed");
+          }
+          await replaceUser(profile.user);
+          setIsLoading(false);
+        } catch (_profileError) {
           const data = await refreshUserToken(storedRefreshToken);
           const nextAccessToken = data?.tokens?.accessToken;
           const nextRefreshToken = data?.tokens?.refreshToken;
+          const nextUser = data?.user;
+
           if (!nextAccessToken || !nextRefreshToken) {
             throw new Error("Session restore failed");
           }
-          setAccessToken(nextAccessToken);
-          setRefreshToken(nextRefreshToken);
-          setApiAccessToken(nextAccessToken);
-          await AsyncStorage.setItem(ACCESS_TOKEN_KEY, nextAccessToken);
-          await AsyncStorage.setItem(REFRESH_TOKEN_KEY, nextRefreshToken);
-          const profile = await getMyProfile();
-          setUser(profile.user);
-          await AsyncStorage.setItem(USER_KEY, JSON.stringify(profile.user));
+
+          if (nextUser) {
+            await persistSession(nextUser, nextAccessToken, nextRefreshToken);
+          } else {
+            applySession(storedUser, nextAccessToken, nextRefreshToken);
+            const profile = await getMyProfile();
+            if (!active) return;
+            if (!profile?.user) {
+              throw new Error("Profile restore failed");
+            }
+            await persistSession(profile.user, nextAccessToken, nextRefreshToken);
+          }
+
+          if (active) setIsLoading(false);
         }
       } catch (_error) {
-        await clearSession();
-      } finally {
-        setIsLoading(false);
+        if (active) {
+          await clearSession();
+          setIsLoading(false);
+        }
       }
-    })();
-  }, [clearSession]);
+    };
+
+    restoreSession();
+
+    return () => {
+      active = false;
+    };
+  }, [applySession, clearSession, persistSession, replaceUser]);
 
   const signUp = useCallback(
     async ({ name, email, phone, password }) => {
@@ -181,11 +263,7 @@ export function AuthProvider({ children }) {
       if (data?.verificationRequired || data?.twoFactorRequired) {
         return data;
       }
-      await persistSession(
-        data.user,
-        data.tokens.accessToken,
-        data.tokens.refreshToken
-      );
+      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken);
       return data;
     },
     [persistSession]
@@ -197,11 +275,7 @@ export function AuthProvider({ children }) {
       if (data?.verificationRequired || data?.twoFactorRequired) {
         return data;
       }
-      await persistSession(
-        data.user,
-        data.tokens.accessToken,
-        data.tokens.refreshToken
-      );
+      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken);
       return data;
     },
     [persistSession]
@@ -210,32 +284,23 @@ export function AuthProvider({ children }) {
   const confirmPhoneOtp = useCallback(
     async ({ verificationToken, otpCode }) => {
       const data = await verifyPhoneOtp({ verificationToken, otpCode });
-      await persistSession(
-        data.user,
-        data.tokens.accessToken,
-        data.tokens.refreshToken
-      );
+      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken);
       return data;
     },
     [persistSession]
   );
 
   const resendPhoneVerification = useCallback(async ({ verificationToken }) => {
-    const data = await resendPhoneOtp({ verificationToken });
-    return data;
+    return resendPhoneOtp({ verificationToken });
   }, []);
 
   const confirmTwoFactorOtp = useCallback(
     async ({ verificationToken, otpCode }) => {
       const data = await verifyTwoFactorOtp({ verificationToken, otpCode });
       if (data?.tokens?.accessToken && data?.tokens?.refreshToken && data?.user) {
-        await persistSession(
-          data.user,
-          data.tokens.accessToken,
-          data.tokens.refreshToken
-        );
+        void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken);
       } else if (data?.user) {
-        await replaceUser(data.user);
+        void replaceUser(data.user);
       }
       return data;
     },
@@ -243,19 +308,17 @@ export function AuthProvider({ children }) {
   );
 
   const resendTwoFactorCode = useCallback(async ({ verificationToken }) => {
-    const data = await resendTwoFactorOtp({ verificationToken });
-    return data;
+    return resendTwoFactorOtp({ verificationToken });
   }, []);
 
   const beginTwoFactorSetup = useCallback(async () => {
-    const data = await startTwoFactorSetup();
-    return data;
+    return startTwoFactorSetup();
   }, []);
 
   const turnOffTwoFactor = useCallback(async () => {
     const data = await disableTwoFactorAuth();
     if (data?.user) {
-      await replaceUser(data.user);
+      void replaceUser(data.user);
     }
     return data;
   }, [replaceUser]);
@@ -275,11 +338,7 @@ export function AuthProvider({ children }) {
       if (data?.verificationRequired || data?.twoFactorRequired) {
         return data;
       }
-      await persistSession(
-        data.user,
-        data.tokens.accessToken,
-        data.tokens.refreshToken
-      );
+      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken);
       return data;
     },
     [persistSession]
@@ -288,11 +347,7 @@ export function AuthProvider({ children }) {
   const signInWithBiometric = useCallback(
     async ({ deviceId, biometricSecret }) => {
       const data = await biometricLogin({ deviceId, biometricSecret });
-      await persistSession(
-        data.user,
-        data.tokens.accessToken,
-        data.tokens.refreshToken
-      );
+      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken);
       return data;
     },
     [persistSession]

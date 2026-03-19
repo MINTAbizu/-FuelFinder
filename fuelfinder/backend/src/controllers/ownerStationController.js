@@ -4,6 +4,10 @@ const {
   normalizePaymentDetails,
   pickPaymentDetailsPayload
 } = require("../utils/stationPaymentDetails");
+const {
+  getAssignedStationIds,
+  isAssignedStationOnlyRole
+} = require("../utils/stationScope");
 
 function buildStationResponse(station) {
   const coords = Array.isArray(station.location?.coordinates) ? station.location.coordinates : [];
@@ -39,13 +43,15 @@ function resolveStationScopeQuery(user) {
   }
 
   const query = {};
-  const stationIds = Array.isArray(user.stationIds)
-    ? user.stationIds.map((value) => String(value))
-    : [];
+  const stationIds = getAssignedStationIds(user);
 
   if (stationIds.length) {
     query._id = { $in: stationIds };
     return query;
+  }
+
+  if (isAssignedStationOnlyRole(user)) {
+    return null;
   }
 
   const organizationId = String(user.organizationId || "").trim();

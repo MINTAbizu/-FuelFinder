@@ -1,3 +1,8 @@
+const {
+  getAssignedStationIds,
+  isAssignedStationOnlyRole
+} = require("../utils/stationScope");
+
 function readScopedId(req, key) {
   const paramValue = req.params ? req.params[key] : undefined;
   const queryValue = req.query ? req.query[key] : undefined;
@@ -71,8 +76,15 @@ function requireScope(options = {}) {
       return res.status(403).json({ message: "Forbidden: city scope denied." });
     }
 
-    if (stationId && req.user.stationIds.length && !hasId(req.user.stationIds, stationId)) {
-      return res.status(403).json({ message: "Forbidden: station scope denied." });
+    if (stationId) {
+      const assignedStationIds = getAssignedStationIds(req.user);
+      if (isAssignedStationOnlyRole(req.user)) {
+        if (!assignedStationIds.length || !hasId(assignedStationIds, stationId)) {
+          return res.status(403).json({ message: "Forbidden: station scope denied." });
+        }
+      } else if (assignedStationIds.length && !hasId(assignedStationIds, stationId)) {
+        return res.status(403).json({ message: "Forbidden: station scope denied." });
+      }
     }
 
     if (branchId && req.user.branchIds.length && !hasId(req.user.branchIds, branchId)) {
@@ -87,4 +99,3 @@ module.exports = {
   requireRole,
   requireScope
 };
-

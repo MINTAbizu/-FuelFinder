@@ -8,6 +8,11 @@ const {
   createTelebirrCheckout,
   verifyTelebirrWebhookSignature
 } = require("../services/telebirr");
+const {
+  getAssignedStationIds,
+  hasAssignedStationAccess,
+  isAssignedStationOnlyRole
+} = require("../utils/stationScope");
 
 const ACTIVE_STATUSES = ["pending_payment", "waiting", "called"];
 const AVERAGE_MINUTES_PER_CAR = 3;
@@ -114,9 +119,13 @@ async function canOperateStation(user, stationId) {
   if (!user) return false;
   if (String(user.role || "") === "super_admin") return true;
 
-  const allowedStationIds = Array.isArray(user.stationIds) ? user.stationIds.map(String) : [];
+  const allowedStationIds = getAssignedStationIds(user);
   if (allowedStationIds.length) {
-    return allowedStationIds.includes(String(stationId));
+    return hasAssignedStationAccess(user, stationId);
+  }
+
+  if (isAssignedStationOnlyRole(user)) {
+    return false;
   }
 
   // If user has no explicit station restriction, evaluate optional broader scope.

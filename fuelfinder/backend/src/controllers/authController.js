@@ -21,6 +21,11 @@ const {
 const SALT_ROUNDS = 12;
 const PHONE_OTP_MAX_ATTEMPTS = Number(process.env.PHONE_OTP_MAX_ATTEMPTS || 5);
 const PHONE_OTP_RESEND_COOLDOWN_SECONDS = Number(process.env.PHONE_OTP_RESEND_COOLDOWN_SECONDS || 60);
+const PUBLIC_USER_SELECT =
+  "_id name email phone phoneVerified twoFactorEnabled authProvider isBlocked role organizationId cityIds stationIds branchIds createdAt";
+const AUTH_FLOW_USER_SELECT = `${PUBLIC_USER_SELECT} passwordHash refreshTokenHash googleSub biometricDevices phoneVerificationHash phoneVerificationExpiresAt phoneVerificationAttempts phoneVerificationLastSentAt twoFactorOtpHash twoFactorOtpExpiresAt twoFactorOtpAttempts twoFactorOtpLastSentAt`;
+const REFRESH_USER_SELECT = `${PUBLIC_USER_SELECT} refreshTokenHash`;
+const BIOMETRIC_USER_SELECT = `${PUBLIC_USER_SELECT} biometricDevices`;
 
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -143,9 +148,11 @@ async function issuePhoneVerification(user, { enforceCooldown = false } = {}) {
   user.phoneVerificationExpiresAt = otpExpiresAt;
   user.phoneVerificationAttempts = 0;
   user.phoneVerificationLastSentAt = now;
-  await sendSms(String(user.phone || ""), buildPhoneVerificationMessage(otpCode));
   setDevOtp(user._id, otpCode, otpExpiresAt);
-  await user.save();
+  await Promise.all([
+    sendSms(String(user.phone || ""), buildPhoneVerificationMessage(otpCode)),
+    user.save()
+  ]);
 
   return {
     verificationToken: signPhoneOtpToken({
@@ -200,9 +207,11 @@ async function issueTwoFactorChallenge(user, { purpose = "two_factor_login", enf
   user.twoFactorOtpExpiresAt = otpExpiresAt;
   user.twoFactorOtpAttempts = 0;
   user.twoFactorOtpLastSentAt = now;
-  await sendSms(String(user.phone || ""), buildTwoFactorMessage(otpCode));
   setDevOtp(`${user._id}:${purpose}`, otpCode, otpExpiresAt);
-  await user.save();
+  await Promise.all([
+    sendSms(String(user.phone || ""), buildTwoFactorMessage(otpCode)),
+    user.save()
+  ]);
 
   return {
     verificationToken: signPhoneOtpToken({
@@ -231,7 +240,7 @@ async function issueTokenPair(user) {
   const refreshTokenHash = await bcrypt.hash(refreshToken, SALT_ROUNDS);
 
   user.refreshTokenHash = refreshTokenHash;
-  await user.save();
+  await User.updateOne({ _id: user._id }, { $set: { refreshTokenHash } });
 
   return { accessToken, refreshToken };
 }
@@ -239,12 +248,12 @@ async function issueTokenPair(user) {
 exports.register = async (req, res) => {
   try {
     const name = String(req.body.name || "").trim();
-    const phone = String(req.body.phone || "").trim();
+    const phone = normalizePhone(req.body.phone);
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "");
     const role = String(req.body.role || "customer").trim().toLowerCase();
 
-    const existing = await User.findOne({ email });
+    const existing = await User.exists({ email });
     if (existing) {
       return res.status(409).json({ message: "Email already registered." });
     }
@@ -304,7 +313,7 @@ exports.bootstrapSuperAdmin = async (req, res) => {
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "");
 
-    const existing = await User.findOne({ email });
+    const existing = await User.exists({ email });
     if (existing) {
       return res.status(409).json({ message: "Email already registered." });
     }
@@ -334,7 +343,7 @@ exports.login = async (req, res) => {
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "");
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).select(AUTH_FLOW_USER_SELECT);
     if (!user) {
       return res.status(401).json({ message: "Invalid credentials." });
     }
@@ -392,7 +401,7 @@ exports.refresh = async (req, res) => {
     const refreshToken = String(req.body.refreshToken || "");
 
     const payload = verifyRefreshToken(refreshToken);
-    const user = await User.findById(payload.sub);
+    const user = await User.findById(payload.sub).select(REFRESH_USER_SELECT);
     if (!user || !user.refreshTokenHash) {
       return res.status(401).json({ message: "Invalid refresh token." });
     }
@@ -406,7 +415,10 @@ exports.refresh = async (req, res) => {
     }
 
     const tokens = await issueTokenPair(user);
-    return res.json({ tokens });
+    return res.json({
+      user: buildUserResponse(user),
+      tokens
+    });
   } catch (error) {
     return res.status(401).json({ message: "Refresh token expired or invalid." });
   }
@@ -414,11 +426,10 @@ exports.refresh = async (req, res) => {
 
 exports.logout = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ message: "User not found." });
-
-    user.refreshTokenHash = "";
-    await user.save();
+    const result = await User.updateOne({ _id: req.user.id }, { $set: { refreshTokenHash: "" } });
+    if (!result.matchedCount) {
+      return res.status(404).json({ message: "User not found." });
+    }
 
     return res.json({ message: "Logged out successfully." });
   } catch (error) {
@@ -431,7 +442,9 @@ exports.biometricLogin = async (req, res) => {
     const deviceId = String(req.body.deviceId || "").trim();
     const biometricSecret = String(req.body.biometricSecret || "").trim();
 
-    const user = await User.findOne({ "biometricDevices.deviceId": deviceId });
+    const user = await User.findOne({ "biometricDevices.deviceId": deviceId }).select(
+      BIOMETRIC_USER_SELECT
+    );
     if (!user) {
       return res.status(401).json({ message: "Biometric login is not available for this device." });
     }
@@ -465,9 +478,7 @@ exports.biometricLogin = async (req, res) => {
 
 exports.me = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select(
-      "_id name email phone phoneVerified twoFactorEnabled authProvider isBlocked role organizationId cityIds stationIds branchIds createdAt"
-    );
+    const user = await User.findById(req.user.id).select(PUBLIC_USER_SELECT).lean();
     if (!user) return res.status(404).json({ message: "User not found." });
 
     return res.json({
@@ -988,7 +999,7 @@ exports.googleAuth = async (req, res) => {
       return res.status(401).json({ message: "Google account not verified." });
     }
 
-    let user = await User.findOne({ email });
+    let user = await User.findOne({ email }).select(AUTH_FLOW_USER_SELECT);
     if (user && user.isBlocked) {
       return res.status(403).json({ message: "Account is blocked. Contact administrator." });
     }

@@ -41,7 +41,7 @@ const sections = [
 
 const roleLabels = {
   staff: "Staff",
-  station_manager: "Station CEO",
+  station_manager: "Station Manager",
   city_manager: "City Manager",
   org_admin: "Org Owner",
   super_admin: "Super Admin"
@@ -80,6 +80,40 @@ function formatMoney(value, currency = "ETB") {
   } catch {
     return `${currency} ${amount.toFixed(2)}`;
   }
+}
+
+function formatFuelStatusLabel(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "full" || normalized === "available") return "Healthy stock";
+  if (normalized === "limited") return "Low stock";
+  if (normalized === "empty") return "Out of stock";
+  return "Partial stock";
+}
+
+function asFiniteNumber(value, fallback = 0) {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : fallback;
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function downloadCsvFile(filename, headers, rows) {
+  const csv = [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 function buildStationFormState(stationId, station) {
@@ -237,6 +271,49 @@ const CEO_TASKS = [
   }
 ];
 
+const SUPER_ADMIN_QUICK_ACTIONS = [
+  {
+    section: "overview",
+    label: "Summary",
+    note: "Check the selected station overview."
+  },
+  {
+    section: "queue",
+    label: "Queue",
+    note: "Open queue and call next."
+  },
+  {
+    section: "inventory",
+    label: "Fuel & Stock",
+    note: "Update live fuel availability."
+  },
+  {
+    section: "cashflow",
+    label: "Payments",
+    note: "Review transactions and payouts."
+  },
+  {
+    section: "staff",
+    label: "Users & Roles",
+    note: "Manage admin and station accounts."
+  },
+  {
+    section: "settings",
+    label: "Station Settings",
+    note: "Edit station profile and setup."
+  }
+];
+
+const STATION_MANAGER_QUICK_ACTIONS = [
+  { section: "queue", label: "Queue" },
+  { section: "inventory", label: "Fuel & Stock" },
+  { section: "cashflow", label: "Payments" },
+  { section: "pricing", label: "Promotions" },
+  { section: "staff", label: "Team" },
+  { section: "reports", label: "Reports" },
+  { section: "settings", label: "Station Profile" }
+];
+
 export default function Dashboard() {
   const [active, setActive] = useState("overview");
   const [session, setSession] = useState(() => loadSession());
@@ -255,6 +332,7 @@ export default function Dashboard() {
 
   const actorRole = String(session?.user?.role || "");
   const isSuperAdmin = actorRole === "super_admin";
+  const isStationManager = actorRole === "station_manager";
   const isStationExec = actorRole === "station_manager" || actorRole === "org_admin" || actorRole === "super_admin";
   const canManageStations = actorRole === "org_admin" || actorRole === "super_admin";
   const isCeo = actorRole === "station_manager" || actorRole === "org_admin";
@@ -418,6 +496,131 @@ export default function Dashboard() {
     });
   }, [cityFilter, regionFilter, stationGeo]);
 
+  const selectedStationGeo = useMemo(() => {
+    return stationGeo.find((item) => String(item.id) === String(stationId)) || null;
+  }, [stationGeo, stationId]);
+
+  const activePromotionCount = useMemo(() => {
+    return promotions.filter((item) => Boolean(item?.isActive)).length;
+  }, [promotions]);
+
+  const blockedTeamCount = useMemo(() => {
+    return teamUsers.filter((item) => Boolean(item?.isBlocked)).length;
+  }, [teamUsers]);
+
+  const fuelHealth = useMemo(() => {
+    const gasoline = asFiniteNumber(station?.fuelInventory?.gasolineLiters, 0);
+    const diesel = asFiniteNumber(station?.fuelInventory?.dieselLiters, 0);
+    const other = asFiniteNumber(station?.fuelInventory?.otherLiters, 0);
+    return {
+      gasoline,
+      diesel,
+      other,
+      total: gasoline + diesel + other
+    };
+  }, [
+    station?.fuelInventory?.dieselLiters,
+    station?.fuelInventory?.gasolineLiters,
+    station?.fuelInventory?.otherLiters
+  ]);
+
+  const operationalAlerts = useMemo(() => {
+    const alerts = [];
+    const waitingCount = Number(queueSnapshot?.waitingCount || 0);
+    const pendingCount = Number(queueSnapshot?.pendingCount || 0);
+    const paymentDetails = station?.paymentDetails || {};
+
+    if (!station?.isActive) {
+      alerts.push({
+        title: "Station is inactive",
+        detail: "Drivers may not be able to queue or trust station availability until you reopen it.",
+        pill: "Settings",
+        section: "settings",
+        warn: true
+      });
+    }
+
+    if (fuelHealth.gasoline > 0 && fuelHealth.gasoline < 1000) {
+      alerts.push({
+        title: "Gasoline stock is low",
+        detail: `${Math.round(fuelHealth.gasoline)} liters remaining. Update stock or prepare replenishment.`,
+        pill: "Fuel",
+        section: "inventory",
+        warn: true
+      });
+    }
+
+    if (fuelHealth.diesel > 0 && fuelHealth.diesel < 1000) {
+      alerts.push({
+        title: "Diesel stock is low",
+        detail: `${Math.round(fuelHealth.diesel)} liters remaining. Review delivery timing now.`,
+        pill: "Fuel",
+        section: "inventory",
+        warn: true
+      });
+    }
+
+    if (waitingCount >= 15) {
+      alerts.push({
+        title: "Queue pressure is high",
+        detail: `${waitingCount} drivers are waiting. Review lane flow and call the next ticket promptly.`,
+        pill: "Queue",
+        section: "queue",
+        warn: true
+      });
+    }
+
+    if (pendingCount > 0) {
+      alerts.push({
+        title: "Pending payments need follow-up",
+        detail: `${pendingCount} transactions are still pending. Review cashier and payment confirmations.`,
+        pill: "Payments",
+        section: "cashflow",
+        warn: false
+      });
+    }
+
+    if (!teamUsers.length) {
+      alerts.push({
+        title: "No station staff accounts found",
+        detail: "Create staff access for attendants and supervisors so activity stays traceable.",
+        pill: "Team",
+        section: "staff",
+        warn: false
+      });
+    }
+
+    if (!paymentDetails.providerName && !paymentDetails.phoneNumber && !paymentDetails.accountNumber) {
+      alerts.push({
+        title: "Customer payment details are incomplete",
+        detail: "Add wallet or bank details so customers see a verified payment method in the app.",
+        pill: "Profile",
+        section: "settings",
+        warn: false
+      });
+    }
+
+    if (!alerts.length) {
+      alerts.push({
+        title: "Operations look stable",
+        detail: "No urgent station issues were detected from the current live data.",
+        pill: "Stable",
+        section: "overview",
+        warn: false
+      });
+    }
+
+    return alerts.slice(0, 5);
+  }, [
+    fuelHealth.diesel,
+    fuelHealth.gasoline,
+    queueSnapshot?.pendingCount,
+    queueSnapshot?.waitingCount,
+    station?.isActive,
+    station?.paymentDetails,
+    teamUsers.length
+  ]);
+
   const visibleSections = useMemo(() => {
     if (isSuperAdmin || isStationExec) return sections;
     return sections.filter((section) => ["overview", "queue", "inventory"].includes(section.id));
@@ -460,7 +663,7 @@ export default function Dashboard() {
       { label: "Active queue", value: `${waitingCount} drivers` },
       {
         label: "Fuel status",
-        value: fuelStatus === "full" ? "All tanks healthy" : fuelStatus === "empty" ? "Out of stock" : "Partial stock"
+        value: formatFuelStatusLabel(fuelStatus)
       },
       { label: "Pending payments", value: `${Number(queueSnapshot?.pendingCount || 0)}` }
     ];
@@ -530,19 +733,15 @@ export default function Dashboard() {
 
         if (!list.length) {
           setStationId("");
+          if (actorRole === "station_manager") {
+            setStatusMessage("No assigned stations were found for this station manager account.");
+          }
           return;
         }
 
         const firstId = String(list[0].id || list[0]._id || "");
-        if (actorRole === "station_manager") {
-          // Single-station CEO experience: lock to the first assigned station.
-          setStationId(firstId);
-          if (list.length > 1) {
-            setStatusMessage(
-              "Multiple stations are assigned to this CEO account. The console is locked to the first station; ask a super admin to fix station scope."
-            );
-          }
-        } else if (!stationId) {
+        const hasCurrent = list.some((item) => String(item.id || item._id || "") === String(stationId));
+        if (!stationId || !hasCurrent) {
           setStationId(firstId);
         }
       } catch (error) {
@@ -829,6 +1028,24 @@ export default function Dashboard() {
     if (!stationId) return;
     loadPromotions();
   }, [active, isStationExec, session?.tokens?.accessToken, stationId]);
+
+  useEffect(() => {
+    if (!session?.tokens?.accessToken) return;
+    if (!isStationManager) return;
+    if (!stationId) return;
+    if (!["overview", "reports"].includes(active)) return;
+
+    loadStationTeam();
+    loadPromotions();
+    loadStationPayments({
+      provider: "",
+      status: "",
+      from: "",
+      to: "",
+      page: 1,
+      limit: 10
+    });
+  }, [active, isStationManager, session?.tokens?.accessToken, stationId]);
 
   const handlePromotionSubmit = async (event) => {
     event.preventDefault();
@@ -1434,12 +1651,76 @@ export default function Dashboard() {
     }
   };
 
+  const handleDownloadQueueCsv = () => {
+    const waiting = Array.isArray(queueSnapshot?.waiting) ? queueSnapshot.waiting : [];
+    if (!waiting.length) {
+      setStatusMessage("There are no waiting tickets to export.");
+      return;
+    }
+
+    downloadCsvFile(
+      `queue-${stationId || "station"}.csv`,
+      ["Reservation code", "Position", "Fuel type", "Requested liters", "Joined at"],
+      waiting.map((ticket) => [
+        ticket?.reservationCode || "",
+        ticket?.position || "",
+        ticket?.fuelType || "",
+        ticket?.requestedLiters || "",
+        formatDateTime(ticket?.joinedAt)
+      ])
+    );
+    setStatusMessage("Queue CSV downloaded.");
+  };
+
+  const handleDownloadPaymentsCsv = () => {
+    if (!paymentsSnapshot.items.length) {
+      setStatusMessage("There are no payment rows to export.");
+      return;
+    }
+
+    downloadCsvFile(
+      `payments-${stationId || "station"}.csv`,
+      ["Created at", "Provider", "Status", "Gross", "Platform fee", "Station payout", "Reference"],
+      paymentsSnapshot.items.map((item) => [
+        formatDateTime(item?.createdAt),
+        item?.provider || "",
+        item?.status || "",
+        item?.amount || 0,
+        item?.platformFee || 0,
+        item?.stationPayout || 0,
+        item?.reference || item?.txRef || ""
+      ])
+    );
+    setStatusMessage("Payments CSV downloaded.");
+  };
+
+  const handleDownloadTeamCsv = () => {
+    if (!teamUsers.length) {
+      setStatusMessage("There are no team accounts to export.");
+      return;
+    }
+
+    downloadCsvFile(
+      `team-${stationId || "station"}.csv`,
+      ["Name", "Email", "Phone", "Role", "Blocked", "Created at"],
+      teamUsers.map((user) => [
+        user?.name || "",
+        user?.email || "",
+        user?.phone || "",
+        roleLabels[user?.role] || user?.role || "",
+        user?.isBlocked ? "Yes" : "No",
+        formatDateTime(user?.createdAt)
+      ])
+    );
+    setStatusMessage("Team CSV downloaded.");
+  };
+
   if (!session?.tokens?.accessToken) {
     return (
       <div className="login-shell">
         <div className="login-card">
           <h1>FuelFinder Owner Console</h1>
-          <p>Sign in to manage your station operations.</p>
+          <p>Sign in to manage station, city, organization, or super admin operations.</p>
           <form onSubmit={handleLogin} className="login-form">
             <label>
               Email
@@ -1461,19 +1742,35 @@ export default function Dashboard() {
   }
 
   const canSwitchStation =
-    (isSuperAdmin || actorRole === "org_admin" || actorRole === "city_manager") && stations.length > 0;
+    (isSuperAdmin ||
+      actorRole === "org_admin" ||
+      actorRole === "city_manager" ||
+      (isStationManager && stations.length > 1)) &&
+    stations.length > 0;
   const resolvedStationName =
     station?.name ||
     filteredStations.find((item) => String(item.id) === String(stationId))?.name ||
     stations.find((item) => String(item.id) === String(stationId))?.name ||
     (stationId ? `Station ${stationId}` : "Station");
+  const consoleScopeLabel = isSuperAdmin
+    ? "Super admin workspace"
+    : isStationManager
+      ? "Station manager workspace"
+    : actorRole === "city_manager"
+      ? "City operations workspace"
+      : actorRole === "org_admin"
+        ? "Organization owner workspace"
+        : "Station operations workspace";
+  const consoleSubtitle = isSuperAdmin
+    ? "Region -> City -> Station -> Task"
+    : "FuelFinder Owner Console";
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
           <h1>FuelFinder</h1>
-          <p>Owner Console - station CEO view</p>
+          <p>{consoleScopeLabel}</p>
         </div>
         <nav className="nav">
           {visibleSections.map((section) => (
@@ -1500,7 +1797,7 @@ export default function Dashboard() {
         <div className="topbar">
           <div>
             <h2>{sectionTitle}</h2>
-            <p className="section-title">FuelFinder Owner Console</p>
+            <p className="section-title">{consoleSubtitle}</p>
           </div>
           <div className="station-chip">
             <strong>Station:</strong>
@@ -1509,7 +1806,8 @@ export default function Dashboard() {
                 <select value={stationId} onChange={(event) => setStationId(event.target.value)}>
                   {filteredStations.map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.name || `Station ${item.id}`}
+                      {(item.name || `Station ${item.id}`) +
+                        (item.cityLabel ? ` - ${item.cityLabel}` : "")}
                     </option>
                   ))}
                 </select>
@@ -1528,10 +1826,22 @@ export default function Dashboard() {
         </div>
 
         {isSuperAdmin && stations.length >= 1 && (
-          <div className="station-filters card">
-            <div className="form-row">
-              <label>
-                Region
+          <div className="super-admin-workspace card">
+            <div className="super-admin-head">
+              <div className="super-admin-copy">
+                <p className="section-title">Simple super admin flow</p>
+                <h3>Choose region, then city, then open the station task you need.</h3>
+                <p>
+                  This keeps large network data easier to handle on web: filter the network first,
+                  pick one station, then jump straight to queue, fuel, payments, users, or settings.
+                </p>
+              </div>
+              <div className="pill">{filteredStations.length} stations ready</div>
+            </div>
+
+            <div className="super-admin-steps">
+              <label className="super-admin-step">
+                <strong>1. Region</strong>
                 <select
                   value={regionFilter}
                   onChange={(event) => {
@@ -1546,8 +1856,9 @@ export default function Dashboard() {
                   ))}
                 </select>
               </label>
-              <label>
-                City
+
+              <label className="super-admin-step">
+                <strong>2. City</strong>
                 <select
                   value={cityFilter}
                   onChange={(event) => setCityFilter(event.target.value)}
@@ -1560,9 +1871,92 @@ export default function Dashboard() {
                   ))}
                 </select>
               </label>
-              <div className="pill">{filteredStations.length} stations</div>
+
+              <div className="super-admin-step">
+                <strong>3. Reset filters</strong>
+                <button
+                  className="btn alt small"
+                  type="button"
+                  onClick={() => {
+                    setRegionFilter("all");
+                    setCityFilter("all");
+                  }}
+                  disabled={regionFilter === "all" && cityFilter === "all"}
+                >
+                  Show whole network
+                </button>
+              </div>
             </div>
-            {!filteredStations.length && <span className="status-banner">No stations for this region/city.</span>}
+
+            {selectedStationGeo ? (
+              <div className="super-admin-summary">
+                <div className="super-admin-station-meta">
+                  <p className="section-title">Selected station</p>
+                  <h3>{selectedStationGeo.name || `Station ${selectedStationGeo.id}`}</h3>
+                  <p>
+                    {selectedStationGeo.cityLabel} - {selectedStationGeo.regionLabel}
+                  </p>
+                  <p>{selectedStationGeo.address || "Address not set yet."}</p>
+                  <div className="super-admin-badges">
+                    <span className={`pill ${selectedStationGeo.isActive ? "" : "warn"}`}>
+                      {selectedStationGeo.isActive ? "Open" : "Inactive"}
+                    </span>
+                    <span className="pill">{formatFuelStatusLabel(selectedStationGeo.fuelStatus)}</span>
+                  </div>
+                </div>
+
+                <div className="super-admin-actions">
+                  {SUPER_ADMIN_QUICK_ACTIONS.map((action) => (
+                    <button
+                      key={action.section}
+                      className={active === action.section ? "btn small" : "btn alt small"}
+                      type="button"
+                      onClick={() => setActive(action.section)}
+                      title={action.note}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {filteredStations.length ? (
+              <div className="station-browser">
+                {filteredStations.map((item) => {
+                  const selected = String(item.id) === String(stationId);
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`station-browser-card${selected ? " selected" : ""}`}
+                      onClick={() => setStationId(String(item.id))}
+                    >
+                      <div className="station-browser-top">
+                        <div>
+                          <strong>{item.name || `Station ${item.id}`}</strong>
+                          <span>
+                            {item.cityLabel} - {item.regionLabel}
+                          </span>
+                        </div>
+                        <span className={`pill ${item.isActive ? "" : "warn"}`}>
+                          {item.isActive ? "Open" : "Inactive"}
+                        </span>
+                      </div>
+                      <p>{item.address || "Address not set yet."}</p>
+                      <div className="station-browser-meta">
+                        <span>Fuel: {formatFuelStatusLabel(item.fuelStatus)}</span>
+                        <span>Updated: {formatDateTime(item.fuelInventory?.updatedAt || item.updatedAt)}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="station-browser-empty">
+                No stations match this region and city. Reset the filters or choose a different area.
+              </div>
+            )}
           </div>
         )}
 
@@ -1582,9 +1976,89 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {isStationManager && (
+              <div className="card full">
+                <div className="topbar">
+                  <div>
+                    <h3>Assigned station workspace</h3>
+                    <p className="section-title">Only assigned stations are available to this manager account</p>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    {STATION_MANAGER_QUICK_ACTIONS.map((action) => (
+                      <button
+                        key={action.section}
+                        className={active === action.section ? "btn small" : "btn alt small"}
+                        type="button"
+                        onClick={() => setActive(action.section)}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="metrics">
+                  <div className="metric">
+                    <span>Assigned stations</span>
+                    <strong>{stations.length}</strong>
+                  </div>
+                  <div className="metric">
+                    <span>Selected city</span>
+                    <strong>{selectedStationGeo?.cityLabel || "--"}</strong>
+                  </div>
+                  <div className="metric">
+                    <span>Selected region</span>
+                    <strong>{selectedStationGeo?.regionLabel || "--"}</strong>
+                  </div>
+                  <div className="metric">
+                    <span>Team accounts</span>
+                    <strong>{teamUsers.length}</strong>
+                  </div>
+                  <div className="metric">
+                    <span>Live promotions</span>
+                    <strong>{activePromotionCount}</strong>
+                  </div>
+                  <div className="metric">
+                    <span>Blocked accounts</span>
+                    <strong>{blockedTeamCount}</strong>
+                  </div>
+                </div>
+
+                {stations.length > 1 ? (
+                  <div className="station-browser">
+                    {stations.map((item) => {
+                      const stationItem = stationGeo.find((entry) => String(entry.id) === String(item.id));
+                      const selected = String(item.id) === String(stationId);
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`station-browser-card${selected ? " selected" : ""}`}
+                          onClick={() => setStationId(String(item.id))}
+                        >
+                          <div className="station-browser-top">
+                            <div>
+                              <strong>{item.name || `Station ${item.id}`}</strong>
+                              <span>
+                                {stationItem?.cityLabel || "Unspecified city"} - {stationItem?.regionLabel || "Unspecified region"}
+                              </span>
+                            </div>
+                            <span className={`pill ${item.isActive ? "" : "warn"}`}>
+                              {item.isActive ? "Open" : "Inactive"}
+                            </span>
+                          </div>
+                          <p>{item.address || "Address not set yet."}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            )}
+
             {isCeo && (
               <div className="card full">
-                <h3>CEO checklist</h3>
+                <h3>Station manager checklist</h3>
                 <p className="section-title">
                   {todayKey} - {ceoTaskProgress.completed}/{ceoTaskProgress.total} done
                 </p>
@@ -1617,19 +2091,15 @@ export default function Dashboard() {
             )}
 
             <div className="card wide">
-              <h3>Live status</h3>
+              <h3>Live operations status</h3>
               <div className="form-row">
                 <label>
-                  Queue status
-                  <select defaultValue="open">
-                    <option value="open">Open</option>
-                    <option value="paused">Paused</option>
-                    <option value="closed">Closed</option>
-                  </select>
+                  Station status
+                  <input type="text" value={station?.isActive ? "Open" : "Inactive"} readOnly />
                 </label>
                 <label>
-                  Last updated
-                  <input type="text" value={formatDateTime(queueSnapshot?.fuelInventory?.updatedAt)} readOnly />
+                  Fuel status
+                  <input type="text" value={formatFuelStatusLabel(station?.fuelStatus)} readOnly />
                 </label>
                 <label>
                   Live queue length
@@ -1639,29 +2109,38 @@ export default function Dashboard() {
                   Estimated wait
                   <input type="text" value={formatMinutes(buildEstimate(queueSnapshot?.waitingCount || 0))} readOnly />
                 </label>
+                <label>
+                  Last fuel update
+                  <input type="text" value={formatDateTime(station?.fuelInventory?.updatedAt)} readOnly />
+                </label>
+                <label>
+                  Pending payments
+                  <input type="number" value={queueSnapshot?.pendingCount || 0} readOnly />
+                </label>
               </div>
-              <button className="btn alt" disabled>
-                Queue controls coming soon
+              <button className="btn alt" type="button" onClick={() => setActive("queue")}>
+                Open queue controls
               </button>
             </div>
 
             <div className="card narrow">
               <h3>Priority alerts</h3>
               <div className="list">
-                <div className="list-item">
-                  <div>
-                    <strong>Diesel below threshold</strong>
-                    <span>18% remaining</span>
+                {operationalAlerts.map((alert) => (
+                  <div className="list-item" key={alert.title}>
+                    <div>
+                      <strong>{alert.title}</strong>
+                      <span>{alert.detail}</span>
+                    </div>
+                    <button
+                      className={alert.warn ? "btn small" : "btn alt small"}
+                      type="button"
+                      onClick={() => setActive(alert.section)}
+                    >
+                      {alert.pill}
+                    </button>
                   </div>
-                  <span className="pill warn">Review</span>
-                </div>
-                <div className="list-item">
-                  <div>
-                    <strong>Queue spike</strong>
-                    <span>{queueSnapshot?.waitingCount || 0} drivers waiting</span>
-                  </div>
-                  <span className="pill">Live</span>
-                </div>
+                ))}
               </div>
             </div>
           </div>
@@ -1721,7 +2200,19 @@ export default function Dashboard() {
                       <strong>{ticket.reservationCode || "Ticket"}</strong>
                       <span>Position {ticket.position}</span>
                     </div>
-                    <button className="btn">View</button>
+                    <button
+                      className="btn small"
+                      type="button"
+                      onClick={() =>
+                        setStatusMessage(
+                          `${ticket.reservationCode || "Ticket"} is waiting in position ${ticket.position}${
+                            ticket.requestedLiters ? ` for ${ticket.requestedLiters} liters` : ""
+                          }.`
+                        )
+                      }
+                    >
+                      Details
+                    </button>
                   </div>
                 ))}
                 {!queueSnapshot?.waiting?.length && (
@@ -1787,38 +2278,54 @@ export default function Dashboard() {
                 <div className="list-item">
                   <div>
                     <strong>Diesel tank</strong>
-                    <span>{fuelForm.dieselLiters} liters remaining</span>
+                    <span>{Math.round(asFiniteNumber(fuelForm.dieselLiters, 0))} liters remaining</span>
                   </div>
-                  <span className="pill warn">Low</span>
+                  <span className={asFiniteNumber(fuelForm.dieselLiters, 0) < 1000 ? "pill warn" : "pill"}>
+                    {asFiniteNumber(fuelForm.dieselLiters, 0) < 1000 ? "Low" : "Stable"}
+                  </span>
                 </div>
                 <div className="list-item">
                   <div>
                     <strong>Gasoline tank</strong>
-                    <span>{fuelForm.gasolineLiters} liters remaining</span>
+                    <span>{Math.round(asFiniteNumber(fuelForm.gasolineLiters, 0))} liters remaining</span>
                   </div>
-                  <span className="pill">Stable</span>
+                  <span className={asFiniteNumber(fuelForm.gasolineLiters, 0) < 1000 ? "pill warn" : "pill"}>
+                    {asFiniteNumber(fuelForm.gasolineLiters, 0) < 1000 ? "Low" : "Stable"}
+                  </span>
+                </div>
+                <div className="list-item">
+                  <div>
+                    <strong>Other fuel</strong>
+                    <span>{Math.round(asFiniteNumber(fuelForm.otherLiters, 0))} liters remaining</span>
+                  </div>
+                  <span className={asFiniteNumber(fuelForm.otherLiters, 0) < 500 ? "pill warn" : "pill"}>
+                    {asFiniteNumber(fuelForm.otherLiters, 0) < 500 ? "Watch" : "Stable"}
+                  </span>
                 </div>
               </div>
             </div>
             <div className="card full">
-              <h3>Stock thresholds</h3>
-              <div className="form-row">
-                <label>
-                  Diesel low threshold (%)
-                  <input type="number" defaultValue={20} />
-                </label>
-                <label>
-                  Gasoline low threshold (%)
-                  <input type="number" defaultValue={25} />
-                </label>
-                <label>
-                  Other low threshold (%)
-                  <input type="number" defaultValue={30} />
-                </label>
+              <h3>Inventory operating standard</h3>
+              <div className="list">
+                <div className="list-item">
+                  <div>
+                    <strong>Record every tank update immediately</strong>
+                    <span>Fuel figures should match the physical dip or approved delivery log before customer demand spikes.</span>
+                  </div>
+                  <button className="btn small" type="button" onClick={handleFuelUpdate} disabled={isLoading}>
+                    Save live stock
+                  </button>
+                </div>
+                <div className="list-item">
+                  <div>
+                    <strong>Escalate low stock before outage</strong>
+                    <span>Use the live warnings above to trigger replenishment before customers see an empty station.</span>
+                  </div>
+                  <button className="btn alt small" type="button" onClick={() => setActive("reports")}>
+                    View report
+                  </button>
+                </div>
               </div>
-              <button className="btn" disabled>
-                Save thresholds (coming soon)
-              </button>
             </div>
           </div>
         )}
@@ -1828,7 +2335,7 @@ export default function Dashboard() {
             {!isStationExec ? (
               <div className="card full">
                 <h3>Cashflow</h3>
-                <p className="section-title">Station CEO only</p>
+                <p className="section-title">Station manager or higher</p>
                 <p>You do not have permission to view station payments.</p>
               </div>
             ) : (
@@ -1992,31 +2499,36 @@ export default function Dashboard() {
         {active === "pricing" && (
           <div className="grid">
             <div className="card wide">
-              <h3>Price updates</h3>
+              <h3>Customer visibility controls</h3>
               <p className="section-title">
-                Customer home promotions render before the station list and only appear when a station admin publishes them.
+                Use this section to control what customers see for the selected assigned station.
               </p>
-              <div className="form-row">
-                <label>
-                  Gasoline price
-                  <input type="number" step="0.01" defaultValue={3.79} />
-                </label>
-                <label>
-                  Diesel price
-                  <input type="number" step="0.01" defaultValue={3.49} />
-                </label>
-                <label>
-                  Other price
-                  <input type="number" step="0.01" defaultValue={3.29} />
-                </label>
-                <label>
-                  Effective time
-                  <input type="text" defaultValue="Immediate" />
-                </label>
+              <div className="metrics">
+                <div className="metric">
+                  <span>Station status</span>
+                  <strong>{station?.isActive ? "Open" : "Inactive"}</strong>
+                </div>
+                <div className="metric">
+                  <span>Fuel status</span>
+                  <strong>{formatFuelStatusLabel(station?.fuelStatus)}</strong>
+                </div>
+                <div className="metric">
+                  <span>Payment provider</span>
+                  <strong>{station?.paymentDetails?.providerName || "Not set"}</strong>
+                </div>
+                <div className="metric">
+                  <span>Live promotions</span>
+                  <strong>{activePromotionCount}</strong>
+                </div>
               </div>
-              <button className="btn alt" disabled>
-                Pricing integration coming soon
-              </button>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <button className="btn alt" type="button" onClick={() => setActive("inventory")}>
+                  Update fuel availability
+                </button>
+                <button className="btn" type="button" onClick={() => setActive("settings")}>
+                  Review public station profile
+                </button>
+              </div>
             </div>
             <div className="card narrow">
               <h3>Live carousel promos</h3>
@@ -2232,46 +2744,68 @@ export default function Dashboard() {
         {active === "reports" && (
           <div className="grid">
             <div className="card wide">
-              <h3>Performance snapshot</h3>
+              <h3>Operations report</h3>
+              <p className="section-title">Live metrics for the selected station</p>
               <div className="metrics">
                 <div className="metric">
-                  <span>Revenue (est.)</span>
-                  <strong>$18.2k</strong>
+                  <span>Assigned stations</span>
+                  <strong>{stations.length}</strong>
                 </div>
                 <div className="metric">
-                  <span>Repeat drivers</span>
-                  <strong>41%</strong>
+                  <span>Queue backlog</span>
+                  <strong>{queueSnapshot?.waitingCount || 0}</strong>
                 </div>
                 <div className="metric">
-                  <span>Average ticket</span>
-                  <strong>$28.60</strong>
+                  <span>Pending payments</span>
+                  <strong>{queueSnapshot?.pendingCount || 0}</strong>
                 </div>
                 <div className="metric">
-                  <span>Promo uplift</span>
-                  <strong>+12%</strong>
+                  <span>Gross payments</span>
+                  <strong>{formatMoney(paymentsSnapshot.summary?.amount || 0, "ETB")}</strong>
+                </div>
+                <div className="metric">
+                  <span>Station payout</span>
+                  <strong>{formatMoney(paymentsSnapshot.summary?.stationPayout || 0, "ETB")}</strong>
+                </div>
+                <div className="metric">
+                  <span>Active promotions</span>
+                  <strong>{activePromotionCount}</strong>
+                </div>
+                <div className="metric">
+                  <span>Team accounts</span>
+                  <strong>{teamUsers.length}</strong>
+                </div>
+                <div className="metric">
+                  <span>Last fuel update</span>
+                  <strong>{formatDateTime(station?.fuelInventory?.updatedAt)}</strong>
                 </div>
               </div>
             </div>
             <div className="card narrow">
               <h3>Export</h3>
-              <p className="section-title">Get CSV for partners</p>
-              <button className="btn alt" disabled>
-                Download daily CSV
+              <p className="section-title">Download current operational data</p>
+              <button className="btn alt" type="button" onClick={handleDownloadQueueCsv}>
+                Download queue CSV
               </button>
-              <button className="btn" disabled>
-                Download monthly CSV
+              <button className="btn" type="button" onClick={handleDownloadPaymentsCsv}>
+                Download payments CSV
+              </button>
+              <button className="btn" type="button" onClick={handleDownloadTeamCsv}>
+                Download team CSV
               </button>
             </div>
             <div className="card full">
-              <h3>Customer feedback</h3>
+              <h3>Operational alerts and standards</h3>
               <div className="list">
-                {["Queue moved fast today!", "Staff were helpful", "Prices changed late"].map((item) => (
-                  <div className="list-item" key={item}>
+                {operationalAlerts.map((alert) => (
+                  <div className="list-item" key={alert.title}>
                     <div>
-                      <strong>{item}</strong>
-                      <span>Submitted today</span>
+                      <strong>{alert.title}</strong>
+                      <span>{alert.detail}</span>
                     </div>
-                    <button className="btn">Reply</button>
+                    <button className={alert.warn ? "btn small" : "btn alt small"} type="button" onClick={() => setActive(alert.section)}>
+                      Open {alert.pill}
+                    </button>
                   </div>
                 ))}
               </div>
@@ -2585,7 +3119,7 @@ export default function Dashboard() {
             ) : !isStationExec ? (
               <div className="card full">
                 <h3>Team</h3>
-                <p className="section-title">Station CEO only</p>
+                <p className="section-title">Station manager or higher</p>
                 <p>You do not have permission to manage station users.</p>
               </div>
             ) : (
@@ -2673,7 +3207,7 @@ export default function Dashboard() {
                       >
                         {allowedTeamRoles.includes("staff") && <option value="staff">Staff</option>}
                         {allowedTeamRoles.includes("station_manager") && (
-                          <option value="station_manager">Station CEO</option>
+                          <option value="station_manager">Station Manager</option>
                         )}
                       </select>
                     </label>
@@ -2754,7 +3288,7 @@ export default function Dashboard() {
                         >
                           {allowedTeamRoles.includes("staff") && <option value="staff">Staff</option>}
                           {allowedTeamRoles.includes("station_manager") && (
-                            <option value="station_manager">Station CEO</option>
+                            <option value="station_manager">Station Manager</option>
                           )}
                         </select>
                       </label>
@@ -2777,7 +3311,7 @@ export default function Dashboard() {
             {!isStationExec ? (
               <div className="card full">
                 <h3>Station settings</h3>
-                <p className="section-title">Station CEO only</p>
+                <p className="section-title">Station manager or higher</p>
                 <p>You do not have permission to edit station profile settings.</p>
               </div>
             ) : (
@@ -3203,15 +3737,17 @@ export default function Dashboard() {
                 <div className="card full">
                   <h3>Integrations</h3>
                   <div className="list">
-                    {["POS system", "Pump telemetry", "Sentry alerts"].map((item) => (
-                      <div className="list-item" key={item}>
+                    {[
+                      { name: "POS system", status: "Planned with enterprise rollout" },
+                      { name: "Pump telemetry", status: "Use after telemetry hardware onboarding" },
+                      { name: "Sentry alerts", status: "Managed at platform level" }
+                    ].map((item) => (
+                      <div className="list-item" key={item.name}>
                         <div>
-                          <strong>{item}</strong>
-                          <span>Connect to unlock automation</span>
+                          <strong>{item.name}</strong>
+                          <span>{item.status}</span>
                         </div>
-                        <button className="btn" disabled>
-                          Connect
-                        </button>
+                        <span className="pill">Roadmap</span>
                       </div>
                     ))}
                   </div>

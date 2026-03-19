@@ -42,4 +42,7 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+userSchema.index({ googleSub: 1 }, { sparse: true });
+userSchema.index({ "biometricDevices.deviceId": 1 }, { sparse: true });
+
 module.exports = mongoose.model("User", userSchema);

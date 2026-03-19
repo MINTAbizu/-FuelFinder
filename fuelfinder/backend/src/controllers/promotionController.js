@@ -1,6 +1,11 @@
 const mongoose = require("mongoose");
 const Promotion = require("../models/Promotion");
 const Station = require("../models/Station");
+const {
+  getAssignedStationIds,
+  hasAssignedStationAccess,
+  isAssignedStationOnlyRole
+} = require("../utils/stationScope");
 
 function asText(value) {
   return String(value || "").trim();
@@ -21,7 +26,7 @@ function parseDateOrNull(value, fieldName) {
 }
 
 function isStationScopedUser(user = {}) {
-  return Array.isArray(user.stationIds) && user.stationIds.length > 0;
+  return getAssignedStationIds(user).length > 0;
 }
 
 function hasStationAccess(user = {}, station) {
@@ -29,7 +34,11 @@ function hasStationAccess(user = {}, station) {
   if (String(user.role || "") === "super_admin") return true;
 
   if (isStationScopedUser(user)) {
-    return user.stationIds.map((value) => String(value)).includes(String(station._id));
+    return hasAssignedStationAccess(user, station._id);
+  }
+
+  if (isAssignedStationOnlyRole(user)) {
+    return false;
   }
 
   const actorOrgId = String(user.organizationId || "").trim();
