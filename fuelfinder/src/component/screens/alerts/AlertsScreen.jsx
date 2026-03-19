@@ -1,5 +1,7 @@
- import React, { useCallback, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -11,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 
 import { useLanguage } from "../../context/LanguageContext";
+import { getPublicStationDetails } from "../../services/queueService";
 import {
   clearFuelAlertHistory,
   loadFuelAlertHistory,
@@ -30,10 +33,48 @@ function formatFuelLabel(value) {
   return "Gasoline";
 }
 
-export default function AlertsScreen() {
+function canShowRoute(alert) {
+  const availability = String(alert?.availability || "").trim().toLowerCase();
+  if (availability === "empty") return false;
+
+  const latitude = Number(alert?.latitude);
+  const longitude = Number(alert?.longitude);
+  const hasCoords = Number.isFinite(latitude) && Number.isFinite(longitude);
+  const hasStationId = Boolean(String(alert?.stationId || "").trim());
+  return hasCoords || hasStationId;
+}
+
+function buildRouteStationPayload(source, fallbackAlert) {
+  const latitude = Number(source?.latitude);
+  const longitude = Number(source?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  const stationId = String(
+    source?.stationId || source?._id || source?.id || fallbackAlert?.stationId || ""
+  ).trim();
+  const queueLength = Number(
+    source?.queue_length ?? source?.queueLength ?? fallbackAlert?.queueLength ?? 0
+  );
+
+  return {
+    stationId,
+    id: stationId,
+    name: String(source?.name || fallbackAlert?.stationName || "Fuel Station").trim() || "Fuel Station",
+    address: String(source?.address || fallbackAlert?.address || "").trim(),
+    latitude,
+    longitude,
+    queueLength: Number.isFinite(queueLength) && queueLength >= 0 ? queueLength : 0,
+    fuel_status: String(
+      source?.fuel_status || source?.fuelStatus || fallbackAlert?.availability || ""
+    ).trim(),
+  };
+}
+
+export default function AlertsScreen({ navigation }) {
   const { t } = useLanguage();
   const [alerts, setAlerts] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [routingAlertId, setRoutingAlertId] = useState("");
 
   const refreshAlerts = useCallback(async (markRead = false) => {
     const nextAlerts = markRead ? await markFuelAlertsRead() : await loadFuelAlertHistory();
@@ -69,6 +110,57 @@ export default function AlertsScreen() {
     await clearFuelAlertHistory();
     setAlerts([]);
   }, []);
+
+  const openAlertRoute = useCallback(
+    async (alertItem) => {
+      setRoutingAlertId(alertItem?.id || "");
+      try {
+        let routeStation = buildRouteStationPayload(alertItem, alertItem);
+        if (!routeStation) {
+          const stationId = String(alertItem?.stationId || "").trim();
+          if (!stationId) {
+            Alert.alert(
+              t("routeUnavailableTitle", { defaultValue: "Route unavailable" }),
+              t("routeUnavailableBody", {
+                defaultValue: "This station does not have valid map coordinates yet.",
+              })
+            );
+            return;
+          }
+
+          const stationDetail = await getPublicStationDetails(stationId);
+          routeStation = buildRouteStationPayload(stationDetail, alertItem);
+        }
+
+        if (!routeStation) {
+          Alert.alert(
+            t("routeUnavailableTitle", { defaultValue: "Route unavailable" }),
+            t("routeUnavailableBody", {
+              defaultValue: "This station does not have valid map coordinates yet.",
+            })
+          );
+          return;
+        }
+
+        navigation.navigate("Map", {
+          routeRequest: {
+            requestedAt: Date.now(),
+            station: routeStation,
+          },
+        });
+      } catch (_error) {
+        Alert.alert(
+          t("routeUnavailableTitle", { defaultValue: "Route unavailable" }),
+          t("routeUnavailableBody", {
+            defaultValue: "This station does not have valid map coordinates yet.",
+          })
+        );
+      } finally {
+        setRoutingAlertId("");
+      }
+    },
+    [navigation, t]
+  );
 
   return (
     <ScrollView
@@ -162,6 +254,22 @@ export default function AlertsScreen() {
                 </Text>
               ) : null}
             </View>
+
+            {canShowRoute(alert) ? (
+              <View style={styles.actionRow}>
+                <Pressable
+                  style={[styles.routeButton, routingAlertId === alert.id && styles.routeButtonDisabled]}
+                  onPress={() => openAlertRoute(alert)}
+                  disabled={routingAlertId === alert.id}
+                >
+                  {routingAlertId === alert.id ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.routeButtonText}>{t("homeScreen.route.show")}</Text>
+                  )}
+                </Pressable>
+              </View>
+            ) : null}
           </View>
         </View>
       ))}
@@ -311,5 +419,27 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: "#475569",
     fontWeight: "700",
+  },
+  actionRow: {
+    marginTop: 12,
+    flexDirection: "row",
+  },
+  routeButton: {
+    minWidth: 112,
+    minHeight: 36,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#0F766E",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  routeButtonDisabled: {
+    opacity: 0.7,
+  },
+  routeButtonText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "900",
   },
 });

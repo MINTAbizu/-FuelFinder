@@ -1,8 +1,35 @@
 import api from "./api";
+import {
+  buildOfflineCacheKey,
+  enqueueOfflineAction,
+  isNetworkError,
+  readCachedOfflineData,
+  requestWithOfflineCache,
+  writeCachedOfflineData,
+} from "./offlineService";
 
 export async function reserveQueueSlot(payload) {
-  const { data } = await api.post("/queue/reserve", payload);
-  return data;
+  try {
+    const { data } = await api.post("/queue/reserve", payload);
+    return data;
+  } catch (error) {
+    if (!isNetworkError(error)) {
+      throw error;
+    }
+
+    const queuedAction = await enqueueOfflineAction({
+      type: "queue.reserve",
+      payload,
+    });
+
+    return {
+      offlineQueued: true,
+      queueId: queuedAction.id,
+      reservationId: queuedAction.id,
+      reservationCode: "OFFLINE",
+      message: "Queue request saved offline. It will sync when you reconnect.",
+    };
+  }
 }
 
 export async function startTelebirrCheckout(reservationId) {
@@ -35,23 +62,77 @@ export async function confirmQueuePayment(payload) {
 }
 
 export async function getMyQueueTicket(stationId) {
-  const { data } = await api.get(`/queue/me/${stationId}`);
-  return data;
+  const cacheKey = buildOfflineCacheKey("queue.me", { stationId });
+  const EMPTY_TICKET_CACHE = { __offlineEmpty: true };
+
+  try {
+    const { data } = await api.get(`/queue/me/${stationId}`);
+    await writeCachedOfflineData(cacheKey, data);
+    return data;
+  } catch (error) {
+    if (Number(error?.response?.status || 0) === 404) {
+      await writeCachedOfflineData(cacheKey, EMPTY_TICKET_CACHE);
+      throw error;
+    }
+
+    if (!isNetworkError(error)) {
+      throw error;
+    }
+
+    const cached = await readCachedOfflineData(cacheKey, 1000 * 60 * 10);
+    if (cached && cached.__offlineEmpty) {
+      return null;
+    }
+    if (cached !== null) {
+      return cached;
+    }
+
+    throw error;
+  }
 }
 
 export async function leaveQueue(ticketId) {
-  const { data } = await api.post("/queue/leave", { ticketId });
-  return data;
+  try {
+    const { data } = await api.post("/queue/leave", { ticketId });
+    return data;
+  } catch (error) {
+    if (!isNetworkError(error)) {
+      throw error;
+    }
+
+    const queuedAction = await enqueueOfflineAction({
+      type: "queue.leave",
+      payload: { ticketId },
+    });
+
+    return {
+      offlineQueued: true,
+      queueId: queuedAction.id,
+      message: "Leave-queue request saved offline. It will sync when you reconnect.",
+    };
+  }
 }
 
 export async function getStationQueue(stationId) {
-  const { data } = await api.get(`/queue/station/${stationId}`);
-  return data;
+  return requestWithOfflineCache({
+    cacheKey: buildOfflineCacheKey("queue.station", { stationId }),
+    maxAgeMs: 1000 * 60 * 10,
+    request: async () => {
+      const { data } = await api.get(`/queue/station/${stationId}`);
+      return data;
+    },
+  });
 }
 
 export async function getPublicStationDetails(stationId) {
-  const { data } = await api.get(`/map/stations/${stationId}`);
-  return data?.station || data;
+  return requestWithOfflineCache({
+    cacheKey: buildOfflineCacheKey("station.details", { stationId }),
+    maxAgeMs: 1000 * 60 * 60 * 24,
+    request: async () => {
+      const { data } = await api.get(`/map/stations/${stationId}`);
+      return data?.station || data;
+    },
+  });
 }
 
 export async function startStationCheckIn(payload) {

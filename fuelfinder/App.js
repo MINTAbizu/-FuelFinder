@@ -26,6 +26,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-cont
 import FuelAlertMonitor from "./src/component/alerts/FuelAlertMonitor";
 import HomeScreen from "./src/component/screens/home/HomeScreen";
 import StationDetails from "./src/component/screens/home/StationDetails";
+import MapScreen from "./src/component/screens/map/MapScreen";
 import LoginScreen from "./src/component/screens/auth/LoginScreen";
 import RegisterScreen from "./src/component/screens/auth/RegisterScreen";
 import PhoneVerifyScreen from "./src/component/screens/auth/PhoneVerifyScreen";
@@ -62,7 +63,9 @@ import {
 import * as Location from "expo-location";
 import * as LocalAuthentication from "expo-local-authentication";
 import { AuthProvider, useAuth } from "./src/component/context/AuthContext";
+import { OfflineProvider, useOffline } from "./src/component/context/OfflineContext";
 import { LanguageProvider, useLanguage } from "./src/component/context/LanguageContext";
+import { clearOfflineStorage } from "./src/component/services/offlineService";
 
 const queryClient = new QueryClient();
 const RootStack = createNativeStackNavigator();
@@ -96,12 +99,42 @@ function LoadingScreen() {
   );
 }
 
-function PlaceholderScreen({ title }) {
+function OfflineStatusBanner() {
   const { t } = useLanguage();
+  const { isOffline, isSyncing, pendingActionsCount } = useOffline();
+
+  if (!isOffline && !isSyncing && !pendingActionsCount) {
+    return null;
+  }
+
+  const bannerText = isSyncing
+    ? t("offlineSyncingBanner", {
+        defaultValue: pendingActionsCount
+          ? `Syncing ${pendingActionsCount} saved change${pendingActionsCount === 1 ? "" : "s"}...`
+          : "Syncing saved changes...",
+      })
+    : isOffline
+      ? t("offlineBanner", {
+          defaultValue: pendingActionsCount
+            ? `Offline mode. ${pendingActionsCount} saved change${pendingActionsCount === 1 ? "" : "s"} waiting to sync.`
+            : "Offline mode. Using saved data until connection returns.",
+        })
+      : t("offlinePendingBanner", {
+          defaultValue: pendingActionsCount
+            ? `${pendingActionsCount} saved change${pendingActionsCount === 1 ? "" : "s"} waiting to sync.`
+            : "Saved changes waiting to sync.",
+        });
+
   return (
-    <View style={styles.placeholderScreen}>
-      <Text style={styles.placeholderTitle}>{title}</Text>
-      <Text style={styles.placeholderSubTitle}>{t("comingSoon")}</Text>
+    <View style={[styles.offlineBanner, isOffline ? styles.offlineBannerWarn : styles.offlineBannerSync]}>
+      <Ionicons
+        name={isSyncing ? "sync-outline" : isOffline ? "cloud-offline-outline" : "cloud-done-outline"}
+        size={16}
+        color={isOffline ? "#78350F" : "#164E63"}
+      />
+      <Text style={[styles.offlineBannerText, isOffline ? styles.offlineBannerTextWarn : styles.offlineBannerTextSync]}>
+        {bannerText}
+      </Text>
     </View>
   );
 }
@@ -162,7 +195,7 @@ async function requestBiometricAuthentication(t, authTypes, promptOverride) {
   });
 }
 
-function ProfileScreen() {
+function ProfileScreen({ navigation }) {
   const {
     user,
     signOut,
@@ -356,6 +389,7 @@ function ProfileScreen() {
         qc.clear();
         await AsyncStorage.multiRemove(Object.values(PREF_KEYS));
         await resetFuelAlertState();
+        await clearOfflineStorage();
         setPrefs({
           darkMode: false,
           pushNotifs: true,
@@ -791,16 +825,20 @@ function ProfileScreen() {
     setAccountBusy(true);
     try {
       const data = await updateMyProfile(payload);
-      await replaceUser(data.user);
+      const nextUser = data?.offlineQueued ? { ...user, ...payload } : data?.user;
+      if (nextUser) {
+        await replaceUser(nextUser);
+      }
       if (prefs.biometricUnlock) {
         await updateBiometricLoginMeta({
-          email: data?.user?.email || payload.email,
-          displayName: data?.user?.name || payload.name,
+          email: nextUser?.email || payload.email,
+          displayName: nextUser?.name || payload.name,
         });
       }
       Alert.alert(
         t("done"),
-        data?.message || t("profileUpdated", { defaultValue: "Profile updated successfully." })
+        data?.message ||
+          t("profileUpdated", { defaultValue: "Profile updated successfully." })
       );
       closeAccountModal();
     } catch (error) {
@@ -811,7 +849,7 @@ function ProfileScreen() {
     } finally {
       setAccountBusy(false);
     }
-  }, [closeAccountModal, prefs.biometricUnlock, profileForm.email, profileForm.name, profileForm.phone, replaceUser, t]);
+  }, [closeAccountModal, prefs.biometricUnlock, profileForm.email, profileForm.name, profileForm.phone, replaceUser, t, user]);
 
   const savePasswordChanges = React.useCallback(async () => {
     const currentPassword = String(passwordForm.currentPassword || "");
@@ -1019,9 +1057,18 @@ function ProfileScreen() {
       return;
     }
 
-    const url = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
-    openUrl(url);
-  }, [openUrl, t]);
+    closeAccountModal();
+    navigation.navigate("Map", {
+      routeRequest: {
+        requestedAt: Date.now(),
+        station: {
+          ...station,
+          latitude,
+          longitude,
+        },
+      },
+    });
+  }, [closeAccountModal, navigation, t]);
 
   const callSavedStation = React.useCallback((station) => {
     if (!station?.contact) {
@@ -2055,7 +2102,7 @@ function HomeStackNavigator() {
       <HomeStack.Screen
         name="StationDetails"
         component={StationDetails}
-        options={{ title: t("stationDetails") }}
+        options={{ title: t("stationDetails.screenTitle", { defaultValue: "Station Details" }) }}
       />
     </HomeStack.Navigator>
   );
@@ -2126,11 +2173,7 @@ function AppTabs() {
       })}
     >
       <Tab.Screen name="Home" component={HomeStackNavigator} options={{ title: t("home") }} />
-      <Tab.Screen
-        name="Map"
-        options={{ title: t("map") }}
-        children={() => <PlaceholderScreen title={t("map")} />}
-      />
+      <Tab.Screen name="Map" component={MapScreen} options={{ title: t("map") }} />
       <Tab.Screen
         name="Alerts"
         options={{
@@ -2271,6 +2314,7 @@ function AppNavigator() {
   return (
     <NavigationContainer>
       <View style={styles.navigatorRoot}>
+        <OfflineStatusBanner />
         {isAuthenticated ? <AppTabs /> : <AuthStack />}
         <FuelAlertMonitor enabled={isAuthenticated && !requiresBiometricUnlock} />
         {isAuthenticated && requiresBiometricUnlock ? (
@@ -2319,7 +2363,9 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <LanguageProvider>
           <AuthProvider>
-            <AppNavigator />
+            <OfflineProvider>
+              <AppNavigator />
+            </OfflineProvider>
           </AuthProvider>
         </LanguageProvider>
       </QueryClientProvider>
@@ -2330,6 +2376,33 @@ export default function App() {
 const styles = StyleSheet.create({
   navigatorRoot: {
     flex: 1,
+  },
+  offlineBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  offlineBannerWarn: {
+    backgroundColor: "#FEF3C7",
+    borderBottomColor: "#FCD34D",
+  },
+  offlineBannerSync: {
+    backgroundColor: "#CFFAFE",
+    borderBottomColor: "#67E8F9",
+  },
+  offlineBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  offlineBannerTextWarn: {
+    color: "#78350F",
+  },
+  offlineBannerTextSync: {
+    color: "#164E63",
   },
   loadingScreen: {
     flex: 1,
@@ -2422,22 +2495,6 @@ const styles = StyleSheet.create({
     minWidth: 18,
     height: 18,
     lineHeight: 12,
-  },
-  placeholderScreen: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#F8FAFC",
-  },
-  placeholderTitle: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#0F172A",
-    marginBottom: 4,
-  },
-  placeholderSubTitle: {
-    fontSize: 14,
-    color: "#64748B",
   },
   profileScreen: {
     flex: 1,

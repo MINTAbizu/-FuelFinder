@@ -1,4 +1,10 @@
 import api from "./api";
+import {
+  buildOfflineCacheKey,
+  enqueueOfflineAction,
+  isNetworkError,
+  requestWithOfflineCache,
+} from "./offlineService";
 
 export async function registerUser(payload) {
   const { data } = await api.post("/auth/register", payload);
@@ -16,13 +22,37 @@ export async function refreshUserToken(refreshToken) {
 }
 
 export async function getMyProfile() {
-  const { data } = await api.get("/auth/me");
-  return data;
+  return requestWithOfflineCache({
+    cacheKey: buildOfflineCacheKey("auth.me"),
+    maxAgeMs: 1000 * 60 * 60 * 6,
+    request: async () => {
+      const { data } = await api.get("/auth/me");
+      return data;
+    },
+  });
 }
 
 export async function updateMyProfile(payload) {
-  const { data } = await api.patch("/auth/me", payload);
-  return data;
+  try {
+    const { data } = await api.patch("/auth/me", payload);
+    return data;
+  } catch (error) {
+    if (!isNetworkError(error)) {
+      throw error;
+    }
+
+    const queuedAction = await enqueueOfflineAction({
+      type: "profile.update",
+      payload,
+    });
+
+    return {
+      offlineQueued: true,
+      queueId: queuedAction.id,
+      message: "Profile changes saved offline. They will sync when you reconnect.",
+      payload,
+    };
+  }
 }
 
 export async function registerBiometricLogin(payload) {

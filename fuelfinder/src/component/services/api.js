@@ -1,4 +1,5 @@
 import axios from "axios";
+import { isNetworkError, markOffline, markOnline } from "./offlineService";
 
 // Use your machine LAN IP for physical devices, e.g. http://192.168.1.20:5000/api
 const rawBaseUrl =
@@ -13,6 +14,19 @@ const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 60000,
 });
+
+api.interceptors.response.use(
+  (response) => {
+    markOnline();
+    return response;
+  },
+  (error) => {
+    if (isNetworkError(error)) {
+      markOffline();
+    }
+    return Promise.reject(error);
+  }
+);
 
 if (__DEV__) {
   // Useful to quickly verify which URL the app is calling.

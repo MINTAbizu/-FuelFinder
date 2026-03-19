@@ -10,6 +10,7 @@ import React, {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import api, { setApiAccessToken } from "../services/api";
+import { clearOfflineStorage, isNetworkError } from "../services/offlineService";
 import {
   biometricLogin,
   disableTwoFactorAuth,
@@ -97,6 +98,11 @@ export function AuthProvider({ children }) {
       await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
     } catch (_error) {
       // The session is already cleared in memory.
+    }
+    try {
+      await clearOfflineStorage();
+    } catch (_error) {
+      // Ignore offline cache cleanup failures after the live session is gone.
     }
   }, [applySession]);
 
@@ -192,12 +198,16 @@ export function AuthProvider({ children }) {
     let active = true;
 
     const restoreSession = async () => {
+      let storedAccessToken = "";
+      let storedRefreshToken = "";
+      let storedUser = null;
+
       try {
         const storedEntries = await AsyncStorage.multiGet(SESSION_STORAGE_KEYS);
         const storedValues = Object.fromEntries(storedEntries);
-        const storedAccessToken = storedValues[ACCESS_TOKEN_KEY] || "";
-        const storedRefreshToken = storedValues[REFRESH_TOKEN_KEY] || "";
-        const storedUser = parseStoredUser(storedValues[USER_KEY]);
+        storedAccessToken = storedValues[ACCESS_TOKEN_KEY] || "";
+        storedRefreshToken = storedValues[REFRESH_TOKEN_KEY] || "";
+        storedUser = parseStoredUser(storedValues[USER_KEY]);
 
         if (!storedAccessToken || !storedRefreshToken) {
           if (active) setIsLoading(false);
@@ -218,32 +228,50 @@ export function AuthProvider({ children }) {
           }
           await replaceUser(profile.user);
           setIsLoading(false);
-        } catch (_profileError) {
-          const data = await refreshUserToken(storedRefreshToken);
-          const nextAccessToken = data?.tokens?.accessToken;
-          const nextRefreshToken = data?.tokens?.refreshToken;
-          const nextUser = data?.user;
-
-          if (!nextAccessToken || !nextRefreshToken) {
-            throw new Error("Session restore failed");
+        } catch (profileError) {
+          if (isNetworkError(profileError) && storedUser) {
+            if (active) setIsLoading(false);
+            return;
           }
 
-          if (nextUser) {
-            await persistSession(nextUser, nextAccessToken, nextRefreshToken);
-          } else {
-            applySession(storedUser, nextAccessToken, nextRefreshToken);
-            const profile = await getMyProfile();
-            if (!active) return;
-            if (!profile?.user) {
-              throw new Error("Profile restore failed");
+          try {
+            const data = await refreshUserToken(storedRefreshToken);
+            const nextAccessToken = data?.tokens?.accessToken;
+            const nextRefreshToken = data?.tokens?.refreshToken;
+            const nextUser = data?.user;
+
+            if (!nextAccessToken || !nextRefreshToken) {
+              throw new Error("Session restore failed");
             }
-            await persistSession(profile.user, nextAccessToken, nextRefreshToken);
-          }
 
-          if (active) setIsLoading(false);
+            if (nextUser) {
+              await persistSession(nextUser, nextAccessToken, nextRefreshToken);
+            } else {
+              applySession(storedUser, nextAccessToken, nextRefreshToken);
+              const profile = await getMyProfile();
+              if (!active) return;
+              if (!profile?.user) {
+                throw new Error("Profile restore failed");
+              }
+              await persistSession(profile.user, nextAccessToken, nextRefreshToken);
+            }
+
+            if (active) setIsLoading(false);
+          } catch (refreshError) {
+            if (isNetworkError(refreshError) && storedUser) {
+              if (active) setIsLoading(false);
+              return;
+            }
+            throw refreshError;
+          }
         }
-      } catch (_error) {
+      } catch (error) {
         if (active) {
+          if (isNetworkError(error) && storedUser && storedAccessToken && storedRefreshToken) {
+            applySession(storedUser, storedAccessToken, storedRefreshToken);
+            setIsLoading(false);
+            return;
+          }
           await clearSession();
           setIsLoading(false);
         }

@@ -3,6 +3,7 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
 import api from "./api";
+import { buildOfflineCacheKey, requestWithOfflineCache } from "./offlineService";
 
 export const FUEL_ALERT_PREF_KEYS = {
   pushNotifications: "ff_pref_push_notifs",
@@ -286,15 +287,25 @@ export async function fetchStationsForFuelAlerts(currentLocation) {
   const lon = Number(currentLocation?.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
 
-  const { data } = await api.get("/map/nearby-fuel", {
-    params: {
-      lat,
-      lon,
+  return requestWithOfflineCache({
+    cacheKey: buildOfflineCacheKey("alerts.nearbyFuel", {
+      lat: Number(lat.toFixed(3)),
+      lon: Number(lon.toFixed(3)),
       radius: FUEL_ALERT_RADIUS_METERS,
+    }),
+    maxAgeMs: 1000 * 60 * 15,
+    request: async () => {
+      const { data } = await api.get("/map/nearby-fuel", {
+        params: {
+          lat,
+          lon,
+          radius: FUEL_ALERT_RADIUS_METERS,
+        },
+      });
+
+      return Array.isArray(data?.stations) ? data.stations : [];
     },
   });
-
-  return Array.isArray(data?.stations) ? data.stations : [];
 }
 
 export async function loadFuelAlertHistory() {
@@ -383,6 +394,8 @@ export async function triggerPreferredFuelAlert(candidate) {
   const availabilityLabel = getAvailabilityLabel(
     candidate.station?.fuel_status || candidate.station?.fuelStatus
   );
+  const latitude = Number(candidate.station?.latitude);
+  const longitude = Number(candidate.station?.longitude);
   const event = {
     id: `fuel_alert_${Date.now()}`,
     type: "preferred_fuel_nearby",
@@ -400,6 +413,8 @@ export async function triggerPreferredFuelAlert(candidate) {
     availability: String(candidate.station?.fuel_status || candidate.station?.fuelStatus || ""),
     availabilityLabel,
     address: String(candidate.station?.address || ""),
+    latitude: Number.isFinite(latitude) ? latitude : null,
+    longitude: Number.isFinite(longitude) ? longitude : null,
     inventorySummary: buildInventorySummary(candidate.station, candidate.preferredFuel),
     triggeredAt: new Date().toISOString(),
     readAt: null,

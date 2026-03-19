@@ -242,13 +242,34 @@ function toSavedStationMap(stations) {
   }, {});
 }
 
-export default function HomeScreen({ navigation }) {
+function getStationQueueLength(station) {
+  const queueLength = Number(station?.queue_length ?? station?.queueLength ?? 0);
+  return Number.isFinite(queueLength) && queueLength >= 0 ? queueLength : 0;
+}
+
+function normalizeRouteStation(station) {
+  const latitude = Number(station?.latitude);
+  const longitude = Number(station?.longitude);
+  return {
+    ...station,
+    id: getStationIdentity(station) || String(station?.id || "").trim(),
+    name: String(station?.name || "Fuel Station").trim() || "Fuel Station",
+    address: String(station?.address || "").trim(),
+    fuel_status: String(station?.fuel_status || station?.fuelStatus || "").trim(),
+    latitude: Number.isFinite(latitude) ? latitude : null,
+    longitude: Number.isFinite(longitude) ? longitude : null,
+    queue_length: getStationQueueLength(station),
+  };
+}
+
+export default function HomeScreen({ navigation, route }) {
   const { t } = useLanguage();
 
   const mapRef = useRef(null);
   const listRef = useRef(null);
   const watcherRef = useRef(null);
   const loadedRef = useRef(false);
+  const handledRouteRequestRef = useRef("");
 
   const [location, setLocation] = useState(null);
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
@@ -270,6 +291,8 @@ export default function HomeScreen({ navigation }) {
   const [routeCoords, setRouteCoords] = useState([]);
   const [routeSummary, setRouteSummary] = useState(null);
   const [activeRouteStationId, setActiveRouteStationId] = useState("");
+  const [routeDestinationStation, setRouteDestinationStation] = useState(null);
+  const [pendingRouteStation, setPendingRouteStation] = useState(null);
   const [savedStationIds, setSavedStationIds] = useState({});
   const [promotions, setPromotions] = useState([]);
   const [promotionsLoading, setPromotionsLoading] = useState(false);
@@ -518,6 +541,7 @@ export default function HomeScreen({ navigation }) {
         return;
       }
 
+      setRouteDestinationStation(normalizeRouteStation(station));
       setRoutingError("");
       try {
         const { data } = await api.get("/map/route", { params: { fromLat, fromLon, toLat, toLon } });
@@ -551,6 +575,52 @@ export default function HomeScreen({ navigation }) {
     },
     [location, t]
   );
+
+  useEffect(() => {
+    const routeRequest = route?.params?.routeRequest;
+    const requestId = String(routeRequest?.requestedAt || "").trim();
+    if (!requestId || handledRouteRequestRef.current === requestId) return;
+
+    handledRouteRequestRef.current = requestId;
+    const nextStation = normalizeRouteStation(routeRequest?.station);
+    const latitude = Number(nextStation?.latitude);
+    const longitude = Number(nextStation?.longitude);
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      setRoutingError(t("homeScreen.route.invalidCoords"));
+      return;
+    }
+
+    listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
+    setRouteDestinationStation(nextStation);
+    setPendingRouteStation(nextStation);
+    setMapCenter({ latitude, longitude });
+    setRoutingError("");
+    mapRef.current?.animateToRegion?.(
+      {
+        latitude,
+        longitude,
+        latitudeDelta: 0.05,
+        longitudeDelta: 0.05,
+      },
+      500
+    );
+  }, [route?.params?.routeRequest, t]);
+
+  useEffect(() => {
+    if (!pendingRouteStation) return;
+
+    if (location) {
+      drawRouteToStation(pendingRouteStation);
+      setPendingRouteStation(null);
+      return;
+    }
+
+    if (!hasLocationPermission && locationError) {
+      setRoutingError(t("homeScreen.route.needLocation"));
+      setPendingRouteStation(null);
+    }
+  }, [drawRouteToStation, hasLocationPermission, location, locationError, pendingRouteStation, t]);
 
   const filteredStations = useMemo(() => {
     const base = location || mapCenter;
@@ -646,6 +716,16 @@ export default function HomeScreen({ navigation }) {
   }, [stations]);
 
   const visibleMapStations = useMemo(() => filteredStations.slice(0, 40), [filteredStations]);
+  const showRouteDestinationMarker = useMemo(() => {
+    const latitude = Number(routeDestinationStation?.latitude);
+    const longitude = Number(routeDestinationStation?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false;
+
+    const destinationId = getStationIdentity(routeDestinationStation);
+    if (!destinationId) return true;
+
+    return !visibleMapStations.some((station) => getStationIdentity(station) === destinationId);
+  }, [routeDestinationStation, visibleMapStations]);
 
   const openPromotion = useCallback(
     async (promotion) => {
@@ -723,6 +803,18 @@ export default function HomeScreen({ navigation }) {
                     tracksViewChanges={false}
                   />
                 ))}
+                {showRouteDestinationMarker ? (
+                  <Marker
+                    coordinate={{
+                      latitude: Number(routeDestinationStation.latitude),
+                      longitude: Number(routeDestinationStation.longitude),
+                    }}
+                    title={routeDestinationStation.name}
+                    description={`${t("homeScreen.queue")}: ${getStationQueueLength(routeDestinationStation)} ${t("homeScreen.units.cars")}`}
+                    pinColor="#2563EB"
+                    tracksViewChanges={false}
+                  />
+                ) : null}
               </MapView>
             </View>
 

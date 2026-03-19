@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import * as Location from "expo-location";
@@ -44,13 +44,13 @@ function logReservationError(scope, error) {
   });
 }
 
-function formatSupportedFuels(supportedFuels) {
+function formatSupportedFuels(supportedFuels, labels) {
   const map = supportedFuels || {};
   const values = [];
-  if (map.gasoline) values.push("gasoline");
-  if (map.diesel) values.push("diesel");
-  if (map.other) values.push("other");
-  if (map.unknown || !values.length) return "not specified";
+  if (map.gasoline) values.push(labels.gasoline);
+  if (map.diesel) values.push(labels.diesel);
+  if (map.other) values.push(labels.other);
+  if (map.unknown || !values.length) return labels.notSpecified;
   return values.join(", ");
 }
 
@@ -77,11 +77,12 @@ function formatDateTime(value) {
   return date.toLocaleString();
 }
 
-export default function StationDetails({ route }) {
+export default function StationDetails({ navigation, route }) {
   const { t: tr } = useLanguage();
   const { user } = useAuth();
   const t = useMemo(
     () => ({
+      screenTitle: tr("stationDetails.screenTitle", { defaultValue: "Station Details" }),
       stationFallback: tr("stationDetails.stationFallback"),
       address: tr("stationDetails.address"),
       contact: tr("stationDetails.contact"),
@@ -156,6 +157,48 @@ export default function StationDetails({ route }) {
       attendantNote: tr("stationDetails.attendantNote"),
       objectIdError: tr("stationDetails.objectIdError"),
       otpForAttendant: tr("stationDetails.otpForAttendant"),
+      notSpecified: tr("stationDetails.notSpecified", { defaultValue: "Not specified" }),
+      myQueueTitle: tr("stationDetails.myQueueTitle", { defaultValue: "My Queue (Realtime)" }),
+      statusLabel: tr("stationDetails.statusLabel", { defaultValue: "Status" }),
+      myPositionLabel: tr("stationDetails.myPositionLabel", { defaultValue: "My Position" }),
+      peopleAheadLabel: tr("stationDetails.peopleAheadLabel", { defaultValue: "People Ahead" }),
+      ticketLabel: tr("stationDetails.ticketLabel", { defaultValue: "Ticket" }),
+      payWithChapa: tr("stationDetails.payWithChapa", { defaultValue: "Pay with Chapa" }),
+      paymentPhaseLabel: tr("stationDetails.paymentPhaseLabel", { defaultValue: "Phase" }),
+      reservationIdLabel: tr("stationDetails.reservationIdLabel", { defaultValue: "Reservation ID" }),
+      reservationCodeLabel: tr("stationDetails.reservationCodeLabel", { defaultValue: "Reservation Code" }),
+      ticketIdLabel: tr("stationDetails.ticketIdLabel", { defaultValue: "Ticket ID" }),
+      positionLabel: tr("stationDetails.positionLabel", { defaultValue: "Position" }),
+      etaMinutesLabel: tr("stationDetails.etaMinutesLabel", { defaultValue: "ETA Minutes" }),
+      expiresAtLabel: tr("stationDetails.expiresAtLabel", { defaultValue: "Expires At" }),
+      requestedLitersLabel: tr("stationDetails.requestedLitersLabel", { defaultValue: "Requested Liters" }),
+      estimatedAmountLabel: tr("stationDetails.estimatedAmountLabel", { defaultValue: "Estimated Amount" }),
+      noFuelTitle: tr("stationDetails.noFuelTitle", { defaultValue: "Station has no fuel" }),
+      noFuelBody: tr("stationDetails.noFuelBody", {
+        defaultValue: "This station is marked empty. Try another station.",
+      }),
+      limitedFuelTitle: tr("stationDetails.limitedFuelTitle", { defaultValue: "Limited fuel" }),
+      limitedFuelBody: tr("stationDetails.limitedFuelBody", {
+        defaultValue: "This station has limited fuel. Do you want to continue payment?",
+      }),
+      continueAction: tr("stationDetails.continueAction", { defaultValue: "Continue" }),
+      queueSavedOffline: tr("stationDetails.queueSavedOffline", {
+        defaultValue: "Queue request saved offline. It will sync when you reconnect. Payment still needs internet.",
+      }),
+      leaveSavedOffline: tr("stationDetails.leaveSavedOffline", {
+        defaultValue: "Leave-queue request saved offline. It will sync when you reconnect.",
+      }),
+      emailRequired: tr("stationDetails.emailRequired", {
+        defaultValue: "Email is required for Chapa payment.",
+      }),
+      checkoutUrlMissing: tr("stationDetails.checkoutUrlMissing", {
+        defaultValue: "Chapa checkout URL not available.",
+      }),
+      fuelOther: tr("homeScreen.fuel.other"),
+      fuelGasoline: tr("homeScreen.fuel.gasoline"),
+      fuelDiesel: tr("homeScreen.fuel.diesel"),
+      minuteShort: tr("homeScreen.route.min"),
+      noActiveTicketStatus: tr("stationDetails.noActiveTicket", { defaultValue: "No active ticket." }),
     }),
     [tr]
   );
@@ -166,7 +209,22 @@ export default function StationDetails({ route }) {
       empty: tr("homeScreen.status.empty"),
     };
   }, [tr]);
+  const getFuelLabel = useCallback(
+    (value) => {
+      if (value === "diesel") return t.fuelDiesel;
+      if (value === "other") return t.fuelOther;
+      return t.fuelGasoline;
+    },
+    [t.fuelDiesel, t.fuelGasoline, t.fuelOther]
+  );
   const { station } = route.params || {};
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: t.screenTitle,
+    });
+  }, [navigation, t.screenTitle]);
+
   const [requestedBand, setRequestedBand] = useState("10-20");
   const [fuelType, setFuelType] = useState("gasoline");
   const [requestedLiters, setRequestedLiters] = useState("10");
@@ -311,7 +369,12 @@ export default function StationDetails({ route }) {
       contact: stationMeta?.contact || station?.contact || t.contact,
       latitude: Number(stationMeta?.latitude ?? station?.latitude),
       longitude: Number(stationMeta?.longitude ?? station?.longitude),
-      supportedFuels: formatSupportedFuels(station?.supportedFuels),
+      supportedFuels: formatSupportedFuels(stationMeta?.supportedFuels || station?.supportedFuels, {
+        gasoline: t.fuelGasoline,
+        diesel: t.fuelDiesel,
+        other: t.fuelOther,
+        notSpecified: t.notSpecified,
+      }),
       fuelStatus,
       fuelInventory,
       queueLength: queue,
@@ -326,7 +389,19 @@ export default function StationDetails({ route }) {
             ).toFixed(1)
           : "4.5",
     };
-  }, [liveFuel, liveQueueCount, station, stationMeta, t.address, t.contact, t.stationFallback]);
+  }, [
+    liveFuel,
+    liveQueueCount,
+    station,
+    stationMeta,
+    t.address,
+    t.contact,
+    t.fuelDiesel,
+    t.fuelGasoline,
+    t.fuelOther,
+    t.notSpecified,
+    t.stationFallback,
+  ]);
 
   const normalizedFuelStatus = String(detail.fuelStatus || "").toLowerCase();
   const isFuelAvailable = normalizedFuelStatus === "available" || normalizedFuelStatus === "full";
@@ -465,7 +540,7 @@ export default function StationDetails({ route }) {
     } finally {
       setLoading(false);
     }
-  }, [queueEnabled, stationId]);
+  }, [queueEnabled, stationId, t.activeTicketLoaded, t.noActiveTicket]);
 
   const pollReservation = useCallback(
     async (nextReservationId, immediate = false) => {
@@ -515,7 +590,7 @@ export default function StationDetails({ route }) {
         }
       }, 2000);
     },
-    []
+    [t.waitingPaymentConfirm, t.paymentVerified, t.reservationExpired]
   );
 
   const reserveAndInitiateChapa = useCallback(async () => {
@@ -529,7 +604,7 @@ export default function StationDetails({ route }) {
     setPaymentPhase("reserving");
     try {
       if (isFuelEmpty) {
-        Alert.alert("Station has no fuel", "This station is marked empty. Try another station.");
+        Alert.alert(t.noFuelTitle, t.noFuelBody);
         setPaymentPhase("idle");
         setLoading(false);
         return;
@@ -537,11 +612,11 @@ export default function StationDetails({ route }) {
       if (isFuelLimited) {
         const proceed = await new Promise((resolve) => {
           Alert.alert(
-            "Limited fuel",
-            "This station has limited fuel. Do you want to continue payment?",
+            t.limitedFuelTitle,
+            t.limitedFuelBody,
             [
-              { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-              { text: "Continue", onPress: () => resolve(true) }
+              { text: tr("cancel"), style: "cancel", onPress: () => resolve(false) },
+              { text: t.continueAction, onPress: () => resolve(true) }
             ]
           );
         });
@@ -569,13 +644,25 @@ export default function StationDetails({ route }) {
 
       const nextReservationId = String(reserve?.reservationId || "");
       const nextReservationCode = String(reserve?.reservationCode || "");
+
+      if (reserve?.offlineQueued) {
+        setReservationId("");
+        setReservationCode("");
+        setPaymentPhase("pending");
+        setMessage(
+          reserve?.message ||
+            t.queueSavedOffline
+        );
+        return;
+      }
+
       setReservationId(nextReservationId);
       setReservationCode(nextReservationCode);
       setPaymentPhase("initiating");
 
       const userEmail = String(user?.email || "").trim();
       if (!userEmail) {
-        throw new Error("Email is required for Chapa payment.");
+        throw new Error(t.emailRequired);
       }
 
       const nameParts = String(user?.name || "Customer").trim().split(/\s+/).filter(Boolean);
@@ -597,7 +684,7 @@ export default function StationDetails({ route }) {
         "";
       if (nextTxRef) setTxRef(String(nextTxRef));
       if (!checkoutUrl) {
-        throw new Error("Chapa checkout URL not available.");
+        throw new Error(t.checkoutUrlMissing);
       }
 
       await WebBrowser.openBrowserAsync(checkoutUrl);
@@ -617,10 +704,13 @@ export default function StationDetails({ route }) {
     isFuelEmpty,
     isFuelLimited,
     litersValue,
+    pollReservation,
     queueEnabled,
     requestedBand,
     selectedUnitPrice,
     stationId,
+    t,
+    tr,
     user
   ]);
 
@@ -642,7 +732,7 @@ export default function StationDetails({ route }) {
     } finally {
       setLoading(false);
     }
-  }, [pollReservation, reservationId, txRef]);
+  }, [pollReservation, reservationId, t.missingReservationBody, t.missingReservationTitle, txRef]);
 
   const leaveMyQueue = useCallback(async () => {
     const ticketId = myTicket?.ticketId;
@@ -652,7 +742,14 @@ export default function StationDetails({ route }) {
     }
     setLoading(true);
     try {
-      await leaveQueue(ticketId);
+      const result = await leaveQueue(ticketId);
+      if (result?.offlineQueued) {
+        setMessage(
+          result?.message ||
+            t.leaveSavedOffline
+        );
+        return;
+      }
       setMyTicket(null);
       setReservationId("");
       setReservationCode("");
@@ -666,7 +763,7 @@ export default function StationDetails({ route }) {
     } finally {
       setLoading(false);
     }
-  }, [myTicket]);
+  }, [myTicket, t.failedLeaveQueue, t.leaveSavedOffline, t.leftQueue, t.noTicketBody, t.noTicketTitle]);
 
   const startCheckInNow = useCallback(async () => {
     const ticketId = myTicket?.ticketId || reservationId;
@@ -703,7 +800,18 @@ export default function StationDetails({ route }) {
     } finally {
       setLoading(false);
     }
-  }, [canStartCheckIn, myTicket, reservationId]);
+  }, [
+    canStartCheckIn,
+    myTicket,
+    reservationId,
+    t.checkInMissingTicketBody,
+    t.checkInMissingTicketTitle,
+    t.completePaymentFirst,
+    t.locationRequiredBody,
+    t.locationRequiredTitle,
+    t.startCheckInBtn,
+    t.startCheckInFailed,
+  ]);
 
   const getStatusStyle = () => {
     if (detail.fuelStatus === "available" || detail.fuelStatus === "full") return styles.statusFull;
@@ -747,15 +855,15 @@ export default function StationDetails({ route }) {
 
         <View style={styles.fuelGrid}>
           <View style={[styles.fuelCard, styles.fuelCardGasoline]}>
-            <Text style={styles.fuelCardTitle}>Gasoline</Text>
+            <Text style={styles.fuelCardTitle}>{t.fuelGasoline}</Text>
             <Text style={styles.fuelCardValue}>{detail.fuelInventory.gasolineLiters.toFixed(2)} L</Text>
           </View>
           <View style={[styles.fuelCard, styles.fuelCardDiesel]}>
-            <Text style={styles.fuelCardTitle}>Diesel</Text>
+            <Text style={styles.fuelCardTitle}>{t.fuelDiesel}</Text>
             <Text style={styles.fuelCardValue}>{detail.fuelInventory.dieselLiters.toFixed(2)} L</Text>
           </View>
           <View style={[styles.fuelCard, styles.fuelCardOther]}>
-            <Text style={styles.fuelCardTitle}>Other</Text>
+            <Text style={styles.fuelCardTitle}>{t.fuelOther}</Text>
             <Text style={styles.fuelCardValue}>{detail.fuelInventory.otherLiters.toFixed(2)} L</Text>
           </View>
         </View>
@@ -769,22 +877,22 @@ export default function StationDetails({ route }) {
             </View>
             <View style={[styles.queueMiniCard, styles.queueMiniCardLast]}>
               <Text style={styles.queueMiniLabel}>{t.estWait}</Text>
-              <Text style={styles.queueMiniValue}>{detail.waitTime} min</Text>
+              <Text style={styles.queueMiniValue}>{detail.waitTime} {t.minuteShort}</Text>
             </View>
           </View>
           <View style={styles.myQueueBox}>
-            <Text style={styles.myQueueTitle}>My Queue (Realtime)</Text>
+            <Text style={styles.myQueueTitle}>{t.myQueueTitle}</Text>
             <Text style={styles.myQueueText}>
-              Status: {String(myTicket?.status || "no active ticket")}
+              {t.statusLabel}: {String(myTicket?.status || t.noActiveTicketStatus)}
             </Text>
             <Text style={styles.myQueueText}>
-              My Position: {Number(myTicket?.position || 0)}
+              {t.myPositionLabel}: {Number(myTicket?.position || 0)}
             </Text>
             <Text style={styles.myQueueText}>
-              People Ahead: {Math.max(0, Number(myTicket?.position || 0) - 1)}
+              {t.peopleAheadLabel}: {Math.max(0, Number(myTicket?.position || 0) - 1)}
             </Text>
             <Text style={styles.myQueueText}>
-              Ticket: {String(myTicket?.reservationCode || "-")}
+              {t.ticketLabel}: {String(myTicket?.reservationCode || "-")}
             </Text>
           </View>
         </View>
@@ -822,7 +930,7 @@ export default function StationDetails({ route }) {
               onPress={() => setFuelType(type)}
             >
               <Text style={[styles.optionText, fuelType === type && styles.optionTextActive]}>
-                {type}
+                {getFuelLabel(type)}
               </Text>
             </Pressable>
           ))}
@@ -836,7 +944,7 @@ export default function StationDetails({ route }) {
           placeholder={t.litersPlaceholder}
           placeholderTextColor="#94A3B8"
         />
-        <Text style={styles.metaText}>{t.currentPrice} ({fuelType}): {selectedUnitPrice.toFixed(2)} ETB/L</Text>
+        <Text style={styles.metaText}>{t.currentPrice} ({getFuelLabel(fuelType)}): {selectedUnitPrice.toFixed(2)} ETB/L</Text>
         <Text style={styles.estimateText}>{t.estimatedTotal}: {estimatedAmount.toFixed(2)} ETB</Text>
         <Text style={styles.metaText}>{t.platformFee}: {platformFeeBirr.toFixed(2)} ETB</Text>
         <Text style={styles.metaText}>{t.amountToPay}</Text>
@@ -895,7 +1003,7 @@ export default function StationDetails({ route }) {
             onPress={reserveAndInitiateChapa}
             disabled={!queueEnabled || loading}
           >
-            <Text style={styles.primaryButtonText}>Pay with Chapa</Text>
+            <Text style={styles.primaryButtonText}>{t.payWithChapa}</Text>
           </Pressable>
 
           <Pressable
@@ -924,28 +1032,30 @@ export default function StationDetails({ route }) {
         </View>
 
         {loading ? <ActivityIndicator size="small" color="#0F766E" style={styles.loader} /> : null}
-        <Text style={styles.metaText}>phase: {paymentPhase}</Text>
-        <Text style={styles.metaText}>reservationId: {reservationId || "-"}</Text>
-        <Text style={styles.metaText}>reservationCode: {reservationCode || "-"}</Text>
+        <Text style={styles.metaText}>{t.paymentPhaseLabel}: {paymentPhase}</Text>
+        <Text style={styles.metaText}>{t.reservationIdLabel}: {reservationId || "-"}</Text>
+        <Text style={styles.metaText}>{t.reservationCodeLabel}: {reservationCode || "-"}</Text>
         {message ? <Text style={styles.infoText}>{message}</Text> : null}
         {disableLeaveAfterPaid ? (
           <Text style={styles.noticeText}>
-            Leave queue is disabled after payment for available stations.
+            {tr("stationDetails.leaveDisabledNotice", {
+              defaultValue: "Leave queue is disabled after payment for available stations.",
+            })}
           </Text>
         ) : null}
 
         {myTicket ? (
           <View style={styles.ticketCard}>
             <Text style={styles.ticketTitle}>{t.activeTicket}</Text>
-            <Text style={styles.metaText}>ticketId: {String(myTicket.ticketId || "-")}</Text>
-            <Text style={styles.metaText}>reservationCode: {String(myTicket.reservationCode || "-")}</Text>
-            <Text style={styles.metaText}>status: {String(myTicket.status || "-")}</Text>
-            <Text style={styles.metaText}>position: {String(myTicket.position ?? "-")}</Text>
-            <Text style={styles.metaText}>etaMinutes: {String(myTicket.etaMinutes ?? "-")}</Text>
-            <Text style={styles.metaText}>expiresAt: {formatDateTime(myTicket.expiresAt)}</Text>
-            <Text style={styles.metaText}>fuelType: {String(myTicket.fuelType || fuelType)}</Text>
-            <Text style={styles.metaText}>requestedLiters: {String(myTicket.requestedLiters ?? "-")}</Text>
-            <Text style={styles.metaText}>estimatedAmount: {String(myTicket.estimatedAmount ?? "-")} ETB</Text>
+            <Text style={styles.metaText}>{t.ticketIdLabel}: {String(myTicket.ticketId || "-")}</Text>
+            <Text style={styles.metaText}>{t.reservationCodeLabel}: {String(myTicket.reservationCode || "-")}</Text>
+            <Text style={styles.metaText}>{t.statusLabel}: {String(myTicket.status || "-")}</Text>
+            <Text style={styles.metaText}>{t.positionLabel}: {String(myTicket.position ?? "-")}</Text>
+            <Text style={styles.metaText}>{t.etaMinutesLabel}: {String(myTicket.etaMinutes ?? "-")}</Text>
+            <Text style={styles.metaText}>{t.expiresAtLabel}: {formatDateTime(myTicket.expiresAt)}</Text>
+            <Text style={styles.metaText}>{t.fuelType}: {getFuelLabel(String(myTicket.fuelType || fuelType))}</Text>
+            <Text style={styles.metaText}>{t.requestedLitersLabel}: {String(myTicket.requestedLiters ?? "-")}</Text>
+            <Text style={styles.metaText}>{t.estimatedAmountLabel}: {String(myTicket.estimatedAmount ?? "-")} ETB</Text>
           </View>
         ) : null}
       </View>
