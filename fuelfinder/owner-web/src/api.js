@@ -9,6 +9,47 @@ const GET_CACHE = new Map();
 const INFLIGHT_GET_REQUESTS = new Map();
 const MAX_CACHE_ENTRIES = 200;
 
+function getBrowserOrigin() {
+  if (typeof window === "undefined" || !window.location?.origin) {
+    return "";
+  }
+  return String(window.location.origin).replace(/\/+$/, "");
+}
+
+function getApiOrigin() {
+  try {
+    const baseUrl = getBrowserOrigin() || "http://localhost";
+    return new URL(API_BASE, baseUrl).origin;
+  } catch {
+    return "";
+  }
+}
+
+function buildNetworkErrorMessage() {
+  const browserOrigin = getBrowserOrigin();
+  const apiOrigin = getApiOrigin();
+  const isCrossOrigin = Boolean(browserOrigin && apiOrigin && browserOrigin !== apiOrigin);
+  const primaryReason = isCrossOrigin
+    ? "This is usually a network or CORS issue."
+    : "This usually means the API is unreachable.";
+  const originHint =
+    browserOrigin && isCrossOrigin
+      ? `Current site origin is ${browserOrigin}; the backend must allow it in CLIENT_ORIGIN, CLIENT_ORIGINS, or CORS_ALLOWED_ORIGINS.`
+      : "";
+  const apiHint = import.meta.env.VITE_API_BASE_URL
+    ? `API base is ${API_BASE}.`
+    : `API base defaulted to ${API_BASE}. Set VITE_API_BASE_URL in owner-web/.env if needed (then restart dev server).`;
+
+  return [
+    "Request failed before the server returned a response.",
+    primaryReason,
+    originHint,
+    apiHint
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function buildCacheKey(path, session) {
   return `${String(session?.user?.id || "guest")}:${String(path || "")}`;
 }
@@ -89,10 +130,7 @@ async function apiRequest(path, options = {}, { auth = true, retry = true, cache
       headers
     });
   } catch (_error) {
-    const hint = import.meta.env.VITE_API_BASE_URL
-      ? `API base is ${API_BASE}.`
-      : `API base defaulted to ${API_BASE}. Set VITE_API_BASE_URL in owner-web/.env if needed (then restart dev server).`;
-    throw new Error(`Request failed (network/CORS). ${hint}`);
+    throw new Error(buildNetworkErrorMessage());
   }
 
   if (response.status === 401 && auth && retry && session?.tokens?.refreshToken) {

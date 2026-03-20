@@ -13,14 +13,15 @@ const { createCorsOriginHandler } = require("./config/corsOrigins");
 
 const app = express();
 const isProduction = process.env.NODE_ENV === "production";
+const corsOptions = {
+  origin: createCorsOriginHandler({ isProduction }),
+  optionsSuccessStatus: 204,
+};
 
 app.set("trust proxy", 1);
 app.use(helmet());
-app.use(
-  cors({
-    origin: createCorsOriginHandler({ isProduction })
-  })
-);
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(morgan("dev"));
 app.use(
   express.json({

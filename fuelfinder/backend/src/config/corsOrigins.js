@@ -1,3 +1,13 @@
+const DEFAULT_ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:5174",
+  "http://127.0.0.1:5174",
+  "http://localhost:4173",
+  "http://127.0.0.1:4173",
+  "https://fuel-centeral-command.netlify.app",
+];
+
 function normalizeOrigin(origin) {
   return String(origin || "").trim().replace(/\/+$/, "");
 }
@@ -14,25 +24,25 @@ function buildWildcardRegex(pattern) {
 }
 
 function parseOriginRules() {
-  const rawOrigins = [
+  const entries = [
+    ...DEFAULT_ALLOWED_ORIGINS,
     process.env.CLIENT_ORIGIN,
     process.env.CLIENT_ORIGINS,
     process.env.CORS_ALLOWED_ORIGINS,
+    process.env.OWNER_WEB_ORIGIN,
+    process.env.OWNER_WEB_ORIGINS,
   ]
-    .map((value) => String(value || "").trim())
-    .filter(Boolean)
-    .join(",");
-
-  const entries = rawOrigins
-    .split(",")
+    .flatMap((value) => String(value || "").split(","))
     .map((value) => normalizeOrigin(value))
     .filter(Boolean);
+
+  const uniqueEntries = Array.from(new Set(entries));
 
   const exactOrigins = [];
   const wildcardOrigins = [];
   let allowAnyOrigin = false;
 
-  for (const entry of entries) {
+  for (const entry of uniqueEntries) {
     if (entry === "*") {
       allowAnyOrigin = true;
       continue;
@@ -69,6 +79,7 @@ function createCorsOriginHandler({ isProduction = false } = {}) {
     if (isAllowedOrigin(origin, { isProduction })) {
       return callback(null, true);
     }
+    console.warn(`[cors] blocked origin: ${normalizeOrigin(origin) || "<missing-origin>"}`);
     return callback(new Error("CORS origin denied."));
   };
 }
