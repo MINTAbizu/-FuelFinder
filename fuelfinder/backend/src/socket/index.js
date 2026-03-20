@@ -1,13 +1,15 @@
 const { Server } = require("socket.io");
 const { verifyAccessToken } = require("../utils/tokens");
 const User = require("../models/User");
+const { createCorsOriginHandler } = require("../config/corsOrigins");
 
 let io = null;
 
 function initSocket(server) {
+  const isProduction = process.env.NODE_ENV === "production";
   io = new Server(server, {
     cors: {
-      origin: process.env.CLIENT_ORIGIN || "*",
+      origin: createCorsOriginHandler({ isProduction }),
       methods: ["GET", "POST", "PATCH"]
     }
   });

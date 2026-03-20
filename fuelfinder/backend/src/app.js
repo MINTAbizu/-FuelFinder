@@ -9,26 +9,16 @@ const mapRoutes = require("./routes/mapRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const chapaPaymentRoutes = require("./routes/chapapayment.routes");
 const ownerRoutes = require("./routes/ownerRoutes");
+const { createCorsOriginHandler } = require("./config/corsOrigins");
 
 const app = express();
 const isProduction = process.env.NODE_ENV === "production";
-const rawClientOrigin = String(process.env.CLIENT_ORIGIN || "").trim();
-const allowedOrigins = rawClientOrigin
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-const allowAnyOrigin = allowedOrigins.includes("*");
 
 app.set("trust proxy", 1);
 app.use(helmet());
 app.use(
   cors({
-    origin(origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowAnyOrigin && !isProduction) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error("CORS origin denied."));
-    }
+    origin: createCorsOriginHandler({ isProduction })
   })
 );
 app.use(morgan("dev"));

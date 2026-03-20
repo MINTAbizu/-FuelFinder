@@ -195,6 +195,36 @@ async function requestBiometricAuthentication(t, authTypes, promptOverride) {
   });
 }
 
+function getBiometricSetupFailureMessage(t, error) {
+  const backendMessage = String(error?.response?.data?.message || "").trim();
+  if (backendMessage) return backendMessage;
+
+  const rawMessage = String(error?.message || "").trim();
+  const normalizedMessage = rawMessage.toLowerCase();
+
+  if (normalizedMessage.includes("network") || normalizedMessage.includes("timeout")) {
+    return t("biometricSetupNetworkError", {
+      defaultValue:
+        "FuelFinder could not reach the server to enable biometric login. Check your connection and try again.",
+    });
+  }
+
+  if (
+    normalizedMessage.includes("secure biometric storage failed") ||
+    normalizedMessage.includes("secure storage") ||
+    normalizedMessage.includes("keychain") ||
+    normalizedMessage.includes("keystore")
+  ) {
+    return t("biometricSetupStorageError", {
+      defaultValue:
+        "FuelFinder could not save the biometric login key securely on this device. Make sure screen lock and biometrics are enabled. If you are testing in Expo Go, switch to a development build.",
+    });
+  }
+
+  if (rawMessage) return rawMessage;
+  return t("somethingWentWrong");
+}
+
 function ProfileScreen({ navigation }) {
   const {
     user,
@@ -618,16 +648,32 @@ function ProfileScreen({ navigation }) {
       }
 
       const deviceId = await getOrCreateBiometricDeviceId();
+      const deviceLabel = buildBiometricDeviceLabel();
       const registration = await registerBiometricLogin({
         deviceId,
-        deviceLabel: buildBiometricDeviceLabel(),
+        deviceLabel,
       });
-      await saveBiometricLoginCredential({
-        deviceId: registration?.deviceId || deviceId,
-        biometricSecret: registration?.biometricSecret || "",
-        email: user?.email || "",
-        displayName: user?.name || "",
-      });
+      const registeredDeviceId = registration?.deviceId || deviceId;
+
+      try {
+        await saveBiometricLoginCredential({
+          deviceId: registeredDeviceId,
+          biometricSecret: registration?.biometricSecret || "",
+          email: user?.email || "",
+          displayName: user?.name || "",
+        });
+      } catch (storageError) {
+        try {
+          await unregisterBiometricLogin({
+            deviceId: registeredDeviceId,
+            deviceLabel,
+          });
+        } catch (_rollbackError) {
+          // Ignore rollback failures and surface the original storage error.
+        }
+        throw storageError;
+      }
+
       setPrefs((current) => ({ ...current, biometricUnlock: true }));
       await persistBool(PREF_KEYS.biometricUnlock, true);
       Alert.alert(
@@ -636,8 +682,11 @@ function ProfileScreen({ navigation }) {
           defaultValue: "Biometric unlock and biometric sign-in are now enabled for this device.",
         })
       );
-    } catch (_error) {
-      Alert.alert(t("somethingWentWrong"));
+    } catch (error) {
+      Alert.alert(
+        t("biometricFailedTitle", { defaultValue: "Biometric setup failed" }),
+        getBiometricSetupFailureMessage(t, error)
+      );
     }
   }, [PREF_KEYS.biometricUnlock, persistBool, prefs.biometricUnlock, t, user?.email, user?.name]);
 

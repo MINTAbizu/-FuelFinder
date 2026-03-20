@@ -1,0 +1,55 @@
+# Node dependencies
+node_modules/
+
+# Expo
+.expo/
+.expo-build-check/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native build outputs
+/ios
+/android
+
+# Kotlin/Java build artifacts
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro bundler
+.metro-health-check*
+
+# Debug logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+
+# Local environment variables
+.env
+.env.*.local
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Optional: VSCode settings
+.vscode/
+
+# Optional: JetBrains IDEs
+.idea/
+
+# Optional: Logs
+*.log
+
+# Exclude non-mobile subprojects and local artifacts from EAS uploads
+backend/
+owner-web/
+design.text
+android.app.ActivityThread

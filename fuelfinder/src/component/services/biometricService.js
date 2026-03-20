@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
+import * as LocalAuthentication from "expo-local-authentication";
 import { Platform } from "react-native";
 
 const BIOMETRIC_LOGIN_META_KEY = "ff_biometric_login_meta";
@@ -45,14 +46,29 @@ export async function saveBiometricLoginCredential({
     biometricSecret: String(biometricSecret || "").trim(),
   };
 
-  await SecureStore.setItemAsync(
-    BIOMETRIC_LOGIN_SECRET_KEY,
-    JSON.stringify(payload),
-    {
-      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
-      requireAuthentication: true,
-    }
-  );
+  if (!payload.deviceId || !payload.biometricSecret) {
+    throw new Error("Missing biometric credential for this device.");
+  }
+
+  const isSecureStoreAvailable = await SecureStore.isAvailableAsync();
+  if (!isSecureStoreAvailable) {
+    throw new Error("Secure storage is not available on this device.");
+  }
+
+  try {
+    await SecureStore.setItemAsync(
+      BIOMETRIC_LOGIN_SECRET_KEY,
+      JSON.stringify(payload),
+      {
+        keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+      }
+    );
+  } catch (error) {
+    const reason = String(error?.message || "").trim();
+    throw new Error(
+      reason ? `Secure biometric storage failed: ${reason}` : "Secure biometric storage failed."
+    );
+  }
 
   await AsyncStorage.setItem(
     BIOMETRIC_LOGIN_META_KEY,
@@ -86,6 +102,34 @@ export async function updateBiometricLoginMeta(patch) {
 }
 
 export async function loadBiometricLoginCredential() {
+  const [hasHardware, isEnrolled] = await Promise.all([
+    LocalAuthentication.hasHardwareAsync(),
+    LocalAuthentication.isEnrolledAsync(),
+  ]);
+
+  if (!hasHardware || !isEnrolled) {
+    return null;
+  }
+
+  const authResult = await LocalAuthentication.authenticateAsync({
+    promptMessage: "Use biometrics to sign in to FuelFinder",
+    cancelLabel: "Cancel",
+    fallbackLabel: "Use passcode",
+    disableDeviceFallback: false,
+  });
+
+  if (!authResult.success) {
+    const authError = String(authResult.error || "").trim().toLowerCase();
+    if (
+      authError === "user_cancel" ||
+      authError === "system_cancel" ||
+      authError === "app_cancel"
+    ) {
+      throw new Error("Biometric authentication was canceled.");
+    }
+    throw new Error("Biometric authentication failed.");
+  }
+
   const raw = await SecureStore.getItemAsync(BIOMETRIC_LOGIN_SECRET_KEY, {
     authenticationPrompt: "Use biometrics to sign in to FuelFinder",
   });
