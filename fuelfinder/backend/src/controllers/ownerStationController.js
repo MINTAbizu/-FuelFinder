@@ -26,6 +26,7 @@ function buildStationResponse(station) {
       updatedByUserId: fuelInventory.updatedByUserId ? String(fuelInventory.updatedByUserId) : null
     },
     paymentDetails: normalizePaymentDetails(station.paymentDetails),
+    chapaSubaccountId: station.chapaSubaccountId || "",
     isActive: Boolean(station.isActive),
     organizationId: station.organizationId ? String(station.organizationId) : null,
     cityId: station.cityId ? String(station.cityId) : null,
@@ -139,6 +140,9 @@ exports.updateMyStation = async (req, res) => {
         ...normalizePaymentDetails(station.paymentDetails),
         ...paymentDetails
       };
+    }
+    if (req.body.chapaSubaccountId !== undefined) {
+      station.chapaSubaccountId = String(req.body.chapaSubaccountId || "").trim();
     }
     if (req.body.isActive !== undefined) {
       station.isActive = Boolean(req.body.isActive);
