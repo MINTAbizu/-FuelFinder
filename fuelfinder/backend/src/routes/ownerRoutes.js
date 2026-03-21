@@ -2,6 +2,7 @@ const express = require("express");
 const auth = require("../middleware/auth");
 const { requireRole, requireScope } = require("../middleware/authorize");
 const ownerStationController = require("../controllers/ownerStationController");
+const ownerInventoryController = require("../controllers/ownerInventoryController");
 const ownerPaymentController = require("../controllers/ownerPaymentController");
 const ownerTeamController = require("../controllers/ownerTeamController");
 const promotionController = require("../controllers/promotionController");
@@ -18,6 +19,13 @@ router.get(
   "/stations/:stationId",
   requireScope({ stationKey: "stationId", requireAny: true }),
   ownerStationController.getMyStation
+);
+
+router.get(
+  "/stations/:stationId/fuel-stock/summary",
+  requireRole(STATION_EXEC_ROLES),
+  requireScope({ stationKey: "stationId", requireAny: true }),
+  ownerInventoryController.getStationFuelStockSummary
 );
 
 router.patch(

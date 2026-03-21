@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const QueueTicket = require("../models/QueueTicket");
 const Station = require("../models/Station");
 const { getIO } = require("../socket");
+const { recordStationFuelSnapshot } = require("../utils/stationFuelHistory");
 const {
   requestAuthToken,
   createTelebirrCheckout,
@@ -322,6 +323,11 @@ async function setStationFuelInventory(stationId, payload, actorUserId) {
   };
   station.fuelStatus = deriveFuelStatusFromInventory(station.fuelInventory);
   await station.save();
+  await recordStationFuelSnapshot({
+    station,
+    source: "manual_update",
+    actorUserId: actorUserId || null
+  }).catch(() => null);
 
   return {
     fuelStatus: station.fuelStatus,
@@ -376,6 +382,10 @@ async function consumeStationFuel(stationId, fuelType, requestedLiters) {
   };
   station.fuelStatus = deriveFuelStatusFromInventory(station.fuelInventory);
   await station.save();
+  await recordStationFuelSnapshot({
+    station,
+    source: "queue_reservation"
+  }).catch(() => null);
   emitStationFuelUpdated(stationId, station.fuelInventory, station.fuelStatus);
   return { ok: true, changed: true };
 }
@@ -405,6 +415,10 @@ async function restoreStationFuel(stationId, fuelType, requestedLiters) {
   };
   station.fuelStatus = deriveFuelStatusFromInventory(station.fuelInventory);
   await station.save();
+  await recordStationFuelSnapshot({
+    station,
+    source: "queue_restore"
+  }).catch(() => null);
   emitStationFuelUpdated(stationId, station.fuelInventory, station.fuelStatus);
   return { ok: true, changed: true };
 }

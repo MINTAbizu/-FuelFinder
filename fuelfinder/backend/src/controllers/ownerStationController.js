@@ -64,6 +64,11 @@ function resolveStationScopeQuery(user) {
   return null;
 }
 
+function canUpdateChapaSubaccount(user = {}) {
+  const role = String(user.role || "").trim();
+  return role === "station_manager" || role === "super_admin";
+}
+
 exports.listMyStations = async (req, res) => {
   try {
     const scopeQuery = resolveStationScopeQuery(req.user || {});
@@ -142,6 +147,11 @@ exports.updateMyStation = async (req, res) => {
       };
     }
     if (req.body.chapaSubaccountId !== undefined) {
+      if (!canUpdateChapaSubaccount(req.user)) {
+        return res.status(403).json({
+          message: "Only station managers or super admin can set chapa subaccount id."
+        });
+      }
       station.chapaSubaccountId = String(req.body.chapaSubaccountId || "").trim();
     }
     if (req.body.isActive !== undefined) {
