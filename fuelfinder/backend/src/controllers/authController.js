@@ -18,14 +18,19 @@ const {
   verifyRefreshToken
 } = require("../utils/tokens");
 
-const SALT_ROUNDS = 12;
+const PASSWORD_SALT_ROUNDS = Math.max(8, Number(process.env.PASSWORD_SALT_ROUNDS || 10));
 const PHONE_OTP_MAX_ATTEMPTS = Number(process.env.PHONE_OTP_MAX_ATTEMPTS || 5);
 const PHONE_OTP_RESEND_COOLDOWN_SECONDS = Number(process.env.PHONE_OTP_RESEND_COOLDOWN_SECONDS || 60);
+const OTP_SMS_RESPONSE_WAIT_MS = Math.max(
+  0,
+  Number(process.env.OTP_SMS_RESPONSE_WAIT_MS || 1500)
+);
 const PUBLIC_USER_SELECT =
   "_id name email phone phoneVerified twoFactorEnabled authProvider isBlocked role organizationId cityIds stationIds branchIds createdAt";
 const AUTH_FLOW_USER_SELECT = `${PUBLIC_USER_SELECT} passwordHash refreshTokenHash googleSub biometricDevices phoneVerificationHash phoneVerificationExpiresAt phoneVerificationAttempts phoneVerificationLastSentAt twoFactorOtpHash twoFactorOtpExpiresAt twoFactorOtpAttempts twoFactorOtpLastSentAt`;
 const REFRESH_USER_SELECT = `${PUBLIC_USER_SELECT} refreshTokenHash`;
 const BIOMETRIC_USER_SELECT = `${PUBLIC_USER_SELECT} biometricDevices`;
+const BCRYPT_HASH_PREFIX = /^\$2[abxy]\$\d{2}\$/;
 
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -73,6 +78,63 @@ function buildPhoneVerificationMessage(code) {
 function buildTwoFactorMessage(code) {
   const minutes = Math.max(1, Math.ceil(OTP_TTL_SECONDS / 60));
   return `Your FuelFinder security code is ${code}. It expires in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+}
+
+function hashStoredToken(value) {
+  return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
+}
+
+function verifyStoredTokenHash(savedHash, value) {
+  const saved = String(savedHash || "").trim();
+  const incoming = hashStoredToken(value);
+
+  if (!saved || saved.length !== incoming.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(Buffer.from(saved), Buffer.from(incoming));
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function saveOtpChallengeAndDispatchSms(user, message) {
+  await user.save();
+
+  const sendPromise = sendSms(String(user.phone || ""), message).catch((error) => {
+    console.error("[auth:sms] Failed to send OTP SMS:", error?.message || error);
+    throw error;
+  });
+
+  if (!OTP_SMS_RESPONSE_WAIT_MS) {
+    void sendPromise.catch(() => {});
+    return { deliveredInResponseWindow: false };
+  }
+
+  const timeoutToken = Symbol("timeout");
+  const result = await Promise.race([
+    sendPromise,
+    wait(OTP_SMS_RESPONSE_WAIT_MS).then(() => timeoutToken),
+  ]);
+
+  if (result === timeoutToken) {
+    void sendPromise.catch(() => {});
+    return { deliveredInResponseWindow: false };
+  }
+
+  return { deliveredInResponseWindow: true, provider: result?.provider || "" };
+}
+
+async function verifyRefreshTokenHash(savedHash, refreshToken) {
+  const normalizedHash = String(savedHash || "").trim();
+  if (!normalizedHash) return false;
+
+  if (BCRYPT_HASH_PREFIX.test(normalizedHash)) {
+    return bcrypt.compare(refreshToken, normalizedHash);
+  }
+
+  return verifyStoredTokenHash(normalizedHash, refreshToken);
 }
 
 function getPhoneOtpCooldownRemainingSeconds(user) {
@@ -149,10 +211,7 @@ async function issuePhoneVerification(user, { enforceCooldown = false } = {}) {
   user.phoneVerificationAttempts = 0;
   user.phoneVerificationLastSentAt = now;
   setDevOtp(user._id, otpCode, otpExpiresAt);
-  await Promise.all([
-    sendSms(String(user.phone || ""), buildPhoneVerificationMessage(otpCode)),
-    user.save()
-  ]);
+  await saveOtpChallengeAndDispatchSms(user, buildPhoneVerificationMessage(otpCode));
 
   return {
     verificationToken: signPhoneOtpToken({
@@ -208,10 +267,7 @@ async function issueTwoFactorChallenge(user, { purpose = "two_factor_login", enf
   user.twoFactorOtpAttempts = 0;
   user.twoFactorOtpLastSentAt = now;
   setDevOtp(`${user._id}:${purpose}`, otpCode, otpExpiresAt);
-  await Promise.all([
-    sendSms(String(user.phone || ""), buildTwoFactorMessage(otpCode)),
-    user.save()
-  ]);
+  await saveOtpChallengeAndDispatchSms(user, buildTwoFactorMessage(otpCode));
 
   return {
     verificationToken: signPhoneOtpToken({
@@ -237,7 +293,7 @@ async function issueTokenPair(user) {
   const payload = buildAuthPayload(user);
   const accessToken = signAccessToken(payload);
   const refreshToken = signRefreshToken(payload);
-  const refreshTokenHash = await bcrypt.hash(refreshToken, SALT_ROUNDS);
+  const refreshTokenHash = hashStoredToken(refreshToken);
 
   user.refreshTokenHash = refreshTokenHash;
   await User.updateOne({ _id: user._id }, { $set: { refreshTokenHash } });
@@ -261,7 +317,7 @@ exports.register = async (req, res) => {
       return res.status(403).json({ message: "Public registration only supports customer role." });
     }
 
-    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    const passwordHash = await bcrypt.hash(password, PASSWORD_SALT_ROUNDS);
     const user = await User.create({
       name,
       phone,
@@ -318,7 +374,7 @@ exports.bootstrapSuperAdmin = async (req, res) => {
       return res.status(409).json({ message: "Email already registered." });
     }
 
-    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    const passwordHash = await bcrypt.hash(password, PASSWORD_SALT_ROUNDS);
     const user = await User.create({
       name,
       phone,
@@ -409,7 +465,7 @@ exports.refresh = async (req, res) => {
       return res.status(403).json({ message: "Account is blocked. Contact administrator." });
     }
 
-    const tokenMatch = await bcrypt.compare(refreshToken, user.refreshTokenHash);
+    const tokenMatch = await verifyRefreshTokenHash(user.refreshTokenHash, refreshToken);
     if (!tokenMatch) {
       return res.status(401).json({ message: "Invalid refresh token." });
     }
@@ -572,7 +628,7 @@ exports.changePassword = async (req, res) => {
       return res.status(400).json({ message: "Choose a new password that is different from your current one." });
     }
 
-    user.passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    user.passwordHash = await bcrypt.hash(newPassword, PASSWORD_SALT_ROUNDS);
     await user.save();
 
     return res.json({
@@ -595,7 +651,7 @@ exports.registerBiometricDevice = async (req, res) => {
     }
 
     const biometricSecret = crypto.randomBytes(32).toString("hex");
-    const secretHash = await bcrypt.hash(biometricSecret, SALT_ROUNDS);
+    const secretHash = await bcrypt.hash(biometricSecret, PASSWORD_SALT_ROUNDS);
 
     upsertBiometricDevice(user, {
       deviceId,
@@ -1007,7 +1063,7 @@ exports.googleAuth = async (req, res) => {
     if (!user) {
       const name = pickGoogleProfileName(payload);
       const randomPassword = crypto.randomBytes(32).toString("hex");
-      const passwordHash = await bcrypt.hash(randomPassword, SALT_ROUNDS);
+      const passwordHash = await bcrypt.hash(randomPassword, PASSWORD_SALT_ROUNDS);
       user = await User.create({
         name,
         email,
