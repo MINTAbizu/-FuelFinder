@@ -1,18 +1,31 @@
 const mongoose = require("mongoose");
 const { fetchNearbyFuelStations, fetchDrivingRoute } = require("../services/mapService");
 const Station = require("../models/Station");
+const QueueTicket = require("../models/QueueTicket");
 const { normalizePaymentDetails } = require("../utils/stationPaymentDetails");
 
 const STATION_SYNC_SELECT =
   "_id name address contact externalSource externalSourceId fuelStatus fuelInventory paymentDetails isActive location";
 const NEARBY_RESPONSE_CACHE_TTL_MS = 1000 * 45;
 const MAX_NEARBY_RESPONSE_CACHE_ENTRIES = 120;
+const DEFAULT_NEARBY_RADIUS_METERS = 12000;
+const MAX_NEARBY_RADIUS_METERS = 50000;
+const MAX_NEARBY_RESULTS = 100;
+const PUBLIC_QUEUE_STATUSES = ["waiting", "called"];
 
 const nearbyStationsResponseCache = new Map();
 
 function parseNumber(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+}
+
+function normalizeNearbyRadius(value) {
+  const parsed = parseNumber(value);
+  if (parsed === null || parsed <= 0) {
+    return DEFAULT_NEARBY_RADIUS_METERS;
+  }
+  return Math.min(Math.round(parsed), MAX_NEARBY_RADIUS_METERS);
 }
 
 function buildNearbyResponseCacheKey(lat, lon, radius) {
@@ -65,29 +78,81 @@ function isDuplicateKeyBulkWriteError(error) {
   return error.writeErrors.every((writeError) => writeError?.code === 11000);
 }
 
+function normalizeSupportedFuels(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const gasoline = source.gasoline === true;
+  const diesel = source.diesel === true;
+  const other = source.other === true;
+  const unknown = source.unknown === true || !(gasoline || diesel || other);
+
+  return {
+    gasoline,
+    diesel,
+    other,
+    unknown
+  };
+}
+
+function deriveSupportedFuels(doc, fallback = {}) {
+  const gasoline = Number(doc?.fuelInventory?.gasolineLiters || 0) > 0;
+  const diesel = Number(doc?.fuelInventory?.dieselLiters || 0) > 0;
+  const other = Number(doc?.fuelInventory?.otherLiters || 0) > 0;
+
+  if (gasoline || diesel || other) {
+    return normalizeSupportedFuels({ gasoline, diesel, other, unknown: false });
+  }
+
+  return normalizeSupportedFuels(fallback?.supportedFuels);
+}
+
+function normalizeQueueLength(value) {
+  const queueLength = Number(value);
+  if (!Number.isFinite(queueLength) || queueLength < 0) return 0;
+  return Math.round(queueLength);
+}
+
 function buildClientStationPayload(doc, fallback = {}) {
   const docCoords = Array.isArray(doc?.location?.coordinates) ? doc.location.coordinates : [];
   const docLon = Number(docCoords[0]);
   const docLat = Number(docCoords[1]);
   const fallbackLat = Number(fallback?.latitude);
   const fallbackLon = Number(fallback?.longitude);
+  const stationId =
+    String(doc?._id || fallback?.stationId || fallback?._id || fallback?.id || "").trim();
+  const publicId = stationId || String(fallback?.id || "").trim();
+  const distanceMeters = Number(doc?.distanceMeters ?? fallback?.distanceMeters);
 
   return {
-    ...fallback,
+    id: publicId,
+    stationId,
     name: String(doc?.name || fallback?.name || "Fuel Station"),
     address: String(doc?.address || fallback?.address || "Address not listed"),
     contact: String(doc?.contact || fallback?.contact || ""),
     fuel_status: mapFuelStatusForClient(doc?.fuelStatus || fallback?.fuel_status || "partial"),
     fuelInventory: {
-      gasolineLiters: Number(doc?.fuelInventory?.gasolineLiters || fallback?.fuelInventory?.gasolineLiters || 0),
-      dieselLiters: Number(doc?.fuelInventory?.dieselLiters || fallback?.fuelInventory?.dieselLiters || 0),
+      gasolineLiters: Number(
+        doc?.fuelInventory?.gasolineLiters || fallback?.fuelInventory?.gasolineLiters || 0
+      ),
+      dieselLiters: Number(
+        doc?.fuelInventory?.dieselLiters || fallback?.fuelInventory?.dieselLiters || 0
+      ),
       otherLiters: Number(doc?.fuelInventory?.otherLiters || fallback?.fuelInventory?.otherLiters || 0),
       updatedAt: doc?.fuelInventory?.updatedAt || fallback?.fuelInventory?.updatedAt || null
     },
-    paymentDetails: normalizePaymentDetails(doc?.paymentDetails),
+    supportedFuels: deriveSupportedFuels(doc, fallback),
+    paymentDetails: normalizePaymentDetails(doc?.paymentDetails || fallback?.paymentDetails),
     latitude: Number.isFinite(docLat) ? docLat : (Number.isFinite(fallbackLat) ? fallbackLat : null),
     longitude: Number.isFinite(docLon) ? docLon : (Number.isFinite(fallbackLon) ? fallbackLon : null),
-    stationId: String(doc?._id || fallback?.stationId || "")
+    queue_length: normalizeQueueLength(
+      doc?.queue_length ?? doc?.queueLength ?? fallback?.queue_length ?? fallback?.queueLength
+    ),
+    distanceMeters: Number.isFinite(distanceMeters) ? Math.round(distanceMeters) : null,
+    isActive:
+      doc?.isActive !== undefined
+        ? Boolean(doc.isActive)
+        : fallback?.isActive !== undefined
+          ? Boolean(fallback.isActive)
+          : true
   };
 }
 
@@ -139,10 +204,6 @@ function buildStationSyncPatch(doc, station, sourceId, lat, lon) {
 
   if (hasMeaningfulCoordinateChange(currentLat, currentLon, lat, lon)) {
     patch.location = { type: "Point", coordinates: [lon, lat] };
-  }
-
-  if (doc?.isActive !== true) {
-    patch.isActive = true;
   }
 
   return Object.keys(patch).length ? patch : null;
@@ -256,11 +317,14 @@ async function attachBackendStationIds(stations) {
   return normalizedStations.map(({ station, sourceId, lat, lon }) => {
     const doc = docsBySourceId.get(sourceId);
     if (!doc) {
-      return {
-        ...station,
-        latitude: Number.isFinite(lat) ? lat : station?.latitude,
-        longitude: Number.isFinite(lon) ? lon : station?.longitude
-      };
+      return buildClientStationPayload(
+        {},
+        {
+          ...station,
+          latitude: Number.isFinite(lat) ? lat : station?.latitude,
+          longitude: Number.isFinite(lon) ? lon : station?.longitude
+        }
+      );
     }
 
     return buildClientStationPayload(doc, {
@@ -271,11 +335,100 @@ async function attachBackendStationIds(stations) {
   });
 }
 
+async function queryNearbyStationsFromDatabase(lat, lon, radius, limit = MAX_NEARBY_RESULTS) {
+  const now = new Date();
+
+  const stations = await Station.aggregate([
+    {
+      $geoNear: {
+        near: {
+          type: "Point",
+          coordinates: [lon, lat]
+        },
+        distanceField: "distanceMeters",
+        maxDistance: radius,
+        spherical: true,
+        query: { isActive: true }
+      }
+    },
+    {
+      $sort: {
+        distanceMeters: 1,
+        updatedAt: -1
+      }
+    },
+    {
+      $limit: limit
+    },
+    {
+      $lookup: {
+        from: QueueTicket.collection.name,
+        let: { stationId: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ["$stationId", "$$stationId"] },
+                  { $in: ["$status", PUBLIC_QUEUE_STATUSES] },
+                  {
+                    $or: [
+                      { $eq: [{ $ifNull: ["$expiresAt", null] }, null] },
+                      { $gt: ["$expiresAt", now] }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            $count: "count"
+          }
+        ],
+        as: "queueStats"
+      }
+    },
+    {
+      $addFields: {
+        queue_length: { $ifNull: [{ $first: "$queueStats.count" }, 0] }
+      }
+    },
+    {
+      $project: {
+        queueStats: 0
+      }
+    }
+  ]);
+
+  return stations.map((station) =>
+    buildClientStationPayload(station, {
+      distanceMeters: station.distanceMeters,
+      queue_length: station.queue_length
+    })
+  );
+}
+
+async function bootstrapNearbyStationsFromExternal(lat, lon, radius) {
+  const stations = await fetchNearbyFuelStations(lat, lon, radius);
+  return attachBackendStationIds(stations);
+}
+
+async function loadNearbyStations(lat, lon, radius) {
+  const localStations = await queryNearbyStationsFromDatabase(lat, lon, radius);
+  if (localStations.length) {
+    return localStations;
+  }
+
+  const bootstrappedStations = await bootstrapNearbyStationsFromExternal(lat, lon, radius);
+  const hydratedStations = await queryNearbyStationsFromDatabase(lat, lon, radius);
+  return hydratedStations.length ? hydratedStations : bootstrappedStations;
+}
+
 exports.getNearbyFuelStations = async (req, res) => {
   try {
     const lat = parseNumber(req.query.lat);
     const lon = parseNumber(req.query.lon);
-    const radius = parseNumber(req.query.radius) || 12000;
+    const radius = normalizeNearbyRadius(req.query.radius);
     if (lat === null || lon === null) {
       return res.status(400).json({ message: "lat and lon are required numeric query params." });
     }
@@ -286,10 +439,9 @@ exports.getNearbyFuelStations = async (req, res) => {
       return res.json({ stations: cachedStations });
     }
 
-    const stations = await fetchNearbyFuelStations(lat, lon, radius);
-    const withBackendIds = await attachBackendStationIds(stations);
-    setCachedNearbyResponse(cacheKey, withBackendIds);
-    return res.json({ stations: withBackendIds });
+    const stations = await loadNearbyStations(lat, lon, radius);
+    setCachedNearbyResponse(cacheKey, stations);
+    return res.json({ stations });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load nearby fuel stations." });
   }
@@ -322,7 +474,9 @@ exports.getDrivingRoute = async (req, res) => {
     const toLat = parseNumber(req.query.toLat);
     const toLon = parseNumber(req.query.toLon);
     if (fromLat === null || fromLon === null || toLat === null || toLon === null) {
-      return res.status(400).json({ message: "fromLat, fromLon, toLat, and toLon are required numeric query params." });
+      return res.status(400).json({
+        message: "fromLat, fromLon, toLat, and toLon are required numeric query params."
+      });
     }
 
     const route = await fetchDrivingRoute(fromLat, fromLon, toLat, toLon);
