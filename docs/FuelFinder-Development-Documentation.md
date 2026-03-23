@@ -11,7 +11,7 @@
 
 
 
-map_key=AIzaSyCvE8A-8LUcbm3tOlmwCauM_zoJLD-m4cs
+<!-- map_key=AIzaSyCvE8A-8LUcbm3tOlmwCauM_zoJLD-m4cs -->
 ## 1. Overview
 FuelFinder is a mobile-first fuel station discovery and queue management app. It includes:
 - A React Native (Expo) client for customers.
