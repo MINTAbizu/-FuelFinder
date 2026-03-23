@@ -4,6 +4,15 @@ const {
   normalizePaymentDetails,
   pickPaymentDetailsPayload
 } = require("../utils/stationPaymentDetails");
+const {
+  normalizeLocationCategories,
+  resolveStationLocation
+} = require("../utils/locationDirectory");
+
+const STATION_POPULATE = [
+  { path: "regionId", select: "name slug code category countryCode isActive" },
+  { path: "cityId", select: "name slug code regionId isActive" }
+];
 
 function asText(value) {
   return String(value || "").trim();
@@ -26,9 +35,43 @@ function asNumber(value, fieldName) {
   return num;
 }
 
+function extractId(value) {
+  if (!value) return null;
+  if (typeof value === "object" && value._id) return String(value._id);
+  return String(value);
+}
+
+function buildRegionPayload(value) {
+  if (!value || typeof value !== "object" || !value._id) return null;
+  return {
+    id: String(value._id),
+    name: value.name || "",
+    slug: value.slug || "",
+    code: value.code || "",
+    category: value.category || "regional_state",
+    countryCode: value.countryCode || "ET",
+    isActive: Boolean(value.isActive)
+  };
+}
+
+function buildCityPayload(value) {
+  if (!value || typeof value !== "object" || !value._id) return null;
+  return {
+    id: String(value._id),
+    name: value.name || "",
+    slug: value.slug || "",
+    code: value.code || "",
+    regionId: extractId(value.regionId),
+    isActive: Boolean(value.isActive)
+  };
+}
+
 function buildStationResponse(station) {
   const coords = Array.isArray(station.location?.coordinates) ? station.location.coordinates : [];
   const fuelInventory = station.fuelInventory || {};
+  const region = buildRegionPayload(station.regionId);
+  const city = buildCityPayload(station.cityId);
+
   return {
     id: String(station._id),
     name: station.name || "",
@@ -46,13 +89,26 @@ function buildStationResponse(station) {
     chapaSubaccountId: station.chapaSubaccountId || "",
     isActive: Boolean(station.isActive),
     organizationId: station.organizationId ? String(station.organizationId) : null,
-    cityId: station.cityId ? String(station.cityId) : null,
+    regionId: region ? region.id : extractId(station.regionId),
+    region,
+    cityId: city ? city.id : extractId(station.cityId),
+    city,
     branchId: station.branchId ? String(station.branchId) : null,
+    subcity: station.subcity || "",
+    woreda: station.woreda || "",
+    landmark: station.landmark || "",
+    locationCategories: Array.isArray(station.locationCategories) ? station.locationCategories : [],
     latitude: coords.length >= 2 ? Number(coords[1]) : null,
     longitude: coords.length >= 2 ? Number(coords[0]) : null,
     createdAt: station.createdAt,
     updatedAt: station.updatedAt
   };
+}
+
+async function loadStationForResponse(stationId) {
+  return Station.findById(stationId)
+    .populate(STATION_POPULATE)
+    .lean();
 }
 
 function isOrgAdmin(req) {
@@ -81,6 +137,14 @@ exports.listStations = async (req, res) => {
       query.organizationId = organizationId;
     }
 
+    const regionId = asText(req.query.regionId);
+    if (regionId) {
+      if (!mongoose.isValidObjectId(regionId)) {
+        return res.status(400).json({ message: "regionId must be a valid ObjectId." });
+      }
+      query.regionId = regionId;
+    }
+
     const cityId = asText(req.query.cityId);
     if (cityId) {
       if (!mongoose.isValidObjectId(cityId)) {
@@ -97,6 +161,11 @@ exports.listStations = async (req, res) => {
       query.branchId = branchId;
     }
 
+    const locationCategory = asText(req.query.locationCategory).toLowerCase();
+    if (locationCategory) {
+      query.locationCategories = locationCategory;
+    }
+
     if (isOrgAdmin(req)) {
       const actorOrgId = getActorOrgId(req);
       if (!actorOrgId) {
@@ -105,7 +174,11 @@ exports.listStations = async (req, res) => {
       query.organizationId = actorOrgId;
     }
 
-    const stations = await Station.find(query).sort({ createdAt: -1 }).lean();
+    const stations = await Station.find(query)
+      .populate(STATION_POPULATE)
+      .sort({ createdAt: -1 })
+      .lean();
+
     return res.json({
       total: stations.length,
       stations: stations.map((station) => buildStationResponse(station))
@@ -125,8 +198,10 @@ exports.createStation = async (req, res) => {
     const longitude = asNumber(req.body.longitude, "longitude");
     const paymentDetails = pickPaymentDetailsPayload(req.body);
     let organizationId = asObjectIdOrNull(req.body.organizationId, "organizationId");
-    const cityId = asObjectIdOrNull(req.body.cityId, "cityId");
+    const requestedRegionId = asObjectIdOrNull(req.body.regionId, "regionId");
+    const requestedCityId = asObjectIdOrNull(req.body.cityId, "cityId");
     const branchId = asObjectIdOrNull(req.body.branchId, "branchId");
+    const locationCategories = normalizeLocationCategories(req.body.locationCategories);
 
     if (!name || !address) {
       return res.status(400).json({ message: "name and address are required." });
@@ -154,6 +229,11 @@ exports.createStation = async (req, res) => {
       return res.status(400).json({ message: "longitude must be between -180 and 180." });
     }
 
+    const resolvedLocation = await resolveStationLocation({
+      regionId: requestedRegionId,
+      cityId: requestedCityId
+    });
+
     const station = await Station.create({
       name,
       address,
@@ -163,20 +243,33 @@ exports.createStation = async (req, res) => {
       fuelStatus,
       isActive: req.body.isActive !== undefined ? Boolean(req.body.isActive) : true,
       organizationId,
-      cityId,
+      regionId: resolvedLocation.regionId,
+      cityId: resolvedLocation.cityId,
       branchId,
+      subcity: asText(req.body.subcity),
+      woreda: asText(req.body.woreda),
+      landmark: asText(req.body.landmark),
+      locationCategories,
       location: {
         type: "Point",
         coordinates: [longitude, latitude]
       }
     });
 
+    const stationDoc = await loadStationForResponse(station._id);
+
     return res.status(201).json({
       message: "Station created successfully.",
-      station: buildStationResponse(station)
+      station: buildStationResponse(stationDoc || station)
     });
   } catch (err) {
     if (err instanceof Error && err.message.includes("must be a valid")) {
+      return res.status(400).json({ message: err.message });
+    }
+    if (err instanceof Error && err.message.includes("does not exist")) {
+      return res.status(400).json({ message: err.message });
+    }
+    if (err instanceof Error && err.message.includes("does not belong")) {
       return res.status(400).json({ message: err.message });
     }
     return res.status(500).json({ message: "Failed to create station." });
@@ -218,6 +311,19 @@ exports.updateStation = async (req, res) => {
     if (req.body.contact !== undefined) {
       station.contact = asText(req.body.contact);
     }
+    if (req.body.subcity !== undefined) {
+      station.subcity = asText(req.body.subcity);
+    }
+    if (req.body.woreda !== undefined) {
+      station.woreda = asText(req.body.woreda);
+    }
+    if (req.body.landmark !== undefined) {
+      station.landmark = asText(req.body.landmark);
+    }
+    if (req.body.locationCategories !== undefined) {
+      station.locationCategories = normalizeLocationCategories(req.body.locationCategories);
+    }
+
     const paymentDetails = pickPaymentDetailsPayload(req.body);
     if (paymentDetails) {
       station.paymentDetails = {
@@ -250,11 +356,24 @@ exports.updateStation = async (req, res) => {
         station.organizationId = requestedOrganizationId;
       }
     }
-    if (req.body.cityId !== undefined) {
-      station.cityId = asObjectIdOrNull(req.body.cityId, "cityId");
-    }
     if (req.body.branchId !== undefined) {
       station.branchId = asObjectIdOrNull(req.body.branchId, "branchId");
+    }
+    if (req.body.regionId !== undefined || req.body.cityId !== undefined) {
+      const requestedRegionId = req.body.regionId !== undefined
+        ? asObjectIdOrNull(req.body.regionId, "regionId")
+        : station.regionId;
+      const requestedCityId = req.body.cityId !== undefined
+        ? asObjectIdOrNull(req.body.cityId, "cityId")
+        : station.cityId;
+
+      const resolvedLocation = await resolveStationLocation({
+        regionId: requestedRegionId,
+        cityId: requestedCityId
+      });
+
+      station.regionId = resolvedLocation.regionId;
+      station.cityId = resolvedLocation.cityId;
     }
     if (req.body.isActive !== undefined) {
       station.isActive = Boolean(req.body.isActive);
@@ -282,12 +401,20 @@ exports.updateStation = async (req, res) => {
     }
 
     await station.save();
+    const stationDoc = await loadStationForResponse(station._id);
+
     return res.json({
       message: "Station updated successfully.",
-      station: buildStationResponse(station)
+      station: buildStationResponse(stationDoc || station)
     });
   } catch (err) {
     if (err instanceof Error && err.message.includes("must be a valid")) {
+      return res.status(400).json({ message: err.message });
+    }
+    if (err instanceof Error && err.message.includes("does not exist")) {
+      return res.status(400).json({ message: err.message });
+    }
+    if (err instanceof Error && err.message.includes("does not belong")) {
       return res.status(400).json({ message: err.message });
     }
     return res.status(500).json({ message: "Failed to update station." });
@@ -318,10 +445,11 @@ exports.setStationActive = async (req, res) => {
 
     station.isActive = Boolean(req.body?.isActive);
     await station.save();
+    const stationDoc = await loadStationForResponse(station._id);
 
     return res.json({
       message: station.isActive ? "Station activated." : "Station deactivated.",
-      station: buildStationResponse(station)
+      station: buildStationResponse(stationDoc || station)
     });
   } catch (_err) {
     return res.status(500).json({ message: "Failed to update station status." });
