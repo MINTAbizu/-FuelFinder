@@ -348,6 +348,42 @@ body {
   background: var(--surface-2);
 }
 
+.city-station-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.city-station-group {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid #e4e0d9;
+  background: rgba(255, 253, 249, 0.92);
+}
+
+.city-station-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.city-station-head div {
+  display: grid;
+  gap: 4px;
+}
+
+.city-station-head h4 {
+  margin: 0;
+}
+
+.city-station-head span:not(.pill) {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(12, 1fr);

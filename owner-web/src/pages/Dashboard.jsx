@@ -10,6 +10,8 @@ import {
   getOwnerStation,
   getStationFuelStockSummary,
   getStationQueue,
+  listAdminCities,
+  listAdminRegions,
   listAdminUsers,
   listOrganizationOptions,
   listOwnerStations,
@@ -158,6 +160,7 @@ function buildCreateStationFormState(defaultOrganizationId = "") {
     fuelStatus: "partial",
     isActive: true,
     organizationId: String(defaultOrganizationId || ""),
+    regionId: "",
     cityId: "",
     branchId: "",
     chapaSubaccountId: "",
@@ -482,6 +485,8 @@ export default function Dashboard() {
   const [promotionStatus, setPromotionStatus] = useState("");
   const [promotionForm, setPromotionForm] = useState(() => buildPromotionFormState());
   const [isSavingPromotion, setIsSavingPromotion] = useState(false);
+  const [directoryRegions, setDirectoryRegions] = useState([]);
+  const [directoryCities, setDirectoryCities] = useState([]);
   const [regionFilter, setRegionFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
 
@@ -497,19 +502,50 @@ export default function Dashboard() {
     return value.map((item) => String(item || "").trim()).filter(Boolean).join(", ");
   };
 
+  const regionDirectoryById = useMemo(() => {
+    const map = new Map();
+    directoryRegions.forEach((item) => {
+      const key = String(item?.id || item?._id || "").trim();
+      if (!key) return;
+      map.set(key, item);
+    });
+    return map;
+  }, [directoryRegions]);
+
+  const cityDirectoryById = useMemo(() => {
+    const map = new Map();
+    directoryCities.forEach((item) => {
+      const key = String(item?.id || item?._id || "").trim();
+      if (!key) return;
+      map.set(key, item);
+    });
+    return map;
+  }, [directoryCities]);
+
   const stationGeo = useMemo(() => {
     return stations.map((item) => {
-      const { cityLabel, regionLabel } = deriveCityRegion(item);
-      const cityLabelKey = normalizeKey(cityLabel);
+      const fallback = deriveCityRegion(item);
+      const cityIdValue = String(item?.cityId || "").trim();
+      const regionIdValue = String(item?.regionId || "").trim();
+      const cityRecord = cityDirectoryById.get(cityIdValue) || null;
+      const regionRecord =
+        regionDirectoryById.get(regionIdValue) ||
+        regionDirectoryById.get(String(cityRecord?.regionId || "").trim()) ||
+        null;
+      const cityLabel = cityRecord?.name || fallback.cityLabel;
+      const regionLabel = regionRecord?.name || fallback.regionLabel;
+
       return {
         ...item,
         regionLabel,
         cityLabel,
-        regionKey: normalizeKey(regionLabel),
-        cityLabelKey
+        regionKey: regionRecord?.id || regionIdValue || `region:${normalizeKey(regionLabel) || "unspecified"}`,
+        cityLabelKey: cityRecord?.id || cityIdValue || `city:${normalizeKey(cityLabel) || "unspecified"}`,
+        regionRecord,
+        cityRecord
       };
     });
-  }, [stations]);
+  }, [cityDirectoryById, regionDirectoryById, stations]);
 
   const stationGeoById = useMemo(() => {
     const map = new Map();
@@ -559,6 +595,49 @@ export default function Dashboard() {
       return matchesRegion && matchesCity;
     });
   }, [cityFilter, regionFilter, stationGeo]);
+
+  const cityStationGroups = useMemo(() => {
+    const groups = new Map();
+
+    filteredStations.forEach((item) => {
+      const groupKey = String(item.cityLabelKey || `city:${normalizeKey(item.cityLabel) || "unspecified"}`);
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          key: groupKey,
+          cityLabel: item.cityLabel || "Unspecified city",
+          regionLabel: item.regionLabel || "Unspecified region",
+          stations: []
+        });
+      }
+
+      groups.get(groupKey).stations.push(item);
+    });
+
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        stations: group.stations
+          .slice()
+          .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+      }))
+      .sort((a, b) => a.cityLabel.localeCompare(b.cityLabel));
+  }, [filteredStations]);
+
+  const createStationRegionOptions = useMemo(() => {
+    return directoryRegions
+      .slice()
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  }, [directoryRegions]);
+
+  const createStationCityOptions = useMemo(() => {
+    return directoryCities
+      .filter((item) => {
+        if (!createStationForm.regionId) return true;
+        return String(item.regionId || "") === String(createStationForm.regionId || "");
+      })
+      .slice()
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  }, [createStationForm.regionId, directoryCities]);
 
   const selectedStationGeo = useMemo(() => {
     return stationGeoById.get(String(stationId)) || null;
@@ -694,6 +773,49 @@ export default function Dashboard() {
     if (visibleSections.some((section) => section.id === active)) return;
     setActive("overview");
   }, [active, visibleSections]);
+
+  useEffect(() => {
+    if (!session?.tokens?.accessToken || !canManageStations) {
+      setDirectoryRegions([]);
+      setDirectoryCities([]);
+      return;
+    }
+
+    let isActive = true;
+
+    const loadLocationDirectory = async () => {
+      try {
+        const [regionsData, citiesData] = await Promise.all([listAdminRegions(), listAdminCities()]);
+        if (!isActive) return;
+        setDirectoryRegions(regionsData?.regions || []);
+        setDirectoryCities(citiesData?.cities || []);
+      } catch {
+        if (!isActive) return;
+        setDirectoryRegions([]);
+        setDirectoryCities([]);
+      }
+    };
+
+    loadLocationDirectory();
+    return () => {
+      isActive = false;
+    };
+  }, [canManageStations, session?.tokens?.accessToken]);
+
+  useEffect(() => {
+    if (!createStationForm.cityId) return;
+    const selectedCity = directoryCities.find(
+      (item) => String(item.id || item._id || "") === String(createStationForm.cityId || "")
+    );
+    if (!selectedCity) return;
+
+    if (
+      !createStationForm.regionId ||
+      String(selectedCity.regionId || "") !== String(createStationForm.regionId || "")
+    ) {
+      setCreateStationForm((prev) => ({ ...prev, cityId: "" }));
+    }
+  }, [createStationForm.cityId, createStationForm.regionId, directoryCities]);
 
   useEffect(() => {
     const validCityKeys = new Set(cityOptions.map((item) => item.key));
@@ -1592,6 +1714,7 @@ export default function Dashboard() {
         fuelStatus: String(createStationForm.fuelStatus || "partial").trim().toLowerCase(),
         isActive: Boolean(createStationForm.isActive),
         organizationId: String(createStationForm.organizationId || "").trim() || null,
+        regionId: String(createStationForm.regionId || "").trim() || null,
         cityId: String(createStationForm.cityId || "").trim() || null,
         branchId: String(createStationForm.branchId || "").trim() || null,
         ...(isSuperAdmin
@@ -2086,36 +2209,51 @@ export default function Dashboard() {
               </div>
             ) : null}
 
-            {filteredStations.length ? (
-              <div className="station-browser">
-                {filteredStations.map((item) => {
-                  const selected = String(item.id) === String(stationId);
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={`station-browser-card${selected ? " selected" : ""}`}
-                      onClick={() => setStationId(String(item.id))}
-                    >
-                      <div className="station-browser-top">
-                        <div>
-                          <strong>{item.name || `Station ${item.id}`}</strong>
-                          <span>
-                            {item.cityLabel} - {item.regionLabel}
-                          </span>
-                        </div>
-                        <span className={`pill ${item.isActive ? "" : "warn"}`}>
-                          {item.isActive ? "Open" : "Inactive"}
-                        </span>
+            {cityStationGroups.length ? (
+              <div className="city-station-groups">
+                {cityStationGroups.map((group) => (
+                  <div className="city-station-group" key={group.key}>
+                    <div className="city-station-head">
+                      <div>
+                        <p className="section-title">City station list</p>
+                        <h4>{group.cityLabel}</h4>
+                        <span>{group.regionLabel}</span>
                       </div>
-                      <p>{item.address || "Address not set yet."}</p>
-                      <div className="station-browser-meta">
-                        <span>Fuel: {formatFuelStatusLabel(item.fuelStatus)}</span>
-                        <span>Updated: {formatDateTime(item.fuelInventory?.updatedAt || item.updatedAt)}</span>
-                      </div>
-                    </button>
-                  );
-                })}
+                      <span className="pill">{group.stations.length} stations</span>
+                    </div>
+
+                    <div className="station-browser">
+                      {group.stations.map((item) => {
+                        const selected = String(item.id) === String(stationId);
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className={`station-browser-card${selected ? " selected" : ""}`}
+                            onClick={() => setStationId(String(item.id))}
+                          >
+                            <div className="station-browser-top">
+                              <div>
+                                <strong>{item.name || `Station ${item.id}`}</strong>
+                                <span>
+                                  {item.cityLabel} - {item.regionLabel}
+                                </span>
+                              </div>
+                              <span className={`pill ${item.isActive ? "" : "warn"}`}>
+                                {item.isActive ? "Open" : "Inactive"}
+                              </span>
+                            </div>
+                            <p>{item.address || "Address not set yet."}</p>
+                            <div className="station-browser-meta">
+                              <span>Fuel: {formatFuelStatusLabel(item.fuelStatus)}</span>
+                              <span>Updated: {formatDateTime(item.fuelInventory?.updatedAt || item.updatedAt)}</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : (
               <div className="station-browser-empty">
@@ -3717,15 +3855,65 @@ export default function Dashboard() {
                           )
                         ) : null}
                         <label>
-                          City ID
-                          <input
-                            type="text"
-                            value={createStationForm.cityId}
-                            onChange={(event) =>
-                              setCreateStationForm((prev) => ({ ...prev, cityId: event.target.value }))
-                            }
-                            placeholder="Optional city ObjectId"
-                          />
+                          Region
+                          {createStationRegionOptions.length ? (
+                            <select
+                              value={createStationForm.regionId}
+                              onChange={(event) =>
+                                setCreateStationForm((prev) => ({
+                                  ...prev,
+                                  regionId: event.target.value,
+                                  cityId: ""
+                                }))
+                              }
+                            >
+                              <option value="">Select region</option>
+                              {createStationRegionOptions.map((item) => (
+                                <option key={String(item.id || item._id || "")} value={String(item.id || item._id || "")}>
+                                  {item.name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type="text"
+                              value={createStationForm.regionId}
+                              onChange={(event) =>
+                                setCreateStationForm((prev) => ({ ...prev, regionId: event.target.value }))
+                              }
+                              placeholder="Optional region ObjectId"
+                            />
+                          )}
+                        </label>
+                        <label>
+                          City
+                          {createStationCityOptions.length ? (
+                            <select
+                              value={createStationForm.cityId}
+                              onChange={(event) =>
+                                setCreateStationForm((prev) => ({ ...prev, cityId: event.target.value }))
+                              }
+                              disabled={!createStationForm.regionId}
+                            >
+                              <option value="">
+                                {createStationForm.regionId ? "Select city" : "Select region first"}
+                              </option>
+                              {createStationCityOptions.map((item) => (
+                                <option key={String(item.id || item._id || "")} value={String(item.id || item._id || "")}>
+                                  {item.name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type="text"
+                              value={createStationForm.cityId}
+                              onChange={(event) =>
+                                setCreateStationForm((prev) => ({ ...prev, cityId: event.target.value }))
+                              }
+                              placeholder="Optional city ObjectId"
+                            />
+                          )}
                         </label>
                         <label>
                           Branch ID

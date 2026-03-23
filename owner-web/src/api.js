@@ -342,6 +342,20 @@ export async function listOrganizationOptions() {
   return apiRequest("/admin/organizations/options", {}, { cacheTtlMs: 1000 * 60 * 10 });
 }
 
+export async function listAdminRegions() {
+  return apiRequest("/admin/regions", {}, { cacheTtlMs: 1000 * 60 * 10 });
+}
+
+export async function listAdminCities(params = {}) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return apiRequest(`/admin/cities${query ? `?${query}` : ""}`, {}, { cacheTtlMs: 1000 * 60 * 10 });
+}
+
 export async function createAdminStation(payload) {
   return apiRequest("/admin/stations", {
     method: "POST",
