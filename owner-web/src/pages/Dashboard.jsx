@@ -526,30 +526,46 @@ export default function Dashboard() {
     return map;
   }, [directoryCities]);
 
+  const woredaDirectoryById = useMemo(() => {
+    const map = new Map();
+    directoryWoredas.forEach((item) => {
+      const key = String(item?.id || item?._id || "").trim();
+      if (!key) return;
+      map.set(key, item);
+    });
+    return map;
+  }, [directoryWoredas]);
+
   const stationGeo = useMemo(() => {
     return stations.map((item) => {
       const fallback = deriveCityRegion(item);
       const cityIdValue = String(item?.cityId || "").trim();
       const regionIdValue = String(item?.regionId || "").trim();
+      const woredaIdValue = String(item?.woredaId || "").trim();
       const cityRecord = cityDirectoryById.get(cityIdValue) || null;
       const regionRecord =
         regionDirectoryById.get(regionIdValue) ||
         regionDirectoryById.get(String(cityRecord?.regionId || "").trim()) ||
         null;
+      const woredaRecord = woredaDirectoryById.get(woredaIdValue) || null;
       const cityLabel = cityRecord?.name || fallback.cityLabel;
       const regionLabel = regionRecord?.name || fallback.regionLabel;
+      const woredaLabel = woredaRecord?.name || String(item?.woreda || "").trim() || "Unspecified woreda";
 
       return {
         ...item,
         regionLabel,
         cityLabel,
+        woredaLabel,
         regionKey: regionRecord?.id || regionIdValue || `region:${normalizeKey(regionLabel) || "unspecified"}`,
         cityLabelKey: cityRecord?.id || cityIdValue || `city:${normalizeKey(cityLabel) || "unspecified"}`,
+        woredaKey: woredaRecord?.id || woredaIdValue || `woreda:${normalizeKey(woredaLabel) || "unspecified"}`,
         regionRecord,
-        cityRecord
+        cityRecord,
+        woredaRecord
       };
     });
-  }, [cityDirectoryById, regionDirectoryById, stations]);
+  }, [cityDirectoryById, directoryWoredas, regionDirectoryById, stations, woredaDirectoryById]);
 
   const stationGeoById = useMemo(() => {
     const map = new Map();
