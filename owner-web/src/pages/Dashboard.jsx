@@ -555,19 +555,76 @@ export default function Dashboard() {
     return map;
   }, [stationGeo]);
 
+  const stationCountByRegion = useMemo(() => {
+    const map = new Map();
+    stationGeo.forEach((item) => {
+      const key = String(item.regionKey || "").trim();
+      if (!key) return;
+      map.set(key, (map.get(key) || 0) + 1);
+    });
+    return map;
+  }, [stationGeo]);
+
+  const stationCountByCity = useMemo(() => {
+    const map = new Map();
+    stationGeo.forEach((item) => {
+      const key = String(item.cityLabelKey || "").trim();
+      if (!key) return;
+      map.set(key, (map.get(key) || 0) + 1);
+    });
+    return map;
+  }, [stationGeo]);
+
   const regionOptions = useMemo(() => {
+    if (directoryRegions.length) {
+      const options = directoryRegions
+        .slice()
+        .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+        .map((item) => {
+          const key = String(item.id || item._id || "").trim();
+          return {
+            key,
+            label: item.name || key,
+            count: stationCountByRegion.get(key) || 0
+          };
+        });
+
+      return [{ key: "all", label: "All regions", count: stationGeo.length }, ...options];
+    }
+
     const map = new Map();
     stationGeo.forEach(({ regionKey, regionLabel }) => {
       if (!regionKey) return;
       if (!map.has(regionKey)) {
-        map.set(regionKey, { key: regionKey, label: regionLabel });
+        map.set(regionKey, { key: regionKey, label: regionLabel, count: stationCountByRegion.get(regionKey) || 0 });
       }
     });
     const options = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
-    return [{ key: "all", label: "All regions" }, ...options];
-  }, [stationGeo]);
+    return [{ key: "all", label: "All regions", count: stationGeo.length }, ...options];
+  }, [directoryRegions, stationCountByRegion, stationGeo]);
 
   const cityOptions = useMemo(() => {
+    if (directoryCities.length) {
+      const options = directoryCities
+        .filter((item) => {
+          if (regionFilter === "all") return true;
+          return String(item.regionId || "").trim() === String(regionFilter || "").trim();
+        })
+        .slice()
+        .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+        .map((item) => {
+          const key = String(item.id || item._id || "").trim();
+          return {
+            key,
+            label: item.name || key,
+            count: stationCountByCity.get(key) || 0,
+            regionId: String(item.regionId || "").trim()
+          };
+        });
+
+      return [{ key: "all", label: regionFilter === "all" ? "All cities" : "All cities in region", count: filteredStations.length }, ...options];
+    }
+
     const map = new Map();
     stationGeo
       .filter((stationItem) => {
@@ -583,7 +640,7 @@ export default function Dashboard() {
       });
     const options = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
     return [{ key: "all", label: "All cities", count: stationGeo.length }, ...options];
-  }, [regionFilter, stationGeo]);
+  }, [directoryCities, filteredStations.length, regionFilter, stationCountByCity, stationGeo]);
 
   const filteredStations = useMemo(() => {
     return stationGeo.filter((item) => {
@@ -597,6 +654,33 @@ export default function Dashboard() {
   }, [cityFilter, regionFilter, stationGeo]);
 
   const cityStationGroups = useMemo(() => {
+    if (directoryCities.length && (regionFilter !== "all" || cityFilter !== "all")) {
+      const scopedCities = directoryCities
+        .filter((item) => {
+          const cityIdValue = String(item.id || item._id || "").trim();
+          const regionIdValue = String(item.regionId || "").trim();
+          const matchesRegion = regionFilter === "all" || regionIdValue === String(regionFilter || "").trim();
+          const matchesCity = cityFilter === "all" || cityIdValue === String(cityFilter || "").trim();
+          return matchesRegion && matchesCity;
+        })
+        .slice()
+        .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+
+      return scopedCities.map((cityItem) => {
+        const cityIdValue = String(cityItem.id || cityItem._id || "").trim();
+        const regionRecord = regionDirectoryById.get(String(cityItem.regionId || "").trim()) || null;
+        return {
+          key: cityIdValue,
+          cityLabel: cityItem.name || "Unspecified city",
+          regionLabel: regionRecord?.name || "Unspecified region",
+          stations: filteredStations
+            .filter((stationItem) => String(stationItem.cityLabelKey || "") === cityIdValue)
+            .slice()
+            .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+        };
+      });
+    }
+
     const groups = new Map();
 
     filteredStations.forEach((item) => {
@@ -621,7 +705,7 @@ export default function Dashboard() {
           .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
       }))
       .sort((a, b) => a.cityLabel.localeCompare(b.cityLabel));
-  }, [filteredStations]);
+  }, [cityFilter, directoryCities, filteredStations, regionDirectoryById, regionFilter]);
 
   const createStationRegionOptions = useMemo(() => {
     return directoryRegions
