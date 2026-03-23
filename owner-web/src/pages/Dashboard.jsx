@@ -2223,7 +2223,7 @@ export default function Dashboard() {
                 >
                   {regionOptions.map((option) => (
                     <option key={option.key} value={option.key}>
-                      {option.label}
+                      {option.count !== undefined ? `${option.label} (${option.count})` : option.label}
                     </option>
                   ))}
                 </select>
@@ -2307,34 +2307,40 @@ export default function Dashboard() {
                     </div>
 
                     <div className="station-browser">
-                      {group.stations.map((item) => {
-                        const selected = String(item.id) === String(stationId);
-                        return (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className={`station-browser-card${selected ? " selected" : ""}`}
-                            onClick={() => setStationId(String(item.id))}
-                          >
-                            <div className="station-browser-top">
-                              <div>
-                                <strong>{item.name || `Station ${item.id}`}</strong>
-                                <span>
-                                  {item.cityLabel} - {item.regionLabel}
+                      {group.stations.length ? (
+                        group.stations.map((item) => {
+                          const selected = String(item.id) === String(stationId);
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              className={`station-browser-card${selected ? " selected" : ""}`}
+                              onClick={() => setStationId(String(item.id))}
+                            >
+                              <div className="station-browser-top">
+                                <div>
+                                  <strong>{item.name || `Station ${item.id}`}</strong>
+                                  <span>
+                                    {item.cityLabel} - {item.regionLabel}
+                                  </span>
+                                </div>
+                                <span className={`pill ${item.isActive ? "" : "warn"}`}>
+                                  {item.isActive ? "Open" : "Inactive"}
                                 </span>
                               </div>
-                              <span className={`pill ${item.isActive ? "" : "warn"}`}>
-                                {item.isActive ? "Open" : "Inactive"}
-                              </span>
-                            </div>
-                            <p>{item.address || "Address not set yet."}</p>
-                            <div className="station-browser-meta">
-                              <span>Fuel: {formatFuelStatusLabel(item.fuelStatus)}</span>
-                              <span>Updated: {formatDateTime(item.fuelInventory?.updatedAt || item.updatedAt)}</span>
-                            </div>
-                          </button>
-                        );
-                      })}
+                              <p>{item.address || "Address not set yet."}</p>
+                              <div className="station-browser-meta">
+                                <span>Fuel: {formatFuelStatusLabel(item.fuelStatus)}</span>
+                                <span>Updated: {formatDateTime(item.fuelInventory?.updatedAt || item.updatedAt)}</span>
+                              </div>
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <div className="station-browser-empty">
+                          No stations have been added for {group.cityLabel} yet.
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
