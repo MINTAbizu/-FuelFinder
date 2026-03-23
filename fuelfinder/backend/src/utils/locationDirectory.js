@@ -100,20 +100,22 @@ async function ensureRegionByName(name, options = {}) {
     throw new Error("Region name must contain searchable characters.");
   }
 
+  const hasCode = Object.prototype.hasOwnProperty.call(options, "code");
   const code = asText(options.code).toUpperCase();
   const category = normalizeRegionCategory(options.category);
   const isActive = options.isActive !== undefined ? Boolean(options.isActive) : true;
 
   let region = await Region.findOne({ slug });
   if (!region) {
-    region = await Region.create({
+    const payload = {
       name: normalizedName,
       slug,
-      code,
       category,
       countryCode: "ET",
       isActive
-    });
+    };
+    if (hasCode && code) payload.code = code;
+    region = await Region.create(payload);
     return region;
   }
 
@@ -122,8 +124,8 @@ async function ensureRegionByName(name, options = {}) {
     region.name = normalizedName;
     changed = true;
   }
-  if (code && region.code !== code) {
-    region.code = code;
+  if (hasCode && region.code !== (code || undefined)) {
+    region.code = code || undefined;
     changed = true;
   }
   if (region.category !== category) {
@@ -145,7 +147,13 @@ async function ensureRegionByName(name, options = {}) {
   return region;
 }
 
-async function ensureCityByName({ name, regionId, code = "", isActive = true }) {
+async function ensureCityByName(input = {}) {
+  const {
+    name,
+    regionId,
+    code,
+    isActive = true
+  } = input;
   const normalizedName = asText(name);
   const normalizedRegionId = asObjectIdOrNull(regionId, "regionId");
   if (!normalizedName || !normalizedRegionId) {
@@ -162,15 +170,19 @@ async function ensureCityByName({ name, regionId, code = "", isActive = true }) 
     throw new Error("regionId does not exist.");
   }
 
+  const hasCode = Object.prototype.hasOwnProperty.call(input, "code");
+
   let city = await City.findOne({ regionId: normalizedRegionId, slug });
   if (!city) {
-    city = await City.create({
+    const payload = {
       name: normalizedName,
       slug,
-      code: asText(code).toUpperCase(),
       regionId: normalizedRegionId,
       isActive: Boolean(isActive)
-    });
+    };
+    const normalizedCode = asText(code).toUpperCase();
+    if (hasCode && normalizedCode) payload.code = normalizedCode;
+    city = await City.create(payload);
     return city;
   }
 
@@ -180,8 +192,8 @@ async function ensureCityByName({ name, regionId, code = "", isActive = true }) 
     city.name = normalizedName;
     changed = true;
   }
-  if (normalizedCode && city.code !== normalizedCode) {
-    city.code = normalizedCode;
+  if (hasCode && city.code !== (normalizedCode || undefined)) {
+    city.code = normalizedCode || undefined;
     changed = true;
   }
   if (String(city.regionId) !== normalizedRegionId) {

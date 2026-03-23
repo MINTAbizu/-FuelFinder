@@ -135,8 +135,6 @@ async function importStationRecord(record) {
     name,
     address,
     contact: asLocationText(record.contact),
-    externalSource: asLocationText(record.externalSource),
-    externalSourceId: asLocationText(record.externalSourceId),
     organizationId: asOptionalObjectId(record.organizationId, "organizationId"),
     regionId: resolvedLocation.regionId,
     cityId: resolvedLocation.cityId,
@@ -152,6 +150,12 @@ async function importStationRecord(record) {
       coordinates: [longitude, latitude]
     }
   };
+  const externalSource = asLocationText(record.externalSource);
+  const externalSourceId = asLocationText(record.externalSourceId);
+  if (externalSource && externalSourceId) {
+    update.externalSource = externalSource;
+    update.externalSourceId = externalSourceId;
+  }
 
   const station = await Station.findOneAndUpdate(
     filter,

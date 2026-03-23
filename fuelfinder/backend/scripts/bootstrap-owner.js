@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const connectDB = require("../src/config/db");
 const User = require("../src/models/User");
 const Station = require("../src/models/Station");
+const { resolveStationLocation } = require("../src/utils/locationDirectory");
 
 function asText(value) {
   return String(value || "").trim();
@@ -44,15 +45,18 @@ async function resolveStationId() {
   }
 
   const organizationId = asText(process.env.OWNER_ORG_ID);
+  const regionId = asText(process.env.OWNER_REGION_ID);
   const cityId = asText(process.env.OWNER_CITY_ID);
   const branchId = asText(process.env.OWNER_BRANCH_ID);
+  const resolvedLocation = await resolveStationLocation({ regionId, cityId });
 
   const station = await Station.create({
     name,
     address,
     contact,
     organizationId: mongoose.isValidObjectId(organizationId) ? organizationId : null,
-    cityId: mongoose.isValidObjectId(cityId) ? cityId : null,
+    regionId: resolvedLocation.regionId,
+    cityId: resolvedLocation.cityId,
     branchId: mongoose.isValidObjectId(branchId) ? branchId : null,
     fuelStatus: "partial",
     isActive: true,
@@ -82,8 +86,10 @@ async function main() {
   }
 
   const organizationId = asText(process.env.OWNER_ORG_ID);
+  const regionId = asText(process.env.OWNER_REGION_ID);
   const cityId = asText(process.env.OWNER_CITY_ID);
   const branchId = asText(process.env.OWNER_BRANCH_ID);
+  const resolvedLocation = await resolveStationLocation({ regionId, cityId });
 
   const existing = await User.findOne({ email });
   if (existing) {
@@ -95,7 +101,7 @@ async function main() {
     existing.phone = phone;
     existing.role = role;
     existing.organizationId = mongoose.isValidObjectId(organizationId) ? organizationId : existing.organizationId;
-    existing.cityIds = mongoose.isValidObjectId(cityId) ? [cityId] : existing.cityIds;
+    existing.cityIds = resolvedLocation.cityId ? [resolvedLocation.cityId] : existing.cityIds;
     existing.branchIds = mongoose.isValidObjectId(branchId) ? [branchId] : existing.branchIds;
     existing.stationIds = [stationId];
     existing.passwordHash = await bcrypt.hash(password, 12);
@@ -112,7 +118,7 @@ async function main() {
     passwordHash,
     role,
     organizationId: mongoose.isValidObjectId(organizationId) ? organizationId : null,
-    cityIds: mongoose.isValidObjectId(cityId) ? [cityId] : [],
+    cityIds: resolvedLocation.cityId ? [resolvedLocation.cityId] : [],
     branchIds: mongoose.isValidObjectId(branchId) ? [branchId] : [],
     stationIds: [stationId]
   });

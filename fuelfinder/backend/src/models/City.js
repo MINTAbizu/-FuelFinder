@@ -4,7 +4,7 @@ const citySchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     slug: { type: String, required: true, trim: true, lowercase: true },
-    code: { type: String, trim: true, uppercase: true, default: "" },
+    code: { type: String, trim: true, uppercase: true },
     regionId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Region",

@@ -91,14 +91,15 @@ exports.createRegion = async (req, res) => {
     }
 
     const slug = slugify(name);
-    const region = await Region.create({
+    const payload = {
       name,
       slug,
-      code,
       category,
       countryCode: "ET",
       isActive
-    });
+    };
+    if (code) payload.code = code;
+    const region = await Region.create(payload);
 
     return res.status(201).json({
       message: "Region created successfully.",
@@ -131,7 +132,7 @@ exports.updateRegion = async (req, res) => {
       region.slug = slugify(name);
     }
     if (req.body.code !== undefined) {
-      region.code = asLocationText(req.body.code).toUpperCase();
+      region.code = asLocationText(req.body.code).toUpperCase() || undefined;
     }
     if (req.body.category !== undefined) {
       region.category = normalizeRegionCategory(req.body.category);
@@ -204,13 +205,14 @@ exports.createCity = async (req, res) => {
       return res.status(404).json({ message: "Region not found." });
     }
 
-    const city = await City.create({
+    const payload = {
       name,
       slug: slugify(name),
-      code,
       regionId,
       isActive
-    });
+    };
+    if (code) payload.code = code;
+    const city = await City.create(payload);
 
     const populatedCity = await City.findById(city._id)
       .populate("regionId", "name slug code category countryCode isActive createdAt updatedAt")
@@ -247,7 +249,7 @@ exports.updateCity = async (req, res) => {
       city.slug = slugify(name);
     }
     if (req.body.code !== undefined) {
-      city.code = asLocationText(req.body.code).toUpperCase();
+      city.code = asLocationText(req.body.code).toUpperCase() || undefined;
     }
     if (req.body.regionId !== undefined) {
       const regionId = asLocationText(req.body.regionId);
