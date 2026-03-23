@@ -5,7 +5,7 @@ const QueueTicket = require("../models/QueueTicket");
 const { normalizePaymentDetails } = require("../utils/stationPaymentDetails");
 
 const STATION_SYNC_SELECT =
-  "_id name address contact externalSource externalSourceId fuelStatus fuelInventory paymentDetails isActive location";
+  "_id name address contact externalSource externalSourceId fuelStatus fuelInventory paymentDetails isActive location regionId cityId subcity woreda landmark locationCategories";
 const NEARBY_RESPONSE_CACHE_TTL_MS = 1000 * 45;
 const MAX_NEARBY_RESPONSE_CACHE_ENTRIES = 120;
 const DEFAULT_NEARBY_RADIUS_METERS = 12000;
@@ -138,14 +138,22 @@ function buildClientStationPayload(doc, fallback = {}) {
       ),
       otherLiters: Number(doc?.fuelInventory?.otherLiters || fallback?.fuelInventory?.otherLiters || 0),
       updatedAt: doc?.fuelInventory?.updatedAt || fallback?.fuelInventory?.updatedAt || null
-    },
-    supportedFuels: deriveSupportedFuels(doc, fallback),
-    paymentDetails: normalizePaymentDetails(doc?.paymentDetails || fallback?.paymentDetails),
-    latitude: Number.isFinite(docLat) ? docLat : (Number.isFinite(fallbackLat) ? fallbackLat : null),
-    longitude: Number.isFinite(docLon) ? docLon : (Number.isFinite(fallbackLon) ? fallbackLon : null),
-    queue_length: normalizeQueueLength(
-      doc?.queue_length ?? doc?.queueLength ?? fallback?.queue_length ?? fallback?.queueLength
-    ),
+      },
+      supportedFuels: deriveSupportedFuels(doc, fallback),
+      paymentDetails: normalizePaymentDetails(doc?.paymentDetails || fallback?.paymentDetails),
+      regionId: doc?.regionId ? String(doc.regionId) : null,
+      cityId: doc?.cityId ? String(doc.cityId) : null,
+      subcity: String(doc?.subcity || fallback?.subcity || ""),
+      woreda: String(doc?.woreda || fallback?.woreda || ""),
+      landmark: String(doc?.landmark || fallback?.landmark || ""),
+      locationCategories: Array.isArray(doc?.locationCategories)
+        ? doc.locationCategories
+        : (Array.isArray(fallback?.locationCategories) ? fallback.locationCategories : []),
+      latitude: Number.isFinite(docLat) ? docLat : (Number.isFinite(fallbackLat) ? fallbackLat : null),
+      longitude: Number.isFinite(docLon) ? docLon : (Number.isFinite(fallbackLon) ? fallbackLon : null),
+      queue_length: normalizeQueueLength(
+        doc?.queue_length ?? doc?.queueLength ?? fallback?.queue_length ?? fallback?.queueLength
+      ),
     distanceMeters: Number.isFinite(distanceMeters) ? Math.round(distanceMeters) : null,
     isActive:
       doc?.isActive !== undefined

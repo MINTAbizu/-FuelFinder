@@ -4,6 +4,7 @@ const {
   normalizePaymentDetails,
   pickPaymentDetailsPayload
 } = require("../utils/stationPaymentDetails");
+const { normalizeLocationCategories } = require("../utils/locationDirectory");
 const {
   getAssignedStationIds,
   isAssignedStationOnlyRole
@@ -29,8 +30,13 @@ function buildStationResponse(station) {
     chapaSubaccountId: station.chapaSubaccountId || "",
     isActive: Boolean(station.isActive),
     organizationId: station.organizationId ? String(station.organizationId) : null,
+    regionId: station.regionId ? String(station.regionId) : null,
     cityId: station.cityId ? String(station.cityId) : null,
     branchId: station.branchId ? String(station.branchId) : null,
+    subcity: station.subcity || "",
+    woreda: station.woreda || "",
+    landmark: station.landmark || "",
+    locationCategories: Array.isArray(station.locationCategories) ? station.locationCategories : [],
     latitude: coords.length >= 2 ? Number(coords[1]) : null,
     longitude: coords.length >= 2 ? Number(coords[0]) : null,
     createdAt: station.createdAt,
@@ -138,6 +144,18 @@ exports.updateMyStation = async (req, res) => {
     }
     if (req.body.contact !== undefined) {
       station.contact = String(req.body.contact || "").trim();
+    }
+    if (req.body.subcity !== undefined) {
+      station.subcity = String(req.body.subcity || "").trim();
+    }
+    if (req.body.woreda !== undefined) {
+      station.woreda = String(req.body.woreda || "").trim();
+    }
+    if (req.body.landmark !== undefined) {
+      station.landmark = String(req.body.landmark || "").trim();
+    }
+    if (req.body.locationCategories !== undefined) {
+      station.locationCategories = normalizeLocationCategories(req.body.locationCategories);
     }
     const paymentDetails = pickPaymentDetailsPayload(req.body);
     if (paymentDetails) {
