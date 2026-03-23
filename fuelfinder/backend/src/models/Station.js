@@ -10,6 +10,7 @@ const stationSchema = new mongoose.Schema(
     organizationId: { type: mongoose.Schema.Types.ObjectId, default: null },
     regionId: { type: mongoose.Schema.Types.ObjectId, ref: "Region", default: null },
     cityId: { type: mongoose.Schema.Types.ObjectId, ref: "City", default: null },
+    woredaId: { type: mongoose.Schema.Types.ObjectId, ref: "Woreda", default: null },
     branchId: { type: mongoose.Schema.Types.ObjectId, default: null },
     subcity: { type: String, trim: true, default: "" },
     woreda: { type: String, trim: true, default: "" },
@@ -57,6 +58,7 @@ const stationSchema = new mongoose.Schema(
 stationSchema.index({ location: "2dsphere" });
 stationSchema.index({ regionId: 1 });
 stationSchema.index({ cityId: 1 });
+stationSchema.index({ woredaId: 1 });
 stationSchema.index({ locationCategories: 1 });
 stationSchema.index({ externalSource: 1, externalSourceId: 1 }, { unique: true, sparse: true });
 
