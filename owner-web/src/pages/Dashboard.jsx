@@ -595,6 +595,16 @@ export default function Dashboard() {
     return map;
   }, [stationGeo]);
 
+  const stationCountByWoreda = useMemo(() => {
+    const map = new Map();
+    stationGeo.forEach((item) => {
+      const key = String(item.woredaKey || "").trim();
+      if (!key) return;
+      map.set(key, (map.get(key) || 0) + 1);
+    });
+    return map;
+  }, [stationGeo]);
+
   const regionOptions = useMemo(() => {
     if (directoryRegions.length) {
       const options = directoryRegions
@@ -623,14 +633,13 @@ export default function Dashboard() {
     return [{ key: "all", label: "All regions", count: stationGeo.length }, ...options];
   }, [directoryRegions, stationCountByRegion, stationGeo]);
 
-  const filteredStations = useMemo(() => {
+  const regionScopedStations = useMemo(() => {
     return stationGeo.filter((item) => {
-      const matchesRegion =
+      return (
         regionFilter === "all" ||
         item.regionKey === regionFilter ||
-        (!item.regionKey && cityFilter !== "all" && item.cityLabelKey === cityFilter);
-      const matchesCity = cityFilter === "all" || item.cityLabelKey === cityFilter;
-      return matchesRegion && matchesCity;
+        (!item.regionKey && cityFilter !== "all" && item.cityLabelKey === cityFilter)
+      );
     });
   }, [cityFilter, regionFilter, stationGeo]);
 
@@ -653,7 +662,7 @@ export default function Dashboard() {
           };
         });
 
-      return [{ key: "all", label: regionFilter === "all" ? "All cities" : "All cities in region", count: filteredStations.length }, ...options];
+      return [{ key: "all", label: regionFilter === "all" ? "All cities" : "All cities in region", count: regionScopedStations.length }, ...options];
     }
 
     const map = new Map();
@@ -671,10 +680,52 @@ export default function Dashboard() {
     });
     const options = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
     return [{ key: "all", label: "All cities", count: stationGeo.length }, ...options];
-  }, [directoryCities, filteredStations.length, regionFilter, stationCountByCity, stationGeo]);
+  }, [directoryCities, regionFilter, regionScopedStations.length, stationCountByCity, stationGeo]);
+
+  const cityScopedStations = useMemo(() => {
+    return regionScopedStations.filter((item) => cityFilter === "all" || item.cityLabelKey === cityFilter);
+  }, [cityFilter, regionScopedStations]);
+
+  const woredaOptions = useMemo(() => {
+    if (directoryWoredas.length) {
+      const options = directoryWoredas
+        .filter((item) => {
+          const itemRegionId = String(item.regionId || "").trim();
+          const itemCityId = String(item.cityId || "").trim();
+          const matchesRegion = regionFilter === "all" || itemRegionId === String(regionFilter || "").trim();
+          const matchesCity = cityFilter === "all" || itemCityId === String(cityFilter || "").trim();
+          return matchesRegion && matchesCity;
+        })
+        .slice()
+        .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+        .map((item) => {
+          const key = String(item.id || item._id || "").trim();
+          return {
+            key,
+            label: item.name || key,
+            count: stationCountByWoreda.get(key) || 0
+          };
+        });
+
+      return [{ key: "all", label: cityFilter === "all" ? "All woredas" : "All woredas in city", count: cityScopedStations.length }, ...options];
+    }
+
+    const map = new Map();
+    cityScopedStations.forEach(({ woredaKey, woredaLabel }) => {
+      if (!woredaKey) return;
+      const existing = map.get(woredaKey) || { key: woredaKey, label: woredaLabel, count: 0 };
+      map.set(woredaKey, { ...existing, count: existing.count + 1 });
+    });
+    const options = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+    return [{ key: "all", label: "All woredas", count: cityScopedStations.length }, ...options];
+  }, [cityFilter, cityScopedStations, directoryWoredas, regionFilter, stationCountByWoreda]);
+
+  const filteredStations = useMemo(() => {
+    return cityScopedStations.filter((item) => woredaFilter === "all" || item.woredaKey === woredaFilter);
+  }, [cityScopedStations, woredaFilter]);
 
   const cityStationGroups = useMemo(() => {
-    if (directoryCities.length && (regionFilter !== "all" || cityFilter !== "all")) {
+    if (directoryCities.length) {
       const scopedCities = directoryCities
         .filter((item) => {
           const cityIdValue = String(item.id || item._id || "").trim();
@@ -689,14 +740,51 @@ export default function Dashboard() {
       return scopedCities.map((cityItem) => {
         const cityIdValue = String(cityItem.id || cityItem._id || "").trim();
         const regionRecord = regionDirectoryById.get(String(cityItem.regionId || "").trim()) || null;
+        const cityStations = filteredStations
+          .filter((stationItem) => String(stationItem.cityLabelKey || "") === cityIdValue)
+          .slice()
+          .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+
+        const woredaGroups = [];
+        const cityWoredas = directoryWoredas
+          .filter((item) => {
+            const itemCityId = String(item.cityId || "").trim();
+            const itemWoredaId = String(item.id || item._id || "").trim();
+            const matchesCity = itemCityId === cityIdValue;
+            const matchesWoreda = woredaFilter === "all" || itemWoredaId === String(woredaFilter || "").trim();
+            return matchesCity && matchesWoreda;
+          })
+          .slice()
+          .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+
+        cityWoredas.forEach((woredaItem) => {
+          const woredaIdValue = String(woredaItem.id || woredaItem._id || "").trim();
+          woredaGroups.push({
+            key: woredaIdValue,
+            label: woredaItem.name || "Unnamed woreda",
+            stations: cityStations.filter((stationItem) => String(stationItem.woredaKey || "") === woredaIdValue)
+          });
+        });
+
+        const unassignedStations = cityStations.filter((stationItem) => {
+          return !cityWoredas.some(
+            (woredaItem) => String(woredaItem.id || woredaItem._id || "") === String(stationItem.woredaKey || "")
+          );
+        });
+
+        if (unassignedStations.length || !woredaGroups.length) {
+          woredaGroups.push({
+            key: `${cityIdValue}:unassigned`,
+            label: !woredaGroups.length ? "All woredas" : "Unassigned woreda",
+            stations: unassignedStations.length ? unassignedStations : cityStations
+          });
+        }
+
         return {
           key: cityIdValue,
           cityLabel: cityItem.name || "Unspecified city",
           regionLabel: regionRecord?.name || "Unspecified region",
-          stations: filteredStations
-            .filter((stationItem) => String(stationItem.cityLabelKey || "") === cityIdValue)
-            .slice()
-            .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+          woredaGroups
         };
       });
     }
@@ -704,28 +792,44 @@ export default function Dashboard() {
     const groups = new Map();
 
     filteredStations.forEach((item) => {
-      const groupKey = String(item.cityLabelKey || `city:${normalizeKey(item.cityLabel) || "unspecified"}`);
-      if (!groups.has(groupKey)) {
-        groups.set(groupKey, {
-          key: groupKey,
+      const cityGroupKey = String(item.cityLabelKey || `city:${normalizeKey(item.cityLabel) || "unspecified"}`);
+      if (!groups.has(cityGroupKey)) {
+        groups.set(cityGroupKey, {
+          key: cityGroupKey,
           cityLabel: item.cityLabel || "Unspecified city",
           regionLabel: item.regionLabel || "Unspecified region",
-          stations: []
+          woredaGroups: new Map()
         });
       }
 
-      groups.get(groupKey).stations.push(item);
+      const cityGroup = groups.get(cityGroupKey);
+      const woredaGroupKey = String(item.woredaKey || `woreda:${normalizeKey(item.woredaLabel) || "unspecified"}`);
+      if (!cityGroup.woredaGroups.has(woredaGroupKey)) {
+        cityGroup.woredaGroups.set(woredaGroupKey, {
+          key: woredaGroupKey,
+          label: item.woredaLabel || "Unspecified woreda",
+          stations: []
+        });
+      }
+      cityGroup.woredaGroups.get(woredaGroupKey).stations.push(item);
     });
 
     return Array.from(groups.values())
       .map((group) => ({
-        ...group,
-        stations: group.stations
-          .slice()
-          .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+        key: group.key,
+        cityLabel: group.cityLabel,
+        regionLabel: group.regionLabel,
+        woredaGroups: Array.from(group.woredaGroups.values())
+          .map((woredaGroup) => ({
+            ...woredaGroup,
+            stations: woredaGroup.stations
+              .slice()
+              .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+          }))
+          .sort((a, b) => a.label.localeCompare(b.label))
       }))
       .sort((a, b) => a.cityLabel.localeCompare(b.cityLabel));
-  }, [cityFilter, directoryCities, filteredStations, regionDirectoryById, regionFilter]);
+  }, [cityFilter, directoryCities, directoryWoredas, filteredStations, regionDirectoryById, regionFilter, woredaFilter]);
 
   const createStationRegionOptions = useMemo(() => {
     return directoryRegions
@@ -742,6 +846,16 @@ export default function Dashboard() {
       .slice()
       .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
   }, [createStationForm.regionId, directoryCities]);
+
+  const createStationWoredaOptions = useMemo(() => {
+    return directoryWoredas
+      .filter((item) => {
+        if (!createStationForm.cityId) return false;
+        return String(item.cityId || "") === String(createStationForm.cityId || "");
+      })
+      .slice()
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  }, [createStationForm.cityId, directoryWoredas]);
 
   const selectedStationGeo = useMemo(() => {
     return stationGeoById.get(String(stationId)) || null;
