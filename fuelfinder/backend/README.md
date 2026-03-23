@@ -25,6 +25,13 @@ Wildcard entries such as `https://*.netlify.app` are also supported.
 - `POST /api/auth/refresh`
 - `POST /api/auth/logout` (Bearer token)
 - `GET /api/auth/me` (Bearer token)
+- `GET /api/admin/regions`
+- `POST /api/admin/regions`
+- `PATCH /api/admin/regions/:regionId`
+- `GET /api/admin/cities`
+- `POST /api/admin/cities`
+- `PATCH /api/admin/cities/:cityId`
+- `POST /api/admin/locations/seed-ethiopia`
 - `POST /api/queue/join`
 - `POST /api/queue/reserve`
 - `POST /api/queue/payments/telebirr/auth-token`
@@ -66,6 +73,41 @@ Quick flow test (reserve -> auth-token -> initiate):
 ## Auth
 Protected endpoints use:
 - `Authorization: Bearer <accessToken>`
+
+## Ethiopia Location Directory
+- Stations can now store `regionId`, `cityId`, `subcity`, `woreda`, `landmark`, and `locationCategories`.
+- Seed Ethiopia regions and common cities:
+  `npm run locations:seed`
+- Re-seed and overwrite matching seed records:
+  `npm run locations:seed -- --overwrite`
+
+Example admin station payload:
+```json
+{
+  "name": "Bole Fuel Center",
+  "address": "Bole Road, Addis Ababa",
+  "regionId": "<REGION_ID>",
+  "cityId": "<CITY_ID>",
+  "subcity": "Bole",
+  "woreda": "03",
+  "landmark": "Near Millennium Hall",
+  "locationCategories": ["airport-corridor", "24-7", "cashless"],
+  "latitude": 8.9806,
+  "longitude": 38.7578
+}
+```
+
+Import stations from JSON:
+`npm run stations:import -- --file=./stations.json`
+
+Supported station import fields:
+- `name`, `address`, `latitude`, `longitude`
+- `regionId` or `regionName`
+- `cityId` or `cityName`
+- `subcity`, `woreda`, `landmark`
+- `locationCategories`
+- `contact`, `fuelStatus`, `isActive`
+- `externalSource`, `externalSourceId`
 
 Register payload:
 ```json

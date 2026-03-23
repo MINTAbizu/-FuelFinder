@@ -8,8 +8,16 @@ const stationSchema = new mongoose.Schema(
     externalSource: { type: String, trim: true },
     externalSourceId: { type: String, trim: true },
     organizationId: { type: mongoose.Schema.Types.ObjectId, default: null },
-    cityId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    regionId: { type: mongoose.Schema.Types.ObjectId, ref: "Region", default: null },
+    cityId: { type: mongoose.Schema.Types.ObjectId, ref: "City", default: null },
     branchId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    subcity: { type: String, trim: true, default: "" },
+    woreda: { type: String, trim: true, default: "" },
+    landmark: { type: String, trim: true, default: "" },
+    locationCategories: {
+      type: [{ type: String, trim: true, lowercase: true }],
+      default: []
+    },
     fuelStatus: {
       type: String,
       enum: ["full", "partial", "empty"],
@@ -47,6 +55,9 @@ const stationSchema = new mongoose.Schema(
 );
 
 stationSchema.index({ location: "2dsphere" });
+stationSchema.index({ regionId: 1 });
+stationSchema.index({ cityId: 1 });
+stationSchema.index({ locationCategories: 1 });
 stationSchema.index({ externalSource: 1, externalSourceId: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model("Station", stationSchema);

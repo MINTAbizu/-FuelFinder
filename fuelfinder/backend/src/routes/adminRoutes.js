@@ -6,6 +6,7 @@ const { auditAction } = require("../middleware/auditLog");
 const adminUserController = require("../controllers/adminUserController");
 const adminStationController = require("../controllers/adminStationController");
 const adminPaymentController = require("../controllers/adminPaymentController");
+const adminLocationController = require("../controllers/adminLocationController");
 
 const router = express.Router();
 
@@ -69,6 +70,53 @@ router.post(
   requireRole(["super_admin"]),
   auditAction("admin.user.force_logout", { targetType: "user" }),
   adminUserController.forceLogoutAdminUser
+);
+
+router.get(
+  "/regions",
+  requireRole(["super_admin", "org_admin"]),
+  adminLocationController.listRegions
+);
+
+router.post(
+  "/regions",
+  requireRole(["super_admin"]),
+  auditAction("admin.region.create", { targetType: "region" }),
+  adminLocationController.createRegion
+);
+
+router.patch(
+  "/regions/:regionId",
+  requireRole(["super_admin"]),
+  auditAction("admin.region.update", { targetType: "region" }),
+  adminLocationController.updateRegion
+);
+
+router.get(
+  "/cities",
+  requireRole(["super_admin", "org_admin"]),
+  adminLocationController.listCities
+);
+
+router.post(
+  "/cities",
+  requireRole(["super_admin"]),
+  auditAction("admin.city.create", { targetType: "city" }),
+  adminLocationController.createCity
+);
+
+router.patch(
+  "/cities/:cityId",
+  requireRole(["super_admin"]),
+  auditAction("admin.city.update", { targetType: "city" }),
+  adminLocationController.updateCity
+);
+
+router.post(
+  "/locations/seed-ethiopia",
+  requireRole(["super_admin"]),
+  auditAction("admin.location.seed_ethiopia", { targetType: "location_directory" }),
+  adminLocationController.seedEthiopiaLocations
 );
 
 router.get(

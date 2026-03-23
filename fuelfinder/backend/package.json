@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "locations:seed": "node scripts/seed-ethiopia-locations.js",
+    "stations:import": "node scripts/import-stations.js",
     "telebirr:flow": "node scripts/telebirr-flow.js",
     "stations:merge": "node scripts/merge-stations.js",
     "stations:backfill-address": "node scripts/backfill-station-addresses.js",
