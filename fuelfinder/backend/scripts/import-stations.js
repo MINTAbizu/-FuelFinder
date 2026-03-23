@@ -8,6 +8,7 @@ const {
   asLocationText,
   ensureRegionByName,
   ensureCityByName,
+  ensureWoredaByName,
   normalizeLocationCategories,
   resolveStationLocation
 } = require("../src/utils/locationDirectory");
@@ -70,6 +71,7 @@ function loadRecords(filePath) {
 async function resolveLocationFromRecord(record) {
   let regionId = asLocationText(record.regionId);
   let cityId = asLocationText(record.cityId);
+  let woredaId = asLocationText(record.woredaId);
 
   if (!regionId) {
     const regionName = asLocationText(record.regionName || record.region);
@@ -95,7 +97,24 @@ async function resolveLocationFromRecord(record) {
     }
   }
 
-  return resolveStationLocation({ regionId, cityId });
+  if (!woredaId) {
+    const woredaName = asLocationText(record.woredaName || record.woreda);
+    if (woredaName) {
+      if (!regionId || !cityId) {
+        throw new Error("woredaName requires regionId/regionName and cityId/cityName.");
+      }
+      const woreda = await ensureWoredaByName({
+        name: woredaName,
+        regionId,
+        cityId,
+        code: record.woredaCode,
+        category: record.woredaCategory
+      });
+      woredaId = String(woreda._id);
+    }
+  }
+
+  return resolveStationLocation({ regionId, cityId, woredaId });
 }
 
 function buildStationFilter(record, resolvedLocation) {
@@ -108,6 +127,7 @@ function buildStationFilter(record, resolvedLocation) {
   return {
     name: asLocationText(record.name),
     address: asLocationText(record.address),
+    woredaId: resolvedLocation.woredaId || null,
     cityId: resolvedLocation.cityId || null,
     regionId: resolvedLocation.regionId || null
   };
@@ -138,11 +158,12 @@ async function importStationRecord(record) {
     organizationId: asOptionalObjectId(record.organizationId, "organizationId"),
     regionId: resolvedLocation.regionId,
     cityId: resolvedLocation.cityId,
+    woredaId: resolvedLocation.woredaId,
     branchId: asOptionalObjectId(record.branchId, "branchId"),
     fuelStatus: normalizeFuelStatus(record.fuelStatus),
     isActive: record.isActive !== undefined ? Boolean(record.isActive) : true,
     subcity: asLocationText(record.subcity),
-    woreda: asLocationText(record.woreda),
+    woreda: asLocationText(record.woreda || record.woredaName || resolvedLocation.woreda?.name),
     landmark: asLocationText(record.landmark),
     locationCategories: normalizeLocationCategories(record.locationCategories),
     location: {

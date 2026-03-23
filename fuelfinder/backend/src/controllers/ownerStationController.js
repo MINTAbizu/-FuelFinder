@@ -32,6 +32,7 @@ function buildStationResponse(station) {
     organizationId: station.organizationId ? String(station.organizationId) : null,
     regionId: station.regionId ? String(station.regionId) : null,
     cityId: station.cityId ? String(station.cityId) : null,
+    woredaId: station.woredaId ? String(station.woredaId) : null,
     branchId: station.branchId ? String(station.branchId) : null,
     subcity: station.subcity || "",
     woreda: station.woreda || "",

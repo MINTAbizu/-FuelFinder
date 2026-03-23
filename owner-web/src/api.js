@@ -356,6 +356,16 @@ export async function listAdminCities(params = {}) {
   return apiRequest(`/admin/cities${query ? `?${query}` : ""}`, {}, { cacheTtlMs: 1000 * 60 * 10 });
 }
 
+export async function listAdminWoredas(params = {}) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return apiRequest(`/admin/woredas${query ? `?${query}` : ""}`, {}, { cacheTtlMs: 1000 * 60 * 10 });
+}
+
 export async function createAdminStation(payload) {
   return apiRequest("/admin/stations", {
     method: "POST",

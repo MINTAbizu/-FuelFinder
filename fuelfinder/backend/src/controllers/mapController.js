@@ -5,7 +5,7 @@ const QueueTicket = require("../models/QueueTicket");
 const { normalizePaymentDetails } = require("../utils/stationPaymentDetails");
 
 const STATION_SYNC_SELECT =
-  "_id name address contact externalSource externalSourceId fuelStatus fuelInventory paymentDetails isActive location regionId cityId subcity woreda landmark locationCategories";
+  "_id name address contact externalSource externalSourceId fuelStatus fuelInventory paymentDetails isActive location regionId cityId woredaId subcity woreda landmark locationCategories";
 const NEARBY_RESPONSE_CACHE_TTL_MS = 1000 * 45;
 const MAX_NEARBY_RESPONSE_CACHE_ENTRIES = 120;
 const DEFAULT_NEARBY_RADIUS_METERS = 12000;
@@ -143,6 +143,7 @@ function buildClientStationPayload(doc, fallback = {}) {
       paymentDetails: normalizePaymentDetails(doc?.paymentDetails || fallback?.paymentDetails),
       regionId: doc?.regionId ? String(doc.regionId) : null,
       cityId: doc?.cityId ? String(doc.cityId) : null,
+      woredaId: doc?.woredaId ? String(doc.woredaId) : null,
       subcity: String(doc?.subcity || fallback?.subcity || ""),
       woreda: String(doc?.woreda || fallback?.woreda || ""),
       landmark: String(doc?.landmark || fallback?.landmark || ""),

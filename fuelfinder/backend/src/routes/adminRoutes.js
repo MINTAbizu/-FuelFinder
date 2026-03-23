@@ -112,6 +112,26 @@ router.patch(
   adminLocationController.updateCity
 );
 
+router.get(
+  "/woredas",
+  requireRole(["super_admin", "org_admin"]),
+  adminLocationController.listWoredas
+);
+
+router.post(
+  "/woredas",
+  requireRole(["super_admin"]),
+  auditAction("admin.woreda.create", { targetType: "woreda" }),
+  adminLocationController.createWoreda
+);
+
+router.patch(
+  "/woredas/:woredaId",
+  requireRole(["super_admin"]),
+  auditAction("admin.woreda.update", { targetType: "woreda" }),
+  adminLocationController.updateWoreda
+);
+
 router.post(
   "/locations/seed-ethiopia",
   requireRole(["super_admin"]),

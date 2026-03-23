@@ -3,19 +3,48 @@ module.exports = [
     name: "Addis Ababa",
     code: "AA",
     category: "chartered_city",
-    cities: ["Addis Ababa"]
+    cities: [
+      {
+        name: "Addis Ababa",
+        woredas: [
+          { name: "Arada", category: "subcity" },
+          { name: "Addis Ketema", category: "subcity" },
+          { name: "Bole", category: "subcity" },
+          { name: "Gullele", category: "subcity" },
+          { name: "Kirkos", category: "subcity" },
+          { name: "Kolfe Keranio", category: "subcity" },
+          { name: "Lideta", category: "subcity" },
+          { name: "Nifas Silk-Lafto", category: "subcity" },
+          { name: "Yeka", category: "subcity" },
+          { name: "Akaky Kaliti", category: "subcity" }
+        ]
+      }
+    ]
   },
   {
     name: "Afar",
     code: "AF",
     category: "regional_state",
-    cities: ["Semera", "Asayita", "Awash", "Logiya"]
+    cities: [
+      { name: "Semera", woredas: ["Semera"] },
+      { name: "Asayita", woredas: ["Asayita"] },
+      { name: "Awash", woredas: ["Awash Fentale"] },
+      "Logiya"
+    ]
   },
   {
     name: "Amhara",
     code: "AM",
     category: "regional_state",
-    cities: ["Bahir Dar", "Gondar", "Dessie", "Debre Birhan", "Debre Markos", "Kombolcha", "Woldia"]
+    cities: [
+      { name: "Bahir Dar", woredas: ["Bahir Dar Zuria"] },
+      "Gondar",
+      "Dessie",
+      "Debre Birhan",
+      "Debre Markos",
+      "Kombolcha",
+      "Woldia"
+    ]
   },
   {
     name: "Benishangul-Gumuz",
@@ -33,7 +62,15 @@ module.exports = [
     name: "Dire Dawa",
     code: "DD",
     category: "chartered_city",
-    cities: ["Dire Dawa"]
+    cities: [
+      {
+        name: "Dire Dawa",
+        woredas: [
+          { name: "Kebele 01", category: "district" },
+          { name: "Kebele 02", category: "district" }
+        ]
+      }
+    ]
   },
   {
     name: "Gambella",
@@ -51,7 +88,16 @@ module.exports = [
     name: "Oromia",
     code: "OR",
     category: "regional_state",
-    cities: ["Adama", "Bishoftu", "Jimma", "Nekemte", "Ambo", "Shashemene", "Asella", "Bale Robe"]
+    cities: [
+      { name: "Adama", woredas: ["Adama"] },
+      { name: "Bishoftu", woredas: ["Bishoftu"] },
+      "Jimma",
+      "Nekemte",
+      "Ambo",
+      "Shashemene",
+      "Asella",
+      "Bale Robe"
+    ]
   },
   {
     name: "Sidama",
@@ -70,6 +116,12 @@ module.exports = [
     code: "SE",
     category: "regional_state",
     cities: ["Arba Minch", "Dilla", "Jinka", "Sawla", "Karat Konso"]
+  },
+  {
+    name: "South East Ethiopia",
+    code: "SEE",
+    category: "regional_state",
+    cities: ["Bale Robe", "Goba", "Dodola", "Ginir", "Berbere"]
   },
   {
     name: "South West Ethiopia",

@@ -12,6 +12,7 @@ import {
   getStationQueue,
   listAdminCities,
   listAdminRegions,
+  listAdminWoredas,
   listAdminUsers,
   listOrganizationOptions,
   listOwnerStations,
@@ -162,6 +163,7 @@ function buildCreateStationFormState(defaultOrganizationId = "") {
     organizationId: String(defaultOrganizationId || ""),
     regionId: "",
     cityId: "",
+    woredaId: "",
     branchId: "",
     chapaSubaccountId: "",
     paymentProviderName: "",
@@ -487,8 +489,10 @@ export default function Dashboard() {
   const [isSavingPromotion, setIsSavingPromotion] = useState(false);
   const [directoryRegions, setDirectoryRegions] = useState([]);
   const [directoryCities, setDirectoryCities] = useState([]);
+  const [directoryWoredas, setDirectoryWoredas] = useState([]);
   const [regionFilter, setRegionFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
+  const [woredaFilter, setWoredaFilter] = useState("all");
 
   const parseIdList = (value) => {
     return String(value || "")
@@ -603,6 +607,17 @@ export default function Dashboard() {
     return [{ key: "all", label: "All regions", count: stationGeo.length }, ...options];
   }, [directoryRegions, stationCountByRegion, stationGeo]);
 
+  const filteredStations = useMemo(() => {
+    return stationGeo.filter((item) => {
+      const matchesRegion =
+        regionFilter === "all" ||
+        item.regionKey === regionFilter ||
+        (!item.regionKey && cityFilter !== "all" && item.cityLabelKey === cityFilter);
+      const matchesCity = cityFilter === "all" || item.cityLabelKey === cityFilter;
+      return matchesRegion && matchesCity;
+    });
+  }, [cityFilter, regionFilter, stationGeo]);
+
   const cityOptions = useMemo(() => {
     if (directoryCities.length) {
       const options = directoryCities
@@ -637,21 +652,10 @@ export default function Dashboard() {
         if (!cityLabelKey) return;
         const existing = map.get(cityLabelKey) || { key: cityLabelKey, label: cityLabel, count: 0 };
         map.set(cityLabelKey, { ...existing, count: existing.count + 1 });
-      });
+    });
     const options = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
     return [{ key: "all", label: "All cities", count: stationGeo.length }, ...options];
   }, [directoryCities, filteredStations.length, regionFilter, stationCountByCity, stationGeo]);
-
-  const filteredStations = useMemo(() => {
-    return stationGeo.filter((item) => {
-      const matchesRegion =
-        regionFilter === "all" ||
-        item.regionKey === regionFilter ||
-        (!item.regionKey && cityFilter !== "all" && item.cityLabelKey === cityFilter);
-      const matchesCity = cityFilter === "all" || item.cityLabelKey === cityFilter;
-      return matchesRegion && matchesCity;
-    });
-  }, [cityFilter, regionFilter, stationGeo]);
 
   const cityStationGroups = useMemo(() => {
     if (directoryCities.length && (regionFilter !== "all" || cityFilter !== "all")) {

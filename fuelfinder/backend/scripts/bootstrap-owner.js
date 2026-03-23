@@ -47,8 +47,9 @@ async function resolveStationId() {
   const organizationId = asText(process.env.OWNER_ORG_ID);
   const regionId = asText(process.env.OWNER_REGION_ID);
   const cityId = asText(process.env.OWNER_CITY_ID);
+  const woredaId = asText(process.env.OWNER_WOREDA_ID);
   const branchId = asText(process.env.OWNER_BRANCH_ID);
-  const resolvedLocation = await resolveStationLocation({ regionId, cityId });
+  const resolvedLocation = await resolveStationLocation({ regionId, cityId, woredaId });
 
   const station = await Station.create({
     name,
@@ -57,6 +58,7 @@ async function resolveStationId() {
     organizationId: mongoose.isValidObjectId(organizationId) ? organizationId : null,
     regionId: resolvedLocation.regionId,
     cityId: resolvedLocation.cityId,
+    woredaId: resolvedLocation.woredaId,
     branchId: mongoose.isValidObjectId(branchId) ? branchId : null,
     fuelStatus: "partial",
     isActive: true,
@@ -88,8 +90,9 @@ async function main() {
   const organizationId = asText(process.env.OWNER_ORG_ID);
   const regionId = asText(process.env.OWNER_REGION_ID);
   const cityId = asText(process.env.OWNER_CITY_ID);
+  const woredaId = asText(process.env.OWNER_WOREDA_ID);
   const branchId = asText(process.env.OWNER_BRANCH_ID);
-  const resolvedLocation = await resolveStationLocation({ regionId, cityId });
+  const resolvedLocation = await resolveStationLocation({ regionId, cityId, woredaId });
 
   const existing = await User.findOne({ email });
   if (existing) {

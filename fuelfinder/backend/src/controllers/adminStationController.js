@@ -11,7 +11,8 @@ const {
 
 const STATION_POPULATE = [
   { path: "regionId", select: "name slug code category countryCode isActive" },
-  { path: "cityId", select: "name slug code regionId isActive" }
+  { path: "cityId", select: "name slug code regionId isActive" },
+  { path: "woredaId", select: "name slug code category regionId cityId isActive" }
 ];
 
 function asText(value) {
@@ -66,11 +67,26 @@ function buildCityPayload(value) {
   };
 }
 
+function buildWoredaPayload(value) {
+  if (!value || typeof value !== "object" || !value._id) return null;
+  return {
+    id: String(value._id),
+    name: value.name || "",
+    slug: value.slug || "",
+    code: value.code || "",
+    category: value.category || "woreda",
+    regionId: extractId(value.regionId),
+    cityId: extractId(value.cityId),
+    isActive: Boolean(value.isActive)
+  };
+}
+
 function buildStationResponse(station) {
   const coords = Array.isArray(station.location?.coordinates) ? station.location.coordinates : [];
   const fuelInventory = station.fuelInventory || {};
   const region = buildRegionPayload(station.regionId);
   const city = buildCityPayload(station.cityId);
+  const woredaDirectory = buildWoredaPayload(station.woredaId);
 
   return {
     id: String(station._id),
@@ -93,6 +109,8 @@ function buildStationResponse(station) {
     region,
     cityId: city ? city.id : extractId(station.cityId),
     city,
+    woredaId: woredaDirectory ? woredaDirectory.id : extractId(station.woredaId),
+    woredaDirectory,
     branchId: station.branchId ? String(station.branchId) : null,
     subcity: station.subcity || "",
     woreda: station.woreda || "",
@@ -153,6 +171,14 @@ exports.listStations = async (req, res) => {
       query.cityId = cityId;
     }
 
+    const woredaId = asText(req.query.woredaId);
+    if (woredaId) {
+      if (!mongoose.isValidObjectId(woredaId)) {
+        return res.status(400).json({ message: "woredaId must be a valid ObjectId." });
+      }
+      query.woredaId = woredaId;
+    }
+
     const branchId = asText(req.query.branchId);
     if (branchId) {
       if (!mongoose.isValidObjectId(branchId)) {
@@ -200,6 +226,7 @@ exports.createStation = async (req, res) => {
     let organizationId = asObjectIdOrNull(req.body.organizationId, "organizationId");
     const requestedRegionId = asObjectIdOrNull(req.body.regionId, "regionId");
     const requestedCityId = asObjectIdOrNull(req.body.cityId, "cityId");
+    const requestedWoredaId = asObjectIdOrNull(req.body.woredaId, "woredaId");
     const branchId = asObjectIdOrNull(req.body.branchId, "branchId");
     const locationCategories = normalizeLocationCategories(req.body.locationCategories);
 
@@ -231,7 +258,8 @@ exports.createStation = async (req, res) => {
 
     const resolvedLocation = await resolveStationLocation({
       regionId: requestedRegionId,
-      cityId: requestedCityId
+      cityId: requestedCityId,
+      woredaId: requestedWoredaId
     });
 
     const station = await Station.create({
@@ -245,9 +273,10 @@ exports.createStation = async (req, res) => {
       organizationId,
       regionId: resolvedLocation.regionId,
       cityId: resolvedLocation.cityId,
+      woredaId: resolvedLocation.woredaId,
       branchId,
       subcity: asText(req.body.subcity),
-      woreda: asText(req.body.woreda),
+      woreda: asText(req.body.woreda || resolvedLocation.woreda?.name),
       landmark: asText(req.body.landmark),
       locationCategories,
       location: {
@@ -359,21 +388,29 @@ exports.updateStation = async (req, res) => {
     if (req.body.branchId !== undefined) {
       station.branchId = asObjectIdOrNull(req.body.branchId, "branchId");
     }
-    if (req.body.regionId !== undefined || req.body.cityId !== undefined) {
+    if (req.body.regionId !== undefined || req.body.cityId !== undefined || req.body.woredaId !== undefined) {
       const requestedRegionId = req.body.regionId !== undefined
         ? asObjectIdOrNull(req.body.regionId, "regionId")
         : station.regionId;
       const requestedCityId = req.body.cityId !== undefined
         ? asObjectIdOrNull(req.body.cityId, "cityId")
         : station.cityId;
+      const requestedWoredaId = req.body.woredaId !== undefined
+        ? asObjectIdOrNull(req.body.woredaId, "woredaId")
+        : station.woredaId;
 
       const resolvedLocation = await resolveStationLocation({
         regionId: requestedRegionId,
-        cityId: requestedCityId
+        cityId: requestedCityId,
+        woredaId: requestedWoredaId
       });
 
       station.regionId = resolvedLocation.regionId;
       station.cityId = resolvedLocation.cityId;
+      station.woredaId = resolvedLocation.woredaId;
+      if (req.body.woreda === undefined && resolvedLocation.woreda?.name) {
+        station.woreda = resolvedLocation.woreda.name;
+      }
     }
     if (req.body.isActive !== undefined) {
       station.isActive = Boolean(req.body.isActive);

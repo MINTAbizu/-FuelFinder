@@ -1,10 +1,12 @@
 const mongoose = require("mongoose");
 const Region = require("../models/Region");
 const City = require("../models/City");
+const Woreda = require("../models/Woreda");
 const slugify = require("../utils/slugify");
 const {
   asLocationText,
   normalizeRegionCategory,
+  normalizeWoredaCategory,
   seedEthiopiaLocationDirectory
 } = require("../utils/locationDirectory");
 
@@ -55,6 +57,30 @@ function buildCityResponse(city) {
     region: populatedRegion,
     createdAt: city.createdAt,
     updatedAt: city.updatedAt
+  };
+}
+
+function buildWoredaResponse(woreda) {
+  const populatedRegion = woreda.regionId && typeof woreda.regionId === "object" && woreda.regionId.name
+    ? buildRegionResponse(woreda.regionId)
+    : null;
+  const populatedCity = woreda.cityId && typeof woreda.cityId === "object" && woreda.cityId.name
+    ? buildCityResponse(woreda.cityId)
+    : null;
+
+  return {
+    id: String(woreda._id),
+    name: woreda.name || "",
+    slug: woreda.slug || "",
+    code: woreda.code || "",
+    category: woreda.category || "woreda",
+    isActive: Boolean(woreda.isActive),
+    regionId: populatedRegion ? populatedRegion.id : extractId(woreda.regionId),
+    region: populatedRegion,
+    cityId: populatedCity ? populatedCity.id : extractId(woreda.cityId),
+    city: populatedCity,
+    createdAt: woreda.createdAt,
+    updatedAt: woreda.updatedAt
   };
 }
 
@@ -285,6 +311,179 @@ exports.updateCity = async (req, res) => {
   }
 };
 
+exports.listWoredas = async (req, res) => {
+  try {
+    const query = {};
+    const q = asLocationText(req.query.q);
+    const regionId = asLocationText(req.query.regionId);
+    const cityId = asLocationText(req.query.cityId);
+
+    if (req.query.isActive === "true") query.isActive = true;
+    if (req.query.isActive === "false") query.isActive = false;
+    if (regionId) {
+      if (!mongoose.isValidObjectId(regionId)) {
+        return res.status(400).json({ message: "regionId must be a valid ObjectId." });
+      }
+      query.regionId = regionId;
+    }
+    if (cityId) {
+      if (!mongoose.isValidObjectId(cityId)) {
+        return res.status(400).json({ message: "cityId must be a valid ObjectId." });
+      }
+      query.cityId = cityId;
+    }
+    if (q) {
+      query.name = { $regex: escapeRegex(q), $options: "i" };
+    }
+
+    const woredas = await Woreda.find(query)
+      .populate("regionId", "name slug code category countryCode isActive createdAt updatedAt")
+      .populate("cityId", "name slug code regionId isActive createdAt updatedAt")
+      .sort({ name: 1 })
+      .lean();
+
+    return res.json({
+      total: woredas.length,
+      woredas: woredas.map((woreda) => buildWoredaResponse(woreda))
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to load woredas." });
+  }
+};
+
+exports.createWoreda = async (req, res) => {
+  try {
+    const name = asLocationText(req.body.name);
+    const code = asLocationText(req.body.code).toUpperCase();
+    const category = normalizeWoredaCategory(req.body.category);
+    const regionId = asLocationText(req.body.regionId);
+    const cityId = asLocationText(req.body.cityId);
+    const isActive = req.body.isActive !== undefined ? Boolean(req.body.isActive) : true;
+
+    if (!name || !regionId || !cityId) {
+      return res.status(400).json({ message: "name, regionId, and cityId are required." });
+    }
+    if (!mongoose.isValidObjectId(regionId)) {
+      return res.status(400).json({ message: "regionId must be a valid ObjectId." });
+    }
+    if (!mongoose.isValidObjectId(cityId)) {
+      return res.status(400).json({ message: "cityId must be a valid ObjectId." });
+    }
+
+    const city = await City.findById(cityId).lean();
+    if (!city) {
+      return res.status(404).json({ message: "City not found." });
+    }
+    if (String(city.regionId) !== regionId) {
+      return res.status(400).json({ message: "cityId does not belong to the provided regionId." });
+    }
+
+    const payload = {
+      name,
+      slug: slugify(name),
+      category,
+      regionId,
+      cityId,
+      isActive
+    };
+    if (code) payload.code = code;
+    const woreda = await Woreda.create(payload);
+
+    const populatedWoreda = await Woreda.findById(woreda._id)
+      .populate("regionId", "name slug code category countryCode isActive createdAt updatedAt")
+      .populate("cityId", "name slug code regionId isActive createdAt updatedAt")
+      .lean();
+
+    return res.status(201).json({
+      message: "Woreda created successfully.",
+      woreda: buildWoredaResponse(populatedWoreda)
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ message: "A woreda with that name already exists in this city." });
+    }
+    return res.status(500).json({ message: "Failed to create woreda." });
+  }
+};
+
+exports.updateWoreda = async (req, res) => {
+  try {
+    const woredaId = asLocationText(req.params.woredaId);
+    if (!mongoose.isValidObjectId(woredaId)) {
+      return res.status(400).json({ message: "Invalid woreda id." });
+    }
+
+    const woreda = await Woreda.findById(woredaId);
+    if (!woreda) {
+      return res.status(404).json({ message: "Woreda not found." });
+    }
+
+    if (req.body.name !== undefined) {
+      const name = asLocationText(req.body.name);
+      if (!name) return res.status(400).json({ message: "name cannot be empty." });
+      woreda.name = name;
+      woreda.slug = slugify(name);
+    }
+    if (req.body.code !== undefined) {
+      woreda.code = asLocationText(req.body.code).toUpperCase() || undefined;
+    }
+    if (req.body.category !== undefined) {
+      woreda.category = normalizeWoredaCategory(req.body.category);
+    }
+
+    let nextRegionId = asLocationText(woreda.regionId);
+    let nextCityId = asLocationText(woreda.cityId);
+
+    if (req.body.regionId !== undefined) {
+      nextRegionId = asLocationText(req.body.regionId);
+      if (!nextRegionId) return res.status(400).json({ message: "regionId cannot be empty." });
+      if (!mongoose.isValidObjectId(nextRegionId)) {
+        return res.status(400).json({ message: "regionId must be a valid ObjectId." });
+      }
+    }
+    if (req.body.cityId !== undefined) {
+      nextCityId = asLocationText(req.body.cityId);
+      if (!nextCityId) return res.status(400).json({ message: "cityId cannot be empty." });
+      if (!mongoose.isValidObjectId(nextCityId)) {
+        return res.status(400).json({ message: "cityId must be a valid ObjectId." });
+      }
+    }
+
+    if (req.body.regionId !== undefined || req.body.cityId !== undefined) {
+      const city = await City.findById(nextCityId).lean();
+      if (!city) {
+        return res.status(404).json({ message: "City not found." });
+      }
+      if (String(city.regionId) !== nextRegionId) {
+        return res.status(400).json({ message: "cityId does not belong to the provided regionId." });
+      }
+      woreda.regionId = nextRegionId;
+      woreda.cityId = nextCityId;
+    }
+
+    if (req.body.isActive !== undefined) {
+      woreda.isActive = Boolean(req.body.isActive);
+    }
+
+    await woreda.save();
+
+    const populatedWoreda = await Woreda.findById(woreda._id)
+      .populate("regionId", "name slug code category countryCode isActive createdAt updatedAt")
+      .populate("cityId", "name slug code regionId isActive createdAt updatedAt")
+      .lean();
+
+    return res.json({
+      message: "Woreda updated successfully.",
+      woreda: buildWoredaResponse(populatedWoreda)
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ message: "A woreda with that name already exists in this city." });
+    }
+    return res.status(500).json({ message: "Failed to update woreda." });
+  }
+};
+
 exports.seedEthiopiaLocations = async (req, res) => {
   try {
     const overwrite = req.body?.overwrite !== undefined
@@ -293,7 +492,7 @@ exports.seedEthiopiaLocations = async (req, res) => {
 
     const summary = await seedEthiopiaLocationDirectory({ overwrite });
     return res.json({
-      message: "Ethiopia region and city directory seeded successfully.",
+      message: "Ethiopia region, city, and woreda directory seeded successfully.",
       summary
     });
   } catch (_error) {
