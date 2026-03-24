@@ -2,6 +2,8 @@ const mongoose = require("mongoose");
 const { fetchNearbyFuelStations, fetchDrivingRoute } = require("../services/mapService");
 const Station = require("../models/Station");
 const QueueTicket = require("../models/QueueTicket");
+const City = require("../models/City");
+const Region = require("../models/Region");
 const { normalizePaymentDetails } = require("../utils/stationPaymentDetails");
 
 const STATION_SYNC_SELECT =
@@ -11,6 +13,9 @@ const MAX_NEARBY_RESPONSE_CACHE_ENTRIES = 120;
 const DEFAULT_NEARBY_RADIUS_METERS = 12000;
 const MAX_NEARBY_RADIUS_METERS = 50000;
 const MAX_NEARBY_RESULTS = 100;
+const DEFAULT_DIRECTORY_LIMIT = 24;
+const DEFAULT_DIRECTORY_STATION_LIMIT = 120;
+const MAX_DIRECTORY_LIMIT = 250;
 const PUBLIC_QUEUE_STATUSES = ["waiting", "called"];
 
 const nearbyStationsResponseCache = new Map();
@@ -18,6 +23,18 @@ const nearbyStationsResponseCache = new Map();
 function parseNumber(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+}
+
+function normalizeDirectoryLimit(value, fallback = DEFAULT_DIRECTORY_LIMIT) {
+  const parsed = parseNumber(value);
+  if (parsed === null || parsed <= 0) {
+    return fallback;
+  }
+  return Math.min(Math.round(parsed), MAX_DIRECTORY_LIMIT);
+}
+
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function normalizeNearbyRadius(value) {
@@ -109,6 +126,33 @@ function normalizeQueueLength(value) {
   const queueLength = Number(value);
   if (!Number.isFinite(queueLength) || queueLength < 0) return 0;
   return Math.round(queueLength);
+}
+
+function buildRegionDirectoryPayload(region) {
+  if (!region?._id) return null;
+  return {
+    id: String(region._id),
+    name: String(region.name || ""),
+    slug: String(region.slug || ""),
+    code: String(region.code || "")
+  };
+}
+
+function buildCityDirectoryPayload(city, stats = {}, region = null) {
+  if (!city?._id) return null;
+  const latitude = Number(stats.latitude);
+  const longitude = Number(stats.longitude);
+  return {
+    id: String(city._id),
+    name: String(city.name || ""),
+    slug: String(city.slug || ""),
+    code: String(city.code || ""),
+    regionId: city.regionId ? String(city.regionId) : null,
+    region: buildRegionDirectoryPayload(region),
+    stationCount: Number(stats.stationCount || 0),
+    latitude: Number.isFinite(latitude) ? latitude : null,
+    longitude: Number.isFinite(longitude) ? longitude : null
+  };
 }
 
 function buildClientStationPayload(doc, fallback = {}) {
@@ -417,6 +461,69 @@ async function queryNearbyStationsFromDatabase(lat, lon, radius, limit = MAX_NEA
   );
 }
 
+async function queryDirectoryStations(matchQuery, limit = DEFAULT_DIRECTORY_STATION_LIMIT) {
+  const now = new Date();
+
+  const stations = await Station.aggregate([
+    {
+      $match: matchQuery
+    },
+    {
+      $lookup: {
+        from: QueueTicket.collection.name,
+        let: { stationId: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ["$stationId", "$$stationId"] },
+                  { $in: ["$status", PUBLIC_QUEUE_STATUSES] },
+                  {
+                    $or: [
+                      { $eq: [{ $ifNull: ["$expiresAt", null] }, null] },
+                      { $gt: ["$expiresAt", now] }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            $count: "count"
+          }
+        ],
+        as: "queueStats"
+      }
+    },
+    {
+      $addFields: {
+        queue_length: { $ifNull: [{ $first: "$queueStats.count" }, 0] }
+      }
+    },
+    {
+      $project: {
+        queueStats: 0
+      }
+    },
+    {
+      $sort: {
+        name: 1,
+        updatedAt: -1
+      }
+    },
+    {
+      $limit: limit
+    }
+  ]);
+
+  return stations.map((station) =>
+    buildClientStationPayload(station, {
+      queue_length: station.queue_length
+    })
+  );
+}
+
 async function bootstrapNearbyStationsFromExternal(lat, lon, radius) {
   const stations = await fetchNearbyFuelStations(lat, lon, radius);
   return attachBackendStationIds(stations);
@@ -453,6 +560,130 @@ exports.getNearbyFuelStations = async (req, res) => {
     return res.json({ stations });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load nearby fuel stations." });
+  }
+};
+
+exports.listDirectoryCities = async (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim();
+    const regionId = String(req.query.regionId || "").trim();
+    const limit = normalizeDirectoryLimit(req.query.limit, DEFAULT_DIRECTORY_LIMIT);
+
+    if (regionId && !mongoose.isValidObjectId(regionId)) {
+      return res.status(400).json({ message: "regionId must be a valid ObjectId." });
+    }
+
+    const cityQuery = { isActive: true };
+    if (regionId) {
+      cityQuery.regionId = regionId;
+    }
+    if (q) {
+      cityQuery.name = { $regex: escapeRegex(q), $options: "i" };
+    }
+
+    const cities = await City.find(cityQuery)
+      .select("_id name slug code regionId")
+      .sort({ name: 1 })
+      .limit(limit * 4)
+      .lean();
+
+    if (!cities.length) {
+      return res.json({ total: 0, cities: [] });
+    }
+
+    const cityIds = cities.map((city) => city._id);
+    const regionIds = Array.from(
+      new Set(cities.map((city) => String(city.regionId || "")).filter(Boolean))
+    );
+
+    const [stats, regions] = await Promise.all([
+      Station.aggregate([
+        {
+          $match: {
+            isActive: true,
+            cityId: { $in: cityIds }
+          }
+        },
+        {
+          $group: {
+            _id: "$cityId",
+            stationCount: { $sum: 1 },
+            longitude: { $avg: { $arrayElemAt: ["$location.coordinates", 0] } },
+            latitude: { $avg: { $arrayElemAt: ["$location.coordinates", 1] } }
+          }
+        }
+      ]),
+      Region.find({ _id: { $in: regionIds } })
+        .select("_id name slug code")
+        .lean()
+    ]);
+
+    const statsByCityId = new Map(
+      stats.map((item) => [String(item._id), item])
+    );
+    const regionsById = new Map(
+      regions.map((region) => [String(region._id), region])
+    );
+
+    const payload = cities
+      .map((city) => buildCityDirectoryPayload(city, statsByCityId.get(String(city._id)), regionsById.get(String(city.regionId))))
+      .filter((city) => city && city.stationCount > 0)
+      .sort((a, b) => {
+        if (b.stationCount !== a.stationCount) {
+          return b.stationCount - a.stationCount;
+        }
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, limit);
+
+    return res.json({
+      total: payload.length,
+      cities: payload
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to load city directory." });
+  }
+};
+
+exports.listDirectoryStations = async (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim();
+    const regionId = String(req.query.regionId || "").trim();
+    const cityId = String(req.query.cityId || "").trim();
+    const limit = normalizeDirectoryLimit(req.query.limit, DEFAULT_DIRECTORY_STATION_LIMIT);
+
+    if (regionId && !mongoose.isValidObjectId(regionId)) {
+      return res.status(400).json({ message: "regionId must be a valid ObjectId." });
+    }
+    if (cityId && !mongoose.isValidObjectId(cityId)) {
+      return res.status(400).json({ message: "cityId must be a valid ObjectId." });
+    }
+
+    const matchQuery = { isActive: true };
+    if (regionId) {
+      matchQuery.regionId = new mongoose.Types.ObjectId(regionId);
+    }
+    if (cityId) {
+      matchQuery.cityId = new mongoose.Types.ObjectId(cityId);
+    }
+    if (q) {
+      const regex = new RegExp(escapeRegex(q), "i");
+      matchQuery.$or = [
+        { name: regex },
+        { address: regex },
+        { subcity: regex },
+        { woreda: regex },
+        { landmark: regex }
+      ];
+    }
+
+    const stations = await queryDirectoryStations(matchQuery, limit);
+    return res.json({
+      total: stations.length,
+      stations
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to load station directory." });
   }
 };
 

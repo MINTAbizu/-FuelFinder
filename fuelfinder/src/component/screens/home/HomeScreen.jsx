@@ -186,6 +186,28 @@ async function fetchStationPromotions(stationIds, limit = 6) {
   return Array.isArray(data?.promotions) ? data.promotions : [];
 }
 
+async function fetchBrowseCities(params = {}) {
+  const { data } = await api.get("/map/cities", {
+    params: {
+      q: String(params?.q || "").trim() || undefined,
+      limit: params?.limit || 20
+    }
+  });
+  return Array.isArray(data?.cities) ? data.cities : [];
+}
+
+async function fetchDirectoryStations(params = {}) {
+  const { data } = await api.get("/map/stations", {
+    params: {
+      cityId: String(params?.cityId || "").trim() || undefined,
+      regionId: String(params?.regionId || "").trim() || undefined,
+      q: String(params?.q || "").trim() || undefined,
+      limit: params?.limit || 120
+    }
+  });
+  return Array.isArray(data?.stations) ? data.stations : [];
+}
+
 function statusLabel(t, status) {
   if (status === "available") return t("homeScreen.status.available");
   if (status === "limited") return t("homeScreen.status.limited");
@@ -277,6 +299,11 @@ export default function HomeScreen({ navigation, route }) {
     latitude: DEFAULT_REGION.latitude,
     longitude: DEFAULT_REGION.longitude,
   });
+  const [browseMode, setBrowseMode] = useState("nearby");
+  const [cityQuery, setCityQuery] = useState("");
+  const [cityOptions, setCityOptions] = useState([]);
+  const [cityOptionsLoading, setCityOptionsLoading] = useState(false);
+  const [selectedCity, setSelectedCity] = useState(null);
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [fuelFilter, setFuelFilter] = useState("any");
@@ -297,6 +324,7 @@ export default function HomeScreen({ navigation, route }) {
   const [promotions, setPromotions] = useState([]);
   const [promotionsLoading, setPromotionsLoading] = useState(false);
   const [promotionIndex, setPromotionIndex] = useState(0);
+  const deferredCityQuery = useDeferredValue(cityQuery);
   const deferredSearchText = useDeferredValue(searchText);
 
   const refreshSavedStations = useCallback(async () => {
@@ -307,6 +335,91 @@ export default function HomeScreen({ navigation, route }) {
       // Ignore local saved-station refresh failures and keep the screen usable.
     }
   }, []);
+
+  const loadBrowseCities = useCallback(
+    async (query = "") => {
+      setCityOptionsLoading(true);
+      try {
+        const nextCities = await fetchBrowseCities({
+          q: query,
+          limit: query ? 30 : 18
+        });
+        setCityOptions(nextCities);
+      } catch (error) {
+        console.error("[Stations:loadBrowseCities]", error?.response?.status, error?.response?.data, error?.message);
+      } finally {
+        setCityOptionsLoading(false);
+      }
+    },
+    []
+  );
+
+  const loadCityStations = useCallback(
+    async (city) => {
+      const cityId = String(city?.id || "").trim();
+      if (!cityId) {
+        setStations([]);
+        return;
+      }
+
+      setLoadingStations(true);
+      setStationsError("");
+      try {
+        const nextStations = await fetchDirectoryStations({
+          cityId,
+          limit: 220
+        });
+        setStations(nextStations);
+
+        const centroid = buildCoordinateCentroid(nextStations);
+        const cityLatitude = Number(city?.latitude);
+        const cityLongitude = Number(city?.longitude);
+        if (centroid) {
+          setMapCenter({
+            latitude: centroid.latitude,
+            longitude: centroid.longitude
+          });
+        } else if (Number.isFinite(cityLatitude) && Number.isFinite(cityLongitude)) {
+          setMapCenter({
+            latitude: cityLatitude,
+            longitude: cityLongitude
+          });
+        }
+
+        if (!nextStations.length) {
+          setStationsError(
+            t("cityStationsEmpty", {
+              defaultValue: "No stations are assigned to this city yet."
+            })
+          );
+        }
+      } catch (error) {
+        setStationsError(
+          t("cityStationsLoadFail", {
+            defaultValue: "Failed to load stations for the selected city."
+          })
+        );
+        console.error("[Stations:loadCityStations]", error?.response?.status, error?.response?.data, error?.message);
+      } finally {
+        setLoadingStations(false);
+      }
+    },
+    [t]
+  );
+
+  const handleSelectCity = useCallback(
+    async (city) => {
+      setSelectedCity(city);
+      setRouteCoords([]);
+      setRouteSummary(null);
+      setActiveRouteStationId("");
+       setRouteDestinationStation(null);
+       setPendingRouteStation(null);
+       setRoutingError("");
+      await loadCityStations(city);
+    },
+    [loadCityStations]
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -339,12 +452,17 @@ export default function HomeScreen({ navigation, route }) {
   }, []);
 
   useEffect(() => {
+    void loadBrowseCities(deferredCityQuery);
+  }, [deferredCityQuery, loadBrowseCities]);
+
+  useEffect(() => {
     let mounted = true;
     (async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== "granted") {
           if (mounted) setHasLocationPermission(false);
+          if (mounted) setBrowseMode("city");
           if (mounted) setLocationError(t("homeScreen.location.denied"));
           return;
         }
@@ -441,20 +559,58 @@ export default function HomeScreen({ navigation, route }) {
     }
   }, [location, t]);
 
+  const handleBrowseModeChange = useCallback(
+    async (nextMode) => {
+      setBrowseMode(nextMode);
+      setStationsError("");
+
+      if (nextMode === "nearby") {
+        if (location) {
+          await loadNearbyStations({ forceRefresh: true });
+        } else {
+          setStations([]);
+        }
+        return;
+      }
+
+      if (selectedCity?.id) {
+        await loadCityStations(selectedCity);
+        return;
+      }
+
+      const fallbackCity = cityOptions[0];
+      if (fallbackCity) {
+        await handleSelectCity(fallbackCity);
+      }
+    },
+    [cityOptions, handleSelectCity, loadCityStations, loadNearbyStations, location, selectedCity]
+  );
+
   useEffect(() => {
-    if (!location || loadedRef.current) return;
+    if (browseMode !== "nearby" || !location || loadedRef.current) return;
     loadedRef.current = true;
     loadNearbyStations();
-  }, [location, loadNearbyStations]);
+  }, [browseMode, location, loadNearbyStations]);
+
+  useEffect(() => {
+    if (browseMode !== "city" || selectedCity || !cityOptions.length) return;
+    void handleSelectCity(cityOptions[0]);
+  }, [browseMode, cityOptions, handleSelectCity, selectedCity]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await loadNearbyStations({ forceRefresh: true });
+      if (browseMode === "city") {
+        if (selectedCity?.id) {
+          await loadCityStations(selectedCity);
+        }
+      } else {
+        await loadNearbyStations({ forceRefresh: true });
+      }
     } finally {
       setRefreshing(false);
     }
-  }, [loadNearbyStations]);
+  }, [browseMode, loadCityStations, loadNearbyStations, selectedCity]);
 
   useEffect(() => {
     let active = true;
@@ -492,14 +648,25 @@ export default function HomeScreen({ navigation, route }) {
   }, [stations]);
 
   const onCenterMap = useCallback(() => {
-    if (!mapRef.current || !location) return;
+    if (!mapRef.current) return;
+    const centerSource = browseMode === "city" ? mapCenter : location;
+    if (!centerSource) return;
     mapRef.current.animateToRegion(
-      { latitude: location.latitude, longitude: location.longitude, latitudeDelta: 0.025, longitudeDelta: 0.025 },
+      {
+        latitude: Number(centerSource.latitude || DEFAULT_REGION.latitude),
+        longitude: Number(centerSource.longitude || DEFAULT_REGION.longitude),
+        latitudeDelta: 0.025,
+        longitudeDelta: 0.025
+      },
       500
     );
-    setCenterNotice(t("homeScreen.mapCentered"));
+    setCenterNotice(
+      browseMode === "city"
+        ? t("cityMapCentered", { defaultValue: "Map centered to the selected city" })
+        : t("homeScreen.mapCentered")
+    );
     setTimeout(() => setCenterNotice(""), 1200);
-  }, [location, t]);
+  }, [browseMode, location, mapCenter, t]);
 
   const onMapRegionChangeComplete = useCallback(
     (region) => {
@@ -623,7 +790,7 @@ export default function HomeScreen({ navigation, route }) {
   }, [drawRouteToStation, hasLocationPermission, location, locationError, pendingRouteStation, t]);
 
   const filteredStations = useMemo(() => {
-    const base = location || mapCenter;
+    const base = browseMode === "city" ? mapCenter : (location || mapCenter);
     const query = deferredSearchText.trim().toLowerCase();
     const next = [];
     let topStationId = "";
@@ -631,7 +798,18 @@ export default function HomeScreen({ navigation, route }) {
 
     for (const station of stations) {
       const stationName = String(station?.name || "").toLowerCase();
-      if (query && !stationName.includes(query)) continue;
+      const stationAddress = String(station?.address || "").toLowerCase();
+      const stationSubcity = String(station?.subcity || "").toLowerCase();
+      const stationWoreda = String(station?.woreda || "").toLowerCase();
+      if (
+        query &&
+        !stationName.includes(query) &&
+        !stationAddress.includes(query) &&
+        !stationSubcity.includes(query) &&
+        !stationWoreda.includes(query)
+      ) {
+        continue;
+      }
       if (statusFilter !== "all" && station?.fuel_status !== statusFilter) continue;
       if (
         fuelFilter !== "any" &&
@@ -691,7 +869,7 @@ export default function HomeScreen({ navigation, route }) {
       ...station,
       isTopPick: getStationIdentity(station) === topStationId,
     }));
-  }, [stations, location, mapCenter, deferredSearchText, statusFilter, fuelFilter, sortBy, t]);
+  }, [browseMode, stations, location, mapCenter, deferredSearchText, statusFilter, fuelFilter, sortBy, t]);
 
   const onToggleSavedStation = useCallback(
     async (station) => {
@@ -769,6 +947,77 @@ export default function HomeScreen({ navigation, route }) {
             <Text style={styles.title}>FuelFinder</Text>
             <Text style={styles.subtitle}>{t("homeScreen.subtitle")}</Text>
 
+            <Text style={styles.section}>
+              {t("stationDiscoveryMode", { defaultValue: "How to explore stations" })}
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+              {[
+                {
+                  id: "nearby",
+                  label: t("browseNearbyLabel", { defaultValue: "Nearby" })
+                },
+                {
+                  id: "city",
+                  label: t("browseCityLabel", { defaultValue: "Browse by city" })
+                }
+              ].map((option) => (
+                <TouchableOpacity
+                  key={option.id}
+                  style={[styles.chip, browseMode === option.id && styles.chipActive]}
+                  onPress={() => handleBrowseModeChange(option.id)}
+                >
+                  <Text style={[styles.chipText, browseMode === option.id && styles.chipTextActive]}>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            {browseMode === "city" ? (
+              <>
+                <TextInput
+                  value={cityQuery}
+                  onChangeText={setCityQuery}
+                  placeholder={t("citySearchPlaceholder", { defaultValue: "Search city" })}
+                  style={styles.search}
+                />
+                {selectedCity ? (
+                  <Text style={styles.count}>
+                    {selectedCity.name}
+                    {selectedCity?.region?.name ? `, ${selectedCity.region.name}` : ""}
+                    {" • "}
+                    {Number(selectedCity.stationCount || 0)}{" "}
+                    {t("cityStationsCount", { defaultValue: "stations" })}
+                  </Text>
+                ) : null}
+                {cityOptionsLoading && !cityOptions.length ? (
+                  <Text style={styles.notice}>
+                    {t("cityOptionsLoading", { defaultValue: "Loading available cities..." })}
+                  </Text>
+                ) : null}
+                {cityOptions.length ? (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+                    {cityOptions.map((city) => {
+                      const isActive = String(selectedCity?.id || "") === String(city?.id || "");
+                      const regionLabel = String(city?.region?.name || "").trim();
+                      return (
+                        <TouchableOpacity
+                          key={String(city?.id || city?.name || "")}
+                          style={[styles.chip, isActive && styles.chipActive]}
+                          onPress={() => handleSelectCity(city)}
+                        >
+                          <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
+                            {city.name}
+                            {regionLabel ? ` • ${regionLabel}` : ""}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                ) : null}
+              </>
+            ) : null}
+
             <View style={styles.mapCard}>
               <MapView
                 ref={mapRef}
@@ -819,16 +1068,29 @@ export default function HomeScreen({ navigation, route }) {
             </View>
 
             <View style={styles.row}>
-              {location ? (
+              {browseMode === "city" || location ? (
                 <Pressable style={[styles.button, styles.primary]} onPress={onCenterMap}>
-                  <Text style={styles.buttonText}>{t("homeScreen.centerOnMe")}</Text>
+                  <Text style={styles.buttonText}>
+                    {browseMode === "city"
+                      ? t("centerSelectedCity", { defaultValue: "Center selected city" })
+                      : t("homeScreen.centerOnMe")}
+                  </Text>
                 </Pressable>
               ) : (
                 <View style={[styles.button, styles.disabled]}>
                   <Text style={styles.buttonText}>{t("homeScreen.centerUnavailable")}</Text>
                 </View>
               )}
-              {location ? (
+              {browseMode === "city" ? (
+                <Pressable
+                  style={[styles.button, styles.secondary]}
+                  onPress={() => (selectedCity?.id ? loadCityStations(selectedCity) : undefined)}
+                >
+                  <Text style={styles.buttonText}>
+                    {t("reloadSelectedCity", { defaultValue: "Load city stations" })}
+                  </Text>
+                </Pressable>
+              ) : location ? (
                 <Pressable style={[styles.button, styles.secondary]} onPress={() => loadNearbyStations({ forceRefresh: true })}>
                   <Text style={styles.buttonText}>{t("homeScreen.findNearby")}</Text>
                 </Pressable>
@@ -849,7 +1111,16 @@ export default function HomeScreen({ navigation, route }) {
             {locationError ? <Text style={styles.notice}>{locationError}</Text> : null}
             {stationsError ? <Text style={styles.error}>{stationsError}</Text> : null}
             {routingError ? <Text style={styles.error}>{routingError}</Text> : null}
-            <TextInput value={searchText} onChangeText={setSearchText} placeholder={t("homeScreen.search")} style={styles.search} />
+            <TextInput
+              value={searchText}
+              onChangeText={setSearchText}
+              placeholder={
+                browseMode === "city"
+                  ? t("stationSearchInCity", { defaultValue: "Search station in selected city" })
+                  : t("homeScreen.search")
+              }
+              style={styles.search}
+            />
 
             {promotionsLoading && !promotions.length ? (
               <View style={styles.promotionsLoading}>
