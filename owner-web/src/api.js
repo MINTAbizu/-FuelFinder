@@ -8,6 +8,8 @@ const STORAGE_KEY = "ff_owner_session_v1";
 const GET_CACHE = new Map();
 const INFLIGHT_GET_REQUESTS = new Map();
 const MAX_CACHE_ENTRIES = 200;
+export const AUTH_EXPIRED_EVENT = "ff-owner-auth-expired";
+export const AUTH_EXPIRED_MESSAGE = "Session expired. Please sign in again.";
 
 function getBrowserOrigin() {
   if (typeof window === "undefined" || !window.location?.origin) {
@@ -97,6 +99,18 @@ export function clearSession() {
   localStorage.removeItem(STORAGE_KEY);
 }
 
+function dispatchAuthExpired(message = AUTH_EXPIRED_MESSAGE) {
+  clearRequestCache();
+  clearSession();
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(AUTH_EXPIRED_EVENT, {
+        detail: { message }
+      })
+    );
+  }
+}
+
 async function apiRequest(path, options = {}, { auth = true, retry = true, cacheTtlMs = 0 } = {}) {
   const session = loadSession();
   const method = String(options.method || "GET").toUpperCase();
@@ -137,7 +151,13 @@ async function apiRequest(path, options = {}, { auth = true, retry = true, cache
     if (cacheKey) {
       INFLIGHT_GET_REQUESTS.delete(cacheKey);
     }
-    const refreshed = await refreshToken(session.tokens.refreshToken);
+    let refreshed = null;
+    try {
+      refreshed = await refreshToken(session.tokens.refreshToken);
+    } catch (_error) {
+      dispatchAuthExpired();
+      throw new Error(AUTH_EXPIRED_MESSAGE);
+    }
     if (refreshed?.tokens?.accessToken) {
       const nextSession = { ...session, tokens: refreshed.tokens };
       saveSession(nextSession);
@@ -147,6 +167,10 @@ async function apiRequest(path, options = {}, { auth = true, retry = true, cache
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 401 && auth) {
+      dispatchAuthExpired();
+      throw new Error(AUTH_EXPIRED_MESSAGE);
+    }
     const message = payload?.message || "Request failed.";
     throw new Error(message);
   }
@@ -221,6 +245,16 @@ export async function getStationFuelStockSummary(stationId, params = {}) {
     {},
     { cacheTtlMs: 1000 * 15 }
   );
+}
+
+export async function listNearbyFuelStations(params = {}) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return apiRequest(`/map/nearby-fuel${query ? `?${query}` : ""}`, {}, { auth: false, cacheTtlMs: 1000 * 45 });
 }
 
 export async function getStationQueue(stationId) {

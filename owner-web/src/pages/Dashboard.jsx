@@ -1,5 +1,7 @@
 import React, { startTransition, useEffect, useMemo, useState } from "react";
 import {
+  AUTH_EXPIRED_EVENT,
+  AUTH_EXPIRED_MESSAGE,
   callNextInQueue,
   createAdminStation,
   createStationPromotion,
@@ -8,6 +10,7 @@ import {
   forceLogoutAdminUser,
   forceLogoutStationTeamUser,
   getOwnerStation,
+  listNearbyFuelStations,
   getStationFuelStockSummary,
   getStationQueue,
   listAdminCities,
@@ -394,6 +397,31 @@ function buildEmptyInventorySummary(dateKey = localDateKey()) {
   };
 }
 
+function buildCoordinateCentroid(items = []) {
+  const coords = (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      latitude: Number(item?.latitude),
+      longitude: Number(item?.longitude)
+    }))
+    .filter((point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude));
+
+  if (!coords.length) return null;
+
+  const totals = coords.reduce(
+    (sum, point) => ({
+      latitude: sum.latitude + point.latitude,
+      longitude: sum.longitude + point.longitude
+    }),
+    { latitude: 0, longitude: 0 }
+  );
+
+  return {
+    latitude: totals.latitude / coords.length,
+    longitude: totals.longitude / coords.length,
+    sampleSize: coords.length
+  };
+}
+
 function readStorageJSON(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
@@ -630,6 +658,103 @@ export default function Dashboard() {
   const [regionFilter, setRegionFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
   const [woredaFilter, setWoredaFilter] = useState("all");
+  const [liveCityStations, setLiveCityStations] = useState([]);
+  const [liveCityStationsLoading, setLiveCityStationsLoading] = useState(false);
+  const [liveCityStationsError, setLiveCityStationsError] = useState("");
+
+  const resetConsoleState = (nextAuthError = "") => {
+    setSession(null);
+    setActive("overview");
+    setStations([]);
+    setStationId("");
+    setStation(null);
+    setQueueSnapshot(null);
+    setStatusMessage("");
+    setLocationDirectoryMessage("");
+    setRegionFilter("all");
+    setCityFilter("all");
+    setWoredaFilter("all");
+
+    setAdminUsers([]);
+    setAdminUsersError("");
+    setOrganizationOptions([]);
+    setUserSearch("");
+    setRoleFilter("all");
+    setLimitToCurrentStation(true);
+    setCreateUserForm({
+      name: "",
+      email: "",
+      phone: "",
+      password: "",
+      role: "staff",
+      organizationId: "",
+      cityIds: "",
+      stationIds: "",
+      branchIds: "",
+      assignToSelectedStation: true
+    });
+    setCreateUserError("");
+    setCreateUserStatus("");
+    setIsCreatingUser(false);
+    setEditUserId("");
+    setEditUserForm(null);
+    setEditUserError("");
+    setEditUserStatus("");
+    setIsSavingUser(false);
+
+    setCeoTasks({});
+    setPaymentsSnapshot({
+      total: 0,
+      page: 1,
+      limit: 25,
+      stationId: "",
+      summary: { amount: 0, platformFee: 0, stationPayout: 0 },
+      items: []
+    });
+    setPaymentsFilters({
+      provider: "",
+      status: "",
+      from: "",
+      to: "",
+      page: 1,
+      limit: 25
+    });
+    setPaymentsLoading(false);
+    setPaymentsError("");
+
+    setTeamUsers([]);
+    setTeamLoading(false);
+    setTeamError("");
+    setTeamStatus("");
+    setCreateTeamForm({ name: "", email: "", phone: "", password: "", role: "staff" });
+    setCreateTeamError("");
+    setCreateTeamStatus("");
+    setIsCreatingTeam(false);
+    setEditTeamUserId("");
+    setEditTeamForm(null);
+    setEditTeamError("");
+    setEditTeamStatus("");
+    setIsSavingTeam(false);
+
+    setStationForm(null);
+    setStationFormDirty(false);
+    setStationFormError("");
+    setStationFormStatus("");
+    setIsSavingStation(false);
+    setCreateStationForm(buildCreateStationFormState(""));
+    setCreateStationError("");
+    setCreateStationStatus("");
+    setIsCreatingStation(false);
+
+    setPromotions([]);
+    setPromotionsLoading(false);
+    setPromotionsError("");
+    setPromotionStatus("");
+    setPromotionForm(buildPromotionFormState());
+    setIsSavingPromotion(false);
+
+    setAuthError(nextAuthError);
+  };
 
   const parseIdList = (value) => {
     return String(value || "")
@@ -789,6 +914,45 @@ export default function Dashboard() {
     });
     return map;
   }, [stationGeo]);
+
+  const cityCenterById = useMemo(() => {
+    const groupedStations = new Map();
+
+    stationGeo.forEach((item) => {
+      const key = String(item.cityLabelKey || "").trim();
+      const latitude = Number(item?.latitude);
+      const longitude = Number(item?.longitude);
+      if (!key || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+      const existing = groupedStations.get(key) || [];
+      existing.push({ latitude, longitude });
+      groupedStations.set(key, existing);
+    });
+
+    const centers = new Map();
+    groupedStations.forEach((items, key) => {
+      const centroid = buildCoordinateCentroid(items);
+      if (!centroid) return;
+      centers.set(key, centroid);
+    });
+
+    return centers;
+  }, [stationGeo]);
+
+  const selectedCityRecord = useMemo(() => {
+    if (cityFilter === "all") return null;
+    return (
+      directoryCities.find(
+        (item) => String(item.id || item._id || "").trim() === String(cityFilter || "").trim()
+      ) || null
+    );
+  }, [cityFilter, directoryCities]);
+
+  const selectedCityCenter = useMemo(() => {
+    if (!selectedCityRecord) return null;
+    const cityId = String(selectedCityRecord.id || selectedCityRecord._id || "").trim();
+    return cityCenterById.get(cityId) || null;
+  }, [cityCenterById, selectedCityRecord]);
 
   const regionOptions = useMemo(() => {
     if (directoryRegions.length) {
@@ -1242,6 +1406,18 @@ export default function Dashboard() {
   }, [active, visibleSections]);
 
   useEffect(() => {
+    const handleAuthExpired = (event) => {
+      const nextMessage = String(event?.detail?.message || AUTH_EXPIRED_MESSAGE).trim() || AUTH_EXPIRED_MESSAGE;
+      resetConsoleState(nextMessage);
+    };
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    return () => {
+      window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!session?.tokens?.accessToken || !canManageStations) {
       setDirectoryRegions([]);
       setDirectoryCities([]);
@@ -1321,6 +1497,55 @@ export default function Dashboard() {
       setWoredaFilter("all");
     }
   }, [woredaFilter, woredaOptions]);
+
+  useEffect(() => {
+    if (!isSuperAdmin || cityFilter === "all") {
+      setLiveCityStations([]);
+      setLiveCityStationsLoading(false);
+      setLiveCityStationsError("");
+      return;
+    }
+
+    if (!selectedCityCenter) {
+      setLiveCityStations([]);
+      setLiveCityStationsLoading(false);
+      setLiveCityStationsError(
+        selectedCityRecord
+          ? `No city-center estimate is available for ${selectedCityRecord.name} yet. Link at least one station to this city first.`
+          : ""
+      );
+      return;
+    }
+
+    let isActive = true;
+
+    const loadLiveCityStations = async () => {
+      try {
+        setLiveCityStationsLoading(true);
+        setLiveCityStationsError("");
+        const data = await listNearbyFuelStations({
+          lat: selectedCityCenter.latitude,
+          lon: selectedCityCenter.longitude,
+          radius: 12000
+        });
+        if (!isActive) return;
+        setLiveCityStations(Array.isArray(data?.stations) ? data.stations : []);
+      } catch (error) {
+        if (!isActive) return;
+        setLiveCityStations([]);
+        setLiveCityStationsError(error?.message || "Failed to load live map stations for this city.");
+      } finally {
+        if (isActive) {
+          setLiveCityStationsLoading(false);
+        }
+      }
+    };
+
+    loadLiveCityStations();
+    return () => {
+      isActive = false;
+    };
+  }, [cityFilter, isSuperAdmin, selectedCityCenter, selectedCityRecord]);
 
   useEffect(() => {
     if (!filteredStations.length) {
@@ -2324,78 +2549,7 @@ export default function Dashboard() {
 
   const handleLogout = async () => {
     await logout();
-    setSession(null);
-    setActive("overview");
-    setStations([]);
-    setStationId("");
-    setStation(null);
-    setRegionFilter("all");
-    setCityFilter("all");
-    setQueueSnapshot(null);
-    setStatusMessage("");
-    setAdminUsers([]);
-    setAdminUsersError("");
-    setOrganizationOptions([]);
-    setUserSearch("");
-    setRoleFilter("all");
-    setLimitToCurrentStation(true);
-    setCreateUserForm({
-      name: "",
-      email: "",
-      phone: "",
-      password: "",
-      role: "staff",
-      organizationId: "",
-      cityIds: "",
-      stationIds: "",
-      branchIds: "",
-      assignToSelectedStation: true
-    });
-    setCreateUserError("");
-    setCreateUserStatus("");
-    setIsCreatingUser(false);
-    stopEditUser();
-
-    setCeoTasks({});
-    setPaymentsSnapshot({
-      total: 0,
-      page: 1,
-      limit: 25,
-      stationId: "",
-      summary: { amount: 0, platformFee: 0, stationPayout: 0 },
-      items: []
-    });
-    setPaymentsFilters({
-      provider: "",
-      status: "",
-      from: "",
-      to: "",
-      page: 1,
-      limit: 25
-    });
-    setPaymentsLoading(false);
-    setPaymentsError("");
-
-    setTeamUsers([]);
-    setTeamLoading(false);
-    setTeamError("");
-    setTeamStatus("");
-    setCreateTeamForm({ name: "", email: "", phone: "", password: "", role: "staff" });
-    setCreateTeamError("");
-    setCreateTeamStatus("");
-    setIsCreatingTeam(false);
-    stopEditTeamUser();
-    setIsSavingTeam(false);
-
-    setStationForm(null);
-    setStationFormDirty(false);
-    setStationFormError("");
-    setStationFormStatus("");
-    setIsSavingStation(false);
-    setCreateStationForm(buildCreateStationFormState(""));
-    setCreateStationError("");
-    setCreateStationStatus("");
-    setIsCreatingStation(false);
+    resetConsoleState("");
   };
 
   const handleFuelUpdate = async () => {
@@ -2753,9 +2907,89 @@ export default function Dashboard() {
                       <div className="city-station-groups">
                         {regionGroup.cityGroups.map((group) => (
                           <div className="city-station-group" key={group.key}>
+                            {String(cityFilter || "").trim() === String(group.key || "").trim() ? (
+                              <div className="city-live-panel">
+                                <div className="city-station-head">
+                                  <div>
+                                    <p className="section-title">Live map stations</p>
+                                    <h4>{group.cityLabel}</h4>
+                                    <span>
+                                      Nearby stations from the customer map flow
+                                      {selectedCityCenter?.sampleSize
+                                        ? `, centered from ${selectedCityCenter.sampleSize} known station${selectedCityCenter.sampleSize === 1 ? "" : "s"}`
+                                        : ""}
+                                    </span>
+                                  </div>
+                                  <span className="pill">{liveCityStations.length} live stations</span>
+                                </div>
+
+                                <div className="station-browser">
+                                  {liveCityStationsLoading ? (
+                                    <div className="station-browser-empty">Loading live map stations for {group.cityLabel}...</div>
+                                  ) : liveCityStations.length ? (
+                                    liveCityStations.map((item) => {
+                                      const linkedStationId = String(item.stationId || "").trim();
+                                      const canOpenLinkedStation = filteredStations.some(
+                                        (stationItem) => String(stationItem.id || "") === linkedStationId
+                                      );
+                                      const content = (
+                                        <>
+                                          <div className="station-browser-top">
+                                            <div>
+                                              <strong>{item.name || "Fuel Station"}</strong>
+                                              <span>
+                                                {group.cityLabel} / {group.regionLabel}
+                                              </span>
+                                            </div>
+                                            <span className={`pill ${item.isActive === false ? "warn" : ""}`}>
+                                              {linkedStationId ? "Linked" : "Live map only"}
+                                            </span>
+                                          </div>
+                                          <p>{item.address || "Address not set yet."}</p>
+                                          <div className="station-browser-meta">
+                                            <span>Fuel: {formatFuelStatusLabel(item.fuel_status || item.fuelStatus)}</span>
+                                            <span>Queue: {Number(item.queue_length || 0)} drivers</span>
+                                            {Number.isFinite(Number(item.distanceMeters)) ? (
+                                              <span>{Math.round(Number(item.distanceMeters) / 1000)} km from city center</span>
+                                            ) : null}
+                                          </div>
+                                        </>
+                                      );
+
+                                      if (linkedStationId && canOpenLinkedStation) {
+                                        return (
+                                          <button
+                                            key={`${item.id || item.stationId || item.name}-${linkedStationId}`}
+                                            type="button"
+                                            className="station-browser-card"
+                                            onClick={() => selectStation(linkedStationId)}
+                                          >
+                                            {content}
+                                          </button>
+                                        );
+                                      }
+
+                                      return (
+                                        <div
+                                          key={`${item.id || item.stationId || item.name}-${item.latitude || "live"}`}
+                                          className="station-browser-card"
+                                        >
+                                          {content}
+                                        </div>
+                                      );
+                                    })
+                                  ) : (
+                                    <div className="station-browser-empty">
+                                      {liveCityStationsError || `No live map stations were found near ${group.cityLabel} yet.`}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ) : null}
+
                             <div className="city-station-head">
                               <div>
-                                <p className="section-title">City station list</p>
+                                <p className="section-title">Saved admin stations</p>
                                 <h4>{group.cityLabel}</h4>
                                 <span>{group.regionLabel}</span>
                               </div>
@@ -2794,7 +3028,7 @@ export default function Dashboard() {
                                 })
                               ) : (
                                 <div className="station-browser-empty">
-                                  No stations have been added for {group.cityLabel} yet.
+                                  No saved database stations are linked to {group.cityLabel} yet.
                                 </div>
                               )}
                             </div>

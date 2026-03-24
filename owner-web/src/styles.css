@@ -398,6 +398,15 @@ body {
   background: rgba(255, 253, 249, 0.92);
 }
 
+.city-live-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px dashed rgba(15, 118, 110, 0.28);
+  background: rgba(15, 118, 110, 0.04);
+}
+
 .city-station-head {
   display: flex;
   justify-content: space-between;
