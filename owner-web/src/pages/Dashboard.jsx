@@ -236,6 +236,33 @@ function isCoordinateFragment(value) {
   return /^-?\d+(?:\.\d+)?$/.test(text);
 }
 
+function looksLikeRoadOrLandmark(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return false;
+  if (/^\d+[\s-]/.test(text)) return true;
+
+  const roadHints = [
+    " road",
+    " street",
+    " avenue",
+    " ave",
+    " highway",
+    " bridge",
+    " ring road",
+    " junction",
+    " roundabout",
+    " camp",
+    " area",
+    " terminal",
+    " station",
+    " fuel",
+    " hotel",
+    " square"
+  ];
+
+  return roadHints.some((hint) => text.includes(hint) || text.endsWith(hint.trim()));
+}
+
 function deriveCityRegion(station) {
   const countryTokens = new Set(["ethiopia", "ethiopia.", "et", "eth", "ethiopian"]);
   const rawAddress = String(station?.address || "").trim();
@@ -251,13 +278,28 @@ function deriveCityRegion(station) {
   }
 
   if (parts.length >= 2) {
+    const last = parts[parts.length - 1];
+    const prev = parts[parts.length - 2];
+
+    if (looksLikeRoadOrLandmark(prev) && !looksLikeRoadOrLandmark(last)) {
+      return { cityLabel: last, regionLabel: "Unspecified region" };
+    }
+  }
+
+  if (parts.length >= 2) {
     const cityLabel = parts[parts.length - 2];
     const regionLabel = parts[parts.length - 1];
-    return { cityLabel, regionLabel };
+    if (!looksLikeRoadOrLandmark(cityLabel) && !looksLikeRoadOrLandmark(regionLabel)) {
+      return { cityLabel, regionLabel };
+    }
+    return { cityLabel: regionLabel, regionLabel: "Unspecified region" };
   }
 
   if (parts.length === 1) {
     const only = parts[0];
+    if (looksLikeRoadOrLandmark(only)) {
+      return { cityLabel: "Unspecified city", regionLabel: "Unspecified region" };
+    }
     return { cityLabel: only, regionLabel: "Unspecified region" };
   }
 
