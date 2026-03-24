@@ -519,6 +519,7 @@ export default function Dashboard() {
   const [directoryRegions, setDirectoryRegions] = useState([]);
   const [directoryCities, setDirectoryCities] = useState([]);
   const [directoryWoredas, setDirectoryWoredas] = useState([]);
+  const [locationDirectoryMessage, setLocationDirectoryMessage] = useState("");
   const [regionFilter, setRegionFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
   const [woredaFilter, setWoredaFilter] = useState("all");
@@ -1090,6 +1091,7 @@ export default function Dashboard() {
       setDirectoryRegions([]);
       setDirectoryCities([]);
       setDirectoryWoredas([]);
+      setLocationDirectoryMessage("");
       return;
     }
 
@@ -1097,20 +1099,34 @@ export default function Dashboard() {
 
     const loadLocationDirectory = async () => {
       try {
+        setLocationDirectoryMessage("");
         const [regionsData, citiesData, woredasData] = await Promise.all([
           listAdminRegions(),
           listAdminCities(),
           listAdminWoredas()
         ]);
         if (!isActive) return;
-        setDirectoryRegions(regionsData?.regions || []);
-        setDirectoryCities(citiesData?.cities || []);
-        setDirectoryWoredas(woredasData?.woredas || []);
-      } catch {
+        const nextRegions = regionsData?.regions || [];
+        const nextCities = citiesData?.cities || [];
+        const nextWoredas = woredasData?.woredas || [];
+        setDirectoryRegions(nextRegions);
+        setDirectoryCities(nextCities);
+        setDirectoryWoredas(nextWoredas);
+        if (!nextRegions.length || !nextCities.length) {
+          setLocationDirectoryMessage(
+            "Backend location directory is empty. Run the Ethiopia location seed on the backend, then refresh this page."
+          );
+        }
+      } catch (error) {
         if (!isActive) return;
         setDirectoryRegions([]);
         setDirectoryCities([]);
         setDirectoryWoredas([]);
+        setLocationDirectoryMessage(
+          error?.message
+            ? `${error.message} Region and city directory could not be loaded from the backend.`
+            : "Region and city directory could not be loaded from the backend."
+        );
       }
     };
 
@@ -2452,6 +2468,14 @@ export default function Dashboard() {
               </div>
               <div className="pill">{filteredStations.length} stations ready</div>
             </div>
+
+            {locationDirectoryMessage ? (
+              <div className="station-browser-empty">
+                {locationDirectoryMessage}
+                <br />
+                Backend action needed: seed Ethiopia locations and make sure this Netlify domain is allowed by backend CORS.
+              </div>
+            ) : null}
 
             <div className="super-admin-steps">
               <label className="super-admin-step">
