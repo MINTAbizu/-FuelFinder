@@ -239,6 +239,27 @@ function getDirectoryMatchesByName(map, value) {
   return key ? map.get(key) || [] : [];
 }
 
+function findDirectoryMentionInText(text, items, options = {}) {
+  const normalizedText = normalizeKey(text);
+  if (!normalizedText) return null;
+
+  const regionId = String(options?.regionId || "").trim();
+  const haystack = ` ${normalizedText} `;
+  const matches = (Array.isArray(items) ? items : [])
+    .filter((item) => {
+      if (!regionId) return true;
+      return String(item?.regionId || "").trim() === regionId;
+    })
+    .map((item) => ({
+      item,
+      key: normalizeKey(item?.name)
+    }))
+    .filter(({ key }) => key && haystack.includes(` ${key} `))
+    .sort((a, b) => b.key.length - a.key.length);
+
+  return matches[0]?.item || null;
+}
+
 function isPlaceholderLocationText(value) {
   const text = String(value || "").trim().toLowerCase();
   if (!text) return true;
@@ -687,6 +708,16 @@ export default function Dashboard() {
         } else if (!regionRecord && namedCityMatches.length === 1) {
           cityRecord = namedCityMatches[0];
         }
+      }
+
+      if (!cityRecord) {
+        const scopedRegionId = String(regionRecord?.id || regionRecord?._id || "").trim();
+        cityRecord =
+          findDirectoryMentionInText(item?.name, directoryCities, { regionId: scopedRegionId }) ||
+          findDirectoryMentionInText(item?.subcity, directoryCities, { regionId: scopedRegionId }) ||
+          findDirectoryMentionInText(item?.woreda, directoryCities, { regionId: scopedRegionId }) ||
+          findDirectoryMentionInText(item?.address, directoryCities, { regionId: scopedRegionId }) ||
+          null;
       }
 
       const cityRegionRecord = regionDirectoryById.get(String(cityRecord?.regionId || "").trim()) || null;

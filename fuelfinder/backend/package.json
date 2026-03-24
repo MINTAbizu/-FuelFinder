@@ -13,6 +13,7 @@
     "stations:merge": "node scripts/merge-stations.js",
     "stations:backfill-address": "node scripts/backfill-station-addresses.js",
     "stations:backfill-location": "node scripts/backfill-station-locations.js",
+    "stations:backfill-location-text": "node scripts/backfill-station-location-text.js",
     "owner:bootstrap": "node scripts/bootstrap-owner.js"
   },
   "dependencies": {
