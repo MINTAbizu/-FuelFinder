@@ -21,7 +21,7 @@ import {
 const getWaitEstimate = (queueLength) => Math.max(2, Number(queueLength || 0) * 3);
 const REQUESTED_BANDS = ["10-20", "20-40", "40+"];
 const FUEL_TYPES = ["gasoline", "diesel", "other"];
-const CHAPA_PLATFORM_FEE_DEFAULT_BIRR = 2;
+const CHAPA_PLATFORM_FEE_PER_LITER_DEFAULT_BIRR = 0.25;
 const DEFAULT_FUEL_PRICES = {
   gasoline: 95,
   diesel: 92,
@@ -268,12 +268,17 @@ export default function StationDetails({ navigation, route }) {
   const estimatedAmount = Number.isFinite(litersValue) && litersValue > 0
     ? Number((litersValue * selectedUnitPrice).toFixed(2))
     : 0;
-  const platformFeeBirr = useMemo(() => {
-    const raw = String(process.env.EXPO_PUBLIC_CHAPA_PLATFORM_FEE_BIRR || CHAPA_PLATFORM_FEE_DEFAULT_BIRR).trim();
+  const platformFeeRateBirr = useMemo(() => {
+    const raw = String(
+      process.env.EXPO_PUBLIC_CHAPA_PLATFORM_FEE_PER_LITER_BIRR || CHAPA_PLATFORM_FEE_PER_LITER_DEFAULT_BIRR
+    ).trim();
     const value = Number(raw);
-    if (!Number.isFinite(value) || value < 0) return CHAPA_PLATFORM_FEE_DEFAULT_BIRR;
+    if (!Number.isFinite(value) || value < 0) return CHAPA_PLATFORM_FEE_PER_LITER_DEFAULT_BIRR;
     return Number(value.toFixed(2));
   }, []);
+  const platformFeeBirr = Number.isFinite(litersValue) && litersValue > 0
+    ? Number((litersValue * platformFeeRateBirr).toFixed(2))
+    : 0;
   const amountToPay = estimatedAmount > 0
     ? Number((estimatedAmount + platformFeeBirr).toFixed(2))
     : 0;

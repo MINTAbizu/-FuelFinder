@@ -32,11 +32,21 @@ function buildTxRef(reservationId) {
   return `FF-${suffix}-${Date.now()}`;
 }
 
-function getPlatformFeeBirr() {
-  const raw = String(process.env.CHAPA_PLATFORM_FEE_BIRR || "2").trim();
+const DEFAULT_PLATFORM_FEE_PER_LITER_BIRR = 0.25;
+
+function getPlatformFeePerLiterBirr() {
+  const raw = String(
+    process.env.CHAPA_PLATFORM_FEE_PER_LITER_BIRR || DEFAULT_PLATFORM_FEE_PER_LITER_BIRR
+  ).trim();
   const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0) return 2;
+  if (!Number.isFinite(value) || value < 0) return DEFAULT_PLATFORM_FEE_PER_LITER_BIRR;
   return Number(value.toFixed(2));
+}
+
+function calculatePlatformFeeBirr(requestedLiters) {
+  const liters = Number(requestedLiters || 0);
+  const safeLiters = Number.isFinite(liters) && liters > 0 ? liters : 0;
+  return Number((safeLiters * getPlatformFeePerLiterBirr()).toFixed(2));
 }
 
 function normalizeChapaPaymentStatus(value) {
@@ -186,7 +196,7 @@ async function finalizeSuccessfulPayment({ tx_ref, response }) {
   }
 
   const platformFee = Number(
-    paymentRecord?.platformFee ?? getPlatformFeeBirr()
+    paymentRecord?.platformFee ?? calculatePlatformFeeBirr(ticket.requestedLiters)
   );
   const amountPaid = Number(
     data.amount || data.amount_payable || ticket.depositAmount || ticket.estimatedAmount || 0
@@ -375,7 +385,7 @@ exports.initialize = async (req, res) => {
     if (!Number.isFinite(baseAmount) || baseAmount <= 0) {
       return res.status(400).json({ message: "Invalid amount for reservation." });
     }
-    const platformFee = getPlatformFeeBirr();
+    const platformFee = calculatePlatformFeeBirr(ticket.requestedLiters);
     const amount = Number((baseAmount + platformFee).toFixed(2));
     const stationPayout = Number((amount - platformFee).toFixed(2));
     const stationSplit = buildStationSubaccountPayload(station, platformFee);
@@ -411,6 +421,7 @@ exports.initialize = async (req, res) => {
         stationId: String(ticket.stationId),
         stationUsesSubaccount: stationSplit.enabled,
         stationSubaccountId: stationSplit.subaccountId,
+        platformFeeRatePerLiter: getPlatformFeePerLiterBirr(),
         platformFee,
         stationPayout
       }
