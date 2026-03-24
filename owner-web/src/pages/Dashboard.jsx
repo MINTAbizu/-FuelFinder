@@ -229,9 +229,21 @@ function isPlaceholderLocationText(value) {
   return text.startsWith("approx location");
 }
 
+function isCoordinateFragment(value) {
+  const text = String(value || "")
+    .trim()
+    .replace(/[()]/g, "");
+  return /^-?\d+(?:\.\d+)?$/.test(text);
+}
+
 function deriveCityRegion(station) {
   const countryTokens = new Set(["ethiopia", "ethiopia.", "et", "eth", "ethiopian"]);
-  const parts = splitAddressParts(station?.address).filter((part) => !isPlaceholderLocationText(part));
+  const rawAddress = String(station?.address || "").trim();
+  const parts = isPlaceholderLocationText(rawAddress)
+    ? []
+    : splitAddressParts(rawAddress).filter(
+        (part) => !isPlaceholderLocationText(part) && !isCoordinateFragment(part)
+      );
   const fallbackSubcity = String(station?.subcity || "").trim();
   const fallbackWoreda = String(station?.woreda || "").trim();
   while (parts.length && countryTokens.has(normalizeKey(parts[parts.length - 1]))) {
@@ -636,7 +648,7 @@ export default function Dashboard() {
           };
         });
 
-      return [{ key: "all", label: "All regions", count: stationGeo.length }, ...options];
+      return [{ key: "all", label: "All regions", count: options.length }, ...options];
     }
 
     const map = new Map();
@@ -647,7 +659,7 @@ export default function Dashboard() {
       }
     });
     const options = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
-    return [{ key: "all", label: "All regions", count: stationGeo.length }, ...options];
+    return [{ key: "all", label: "All regions", count: options.length }, ...options];
   }, [directoryRegions, stationCountByRegion, stationGeo]);
 
   const regionScopedStations = useMemo(() => {
@@ -679,7 +691,7 @@ export default function Dashboard() {
           };
         });
 
-      return [{ key: "all", label: regionFilter === "all" ? "All cities" : "All cities in region", count: regionScopedStations.length }, ...options];
+      return [{ key: "all", label: regionFilter === "all" ? "All cities" : "All cities in region", count: options.length }, ...options];
     }
 
     const map = new Map();
@@ -696,7 +708,7 @@ export default function Dashboard() {
         map.set(cityLabelKey, { ...existing, count: existing.count + 1 });
     });
     const options = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
-    return [{ key: "all", label: "All cities", count: stationGeo.length }, ...options];
+    return [{ key: "all", label: "All cities", count: options.length }, ...options];
   }, [directoryCities, regionFilter, regionScopedStations.length, stationCountByCity, stationGeo]);
 
   const cityScopedStations = useMemo(() => {
@@ -724,7 +736,7 @@ export default function Dashboard() {
           };
         });
 
-      return [{ key: "all", label: cityFilter === "all" ? "All woredas" : "All woredas in city", count: cityScopedStations.length }, ...options];
+      return [{ key: "all", label: cityFilter === "all" ? "All woredas" : "All woredas in city", count: options.length }, ...options];
     }
 
     const map = new Map();
@@ -734,7 +746,7 @@ export default function Dashboard() {
       map.set(woredaKey, { ...existing, count: existing.count + 1 });
     });
     const options = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
-    return [{ key: "all", label: "All woredas", count: cityScopedStations.length }, ...options];
+    return [{ key: "all", label: "All woredas", count: options.length }, ...options];
   }, [cityFilter, cityScopedStations, directoryWoredas, regionFilter, stationCountByWoreda]);
 
   const filteredStations = useMemo(() => {
