@@ -1,0 +1,199 @@
+{
+  "regions": [
+    {
+      "name": "Addis Ababa",
+      "code": "AA",
+      "category": "chartered_city",
+      "isActive": true,
+      "cities": [
+        {
+          "name": "Addis Ababa",
+          "isActive": true,
+          "woredas": [
+            { "name": "Arada", "category": "subcity", "isActive": true },
+            { "name": "Addis Ketema", "category": "subcity", "isActive": true },
+            { "name": "Akaky Kaliti", "category": "subcity", "isActive": true },
+            { "name": "Bole", "category": "subcity", "isActive": true },
+            { "name": "Gullele", "category": "subcity", "isActive": true },
+            { "name": "Kirkos", "category": "subcity", "isActive": true },
+            { "name": "Kolfe Keranio", "category": "subcity", "isActive": true },
+            { "name": "Lideta", "category": "subcity", "isActive": true },
+            { "name": "Nifas Silk-Lafto", "category": "subcity", "isActive": true },
+            { "name": "Yeka", "category": "subcity", "isActive": true }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Afar",
+      "code": "AF",
+      "category": "regional_state",
+      "isActive": true,
+      "cities": [
+        { "name": "Semera", "isActive": true },
+        { "name": "Asayita", "isActive": true },
+        { "name": "Awash", "isActive": true, "woredas": [{ "name": "Awash Fentale", "category": "woreda", "isActive": true }] },
+        { "name": "Mile", "isActive": true },
+        { "name": "Logiya", "isActive": true }
+      ]
+    },
+    {
+      "name": "Amhara",
+      "code": "AM",
+      "category": "regional_state",
+      "isActive": true,
+      "cities": [
+        { "name": "Bahir Dar", "isActive": true },
+        { "name": "Gondar", "isActive": true },
+        { "name": "Dessie", "isActive": true },
+        { "name": "Debre Birhan", "isActive": true },
+        { "name": "Debre Markos", "isActive": true },
+        { "name": "Debre Tabor", "isActive": true },
+        { "name": "Kombolcha", "isActive": true },
+        { "name": "Woldia", "isActive": true }
+      ]
+    },
+    {
+      "name": "Benishangul-Gumuz",
+      "code": "BG",
+      "category": "regional_state",
+      "isActive": true,
+      "cities": [
+        { "name": "Assosa", "isActive": true },
+        { "name": "Pawe", "isActive": true },
+        { "name": "Gilgel Beles", "isActive": true },
+        { "name": "Kamashi", "isActive": true }
+      ]
+    },
+    {
+      "name": "Dire Dawa",
+      "code": "DD",
+      "category": "chartered_city",
+      "isActive": true,
+      "cities": [
+        {
+          "name": "Dire Dawa",
+          "isActive": true,
+          "woredas": [
+            { "name": "Kebele 01", "category": "district", "isActive": true },
+            { "name": "Kebele 02", "category": "district", "isActive": true }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Gambella",
+      "code": "GA",
+      "category": "regional_state",
+      "isActive": true,
+      "cities": [
+        { "name": "Gambella", "isActive": true },
+        { "name": "Abobo", "isActive": true },
+        { "name": "Itang", "isActive": true }
+      ]
+    },
+    {
+      "name": "Harari",
+      "code": "HA",
+      "category": "regional_state",
+      "isActive": true,
+      "cities": [
+        { "name": "Harar", "isActive": true }
+      ]
+    },
+    {
+      "name": "Oromia",
+      "code": "OR",
+      "category": "regional_state",
+      "isActive": true,
+      "cities": [
+        { "name": "Adama", "isActive": true },
+        { "name": "Ambo", "isActive": true },
+        { "name": "Asella", "isActive": true },
+        { "name": "Bale Robe", "isActive": true },
+        { "name": "Berbere", "isActive": true },
+        { "name": "Bishoftu", "isActive": true },
+        { "name": "Burayu", "isActive": true },
+        { "name": "Chiro", "isActive": true },
+        { "name": "Dembidollo", "isActive": true },
+        { "name": "Dodola", "isActive": true },
+        { "name": "Dukem", "isActive": true },
+        { "name": "Ginir", "isActive": true },
+        { "name": "Goba", "isActive": true },
+        { "name": "Jimma", "isActive": true },
+        { "name": "Mettu", "isActive": true },
+        { "name": "Mojo", "isActive": true },
+        { "name": "Nekemte", "isActive": true },
+        { "name": "Sebeta", "isActive": true },
+        { "name": "Shashemene", "isActive": true },
+        { "name": "Sululta", "isActive": true },
+        { "name": "Weliso", "isActive": true }
+      ]
+    },
+    {
+      "name": "Sidama",
+      "code": "SI",
+      "category": "regional_state",
+      "isActive": true,
+      "cities": [
+        { "name": "Hawassa", "isActive": true },
+        { "name": "Yirgalem", "isActive": true },
+        { "name": "Aleta Wendo", "isActive": true },
+        { "name": "Daye", "isActive": true }
+      ]
+    },
+    {
+      "name": "Somali",
+      "code": "SO",
+      "category": "regional_state",
+      "isActive": true,
+      "cities": [
+        { "name": "Jijiga", "isActive": true },
+        { "name": "Gode", "isActive": true },
+        { "name": "Kebri Dehar", "isActive": true },
+        { "name": "Degehabur", "isActive": true },
+        { "name": "Warder", "isActive": true },
+        { "name": "Gursum", "isActive": true }
+      ]
+    },
+    {
+      "name": "SNNP",
+      "code": "SN",
+      "category": "regional_state",
+      "isActive": true,
+      "cities": [
+        { "name": "Arba Minch", "isActive": true },
+        { "name": "Bonga", "isActive": true },
+        { "name": "Butajira", "isActive": true },
+        { "name": "Dilla", "isActive": true },
+        { "name": "Durame", "isActive": true },
+        { "name": "Halaba Kulito", "isActive": true },
+        { "name": "Hosaena", "isActive": true },
+        { "name": "Jinka", "isActive": true },
+        { "name": "Karat Konso", "isActive": true },
+        { "name": "Mizan Teferi", "isActive": true },
+        { "name": "Sawla", "isActive": true },
+        { "name": "Tepi", "isActive": true },
+        { "name": "Tercha", "isActive": true },
+        { "name": "Welkite", "isActive": true },
+        { "name": "Wolaita Sodo", "isActive": true },
+        { "name": "Worabe", "isActive": true }
+      ]
+    },
+    {
+      "name": "Tigray",
+      "code": "TI",
+      "category": "regional_state",
+      "isActive": true,
+      "cities": [
+        { "name": "Mekelle", "isActive": true },
+        { "name": "Adigrat", "isActive": true },
+        { "name": "Adwa", "isActive": true },
+        { "name": "Axum", "isActive": true },
+        { "name": "Shire", "isActive": true },
+        { "name": "Wukro", "isActive": true },
+        { "name": "Alamata", "isActive": true }
+      ]
+    }
+  ]
+}
