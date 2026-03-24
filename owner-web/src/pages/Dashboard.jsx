@@ -458,7 +458,34 @@ const STATION_MANAGER_QUICK_ACTIONS = [
   { section: "settings", label: "Station Profile" }
 ];
 
+const LOCATION_DIRECTORY_STORAGE_KEY = "ff_owner_location_directory_v1";
+
+function readCachedLocationDirectory() {
+  const cached = readStorageJSON(LOCATION_DIRECTORY_STORAGE_KEY, {});
+  return {
+    regions: Array.isArray(cached?.regions) ? cached.regions : [],
+    cities: Array.isArray(cached?.cities) ? cached.cities : [],
+    woredas: Array.isArray(cached?.woredas) ? cached.woredas : []
+  };
+}
+
+function persistLocationDirectory(directory = {}) {
+  try {
+    localStorage.setItem(
+      LOCATION_DIRECTORY_STORAGE_KEY,
+      JSON.stringify({
+        regions: Array.isArray(directory?.regions) ? directory.regions : [],
+        cities: Array.isArray(directory?.cities) ? directory.cities : [],
+        woredas: Array.isArray(directory?.woredas) ? directory.woredas : []
+      })
+    );
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 export default function Dashboard() {
+  const cachedLocationDirectory = useMemo(() => readCachedLocationDirectory(), []);
   const [active, setActive] = useState("overview");
   const [session, setSession] = useState(() => loadSession());
   const [authError, setAuthError] = useState("");
@@ -575,9 +602,9 @@ export default function Dashboard() {
   const [promotionStatus, setPromotionStatus] = useState("");
   const [promotionForm, setPromotionForm] = useState(() => buildPromotionFormState());
   const [isSavingPromotion, setIsSavingPromotion] = useState(false);
-  const [directoryRegions, setDirectoryRegions] = useState([]);
-  const [directoryCities, setDirectoryCities] = useState([]);
-  const [directoryWoredas, setDirectoryWoredas] = useState([]);
+  const [directoryRegions, setDirectoryRegions] = useState(cachedLocationDirectory.regions);
+  const [directoryCities, setDirectoryCities] = useState(cachedLocationDirectory.cities);
+  const [directoryWoredas, setDirectoryWoredas] = useState(cachedLocationDirectory.woredas);
   const [locationDirectoryMessage, setLocationDirectoryMessage] = useState("");
   const [regionFilter, setRegionFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
@@ -1209,6 +1236,11 @@ export default function Dashboard() {
         setDirectoryRegions(nextRegions);
         setDirectoryCities(nextCities);
         setDirectoryWoredas(nextWoredas);
+        persistLocationDirectory({
+          regions: nextRegions,
+          cities: nextCities,
+          woredas: nextWoredas
+        });
         if (!nextRegions.length || !nextCities.length) {
           setLocationDirectoryMessage(
             "Backend location directory is empty. Run the Ethiopia location seed on the backend, then refresh this page."
@@ -1216,13 +1248,10 @@ export default function Dashboard() {
         }
       } catch (error) {
         if (!isActive) return;
-        setDirectoryRegions([]);
-        setDirectoryCities([]);
-        setDirectoryWoredas([]);
         setLocationDirectoryMessage(
           error?.message
-            ? `${error.message} Region and city directory could not be loaded from the backend.`
-            : "Region and city directory could not be loaded from the backend."
+            ? `${error.message} Region and city directory could not be refreshed from the backend.`
+            : "Region and city directory could not be refreshed from the backend."
         );
       }
     };
