@@ -132,6 +132,12 @@ Backfill human-readable address, region, city, and woreda for already imported O
 
 If the backfill script says it cannot reach `http://localhost:8080`, your Nominatim service is not running yet or is not reachable from this machine.
 
+Fastest safe fallback when geocoding is unavailable:
+1. Dry run a conservative text-based city matcher:
+   `npm run stations:backfill-location-text -- --limit=500`
+2. Apply the high-confidence matches:
+   `npm run stations:backfill-location-text -- --limit=500 --apply`
+
 Notes for OSM import:
 - The exporter uses Overpass to fetch `amenity=fuel` features in Ethiopia.
 - Reverse enrichment is opt-in and requires `--nominatimUrl`. This is intended for your own Nominatim instance or another approved geocoder.
