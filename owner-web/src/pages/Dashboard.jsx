@@ -222,9 +222,18 @@ function normalizeKey(value) {
     .replace(/\s+/g, " ");
 }
 
+function isPlaceholderLocationText(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return true;
+  if (text === "address not listed") return true;
+  return text.startsWith("approx location");
+}
+
 function deriveCityRegion(station) {
   const countryTokens = new Set(["ethiopia", "ethiopia.", "et", "eth", "ethiopian"]);
-  const parts = splitAddressParts(station?.address);
+  const parts = splitAddressParts(station?.address).filter((part) => !isPlaceholderLocationText(part));
+  const fallbackSubcity = String(station?.subcity || "").trim();
+  const fallbackWoreda = String(station?.woreda || "").trim();
   while (parts.length && countryTokens.has(normalizeKey(parts[parts.length - 1]))) {
     parts.pop();
   }
@@ -237,7 +246,15 @@ function deriveCityRegion(station) {
 
   if (parts.length === 1) {
     const only = parts[0];
-    return { cityLabel: only, regionLabel: only };
+    return { cityLabel: only, regionLabel: "Unspecified region" };
+  }
+
+  if (fallbackSubcity) {
+    return { cityLabel: fallbackSubcity, regionLabel: "Unspecified region" };
+  }
+
+  if (fallbackWoreda && !isPlaceholderLocationText(fallbackWoreda)) {
+    return { cityLabel: fallbackWoreda, regionLabel: "Unspecified region" };
   }
 
   const fallbackCity = station?.cityId ? `City ${String(station.cityId).slice(-6).toUpperCase()}` : "Unspecified city";
