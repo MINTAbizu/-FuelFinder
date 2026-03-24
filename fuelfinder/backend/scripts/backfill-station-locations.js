@@ -95,23 +95,66 @@ function formatFromAddressObject(addr) {
   };
 }
 
-async function reverseGeocode(lat, lon, baseUrl, userAgent, email) {
+function buildReverseGeocodeUrl(lat, lon, baseUrl, email) {
   const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "");
   if (!normalizedBaseUrl) {
     throw new Error("nominatimUrl is required.");
   }
 
   const emailPart = email ? `&email=${encodeURIComponent(email)}` : "";
-  const url =
+  return (
     `${normalizedBaseUrl}/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}` +
-    `&lon=${encodeURIComponent(lon)}&zoom=18&addressdetails=1&accept-language=en${emailPart}`;
+    `&lon=${encodeURIComponent(lon)}&zoom=18&addressdetails=1&accept-language=en${emailPart}`
+  );
+}
 
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": userAgent,
-      Accept: "application/json"
-    }
-  });
+async function assertGeocoderReachable(baseUrl, userAgent, email) {
+  const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "");
+  const url = buildReverseGeocodeUrl(9.03, 38.74, normalizedBaseUrl, email);
+
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        "User-Agent": userAgent,
+        Accept: "application/json"
+      }
+    });
+  } catch (error) {
+    throw new Error(
+      `Could not reach the geocoder at ${normalizedBaseUrl}. ` +
+        "Make sure your Nominatim server is running and accessible. " +
+        `Original error: ${error?.message || error}`
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Geocoder responded with ${response.status} at ${normalizedBaseUrl}. ` +
+        "Check that the Nominatim service is healthy and serving reverse geocode requests."
+    );
+  }
+}
+
+async function reverseGeocode(lat, lon, baseUrl, userAgent, email) {
+  const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "");
+  const url = buildReverseGeocodeUrl(lat, lon, normalizedBaseUrl, email);
+
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        "User-Agent": userAgent,
+        Accept: "application/json"
+      }
+    });
+  } catch (error) {
+    throw new Error(
+      `Could not reach the geocoder at ${normalizedBaseUrl}. ` +
+        `Original error: ${error?.message || error}`
+    );
+  }
+
   if (!response.ok) {
     throw new Error(`Reverse geocode failed (${response.status})`);
   }
@@ -172,6 +215,8 @@ async function main() {
   if (!nominatimUrl) {
     throw new Error("Provide --nominatimUrl=<your-nominatim-base-url>.");
   }
+
+  await assertGeocoderReachable(nominatimUrl, userAgent, email);
 
   await connectDB();
 

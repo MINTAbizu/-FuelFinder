@@ -81,6 +81,8 @@ Protected endpoints use:
   `npm run locations:seed`
 - Re-seed and overwrite matching seed records:
   `npm run locations:seed -- --overwrite`
+- Seed the included business-facing 12-region Ethiopia directory:
+  `npm run locations:seed -- --file=./examples/ethiopia-locations.business-12.json --overwrite`
 - Seed a full custom Ethiopia hierarchy from JSON:
   `npm run locations:seed -- --file=./examples/ethiopia-locations.import.template.json --overwrite`
 
@@ -127,6 +129,8 @@ Backfill human-readable address, region, city, and woreda for already imported O
    `npm run stations:backfill-location -- --nominatimUrl=http://localhost:8080 --limit=100`
 2. Apply:
    `npm run stations:backfill-location -- --nominatimUrl=http://localhost:8080 --limit=100 --apply`
+
+If the backfill script says it cannot reach `http://localhost:8080`, your Nominatim service is not running yet or is not reachable from this machine.
 
 Notes for OSM import:
 - The exporter uses Overpass to fetch `amenity=fuel` features in Ethiopia.
