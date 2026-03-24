@@ -122,6 +122,12 @@ Import Ethiopia fuel stations directly from OpenStreetMap:
 Optional location enrichment with your own Nominatim instance:
 `npm run stations:export-osm -- --out=./exports/ethiopia-osm-stations.json --reverse --nominatimUrl=http://localhost:8080`
 
+Backfill human-readable address, region, city, and woreda for already imported OSM stations:
+1. Dry run:
+   `npm run stations:backfill-location -- --nominatimUrl=http://localhost:8080 --limit=100`
+2. Apply:
+   `npm run stations:backfill-location -- --nominatimUrl=http://localhost:8080 --limit=100 --apply`
+
 Notes for OSM import:
 - The exporter uses Overpass to fetch `amenity=fuel` features in Ethiopia.
 - Reverse enrichment is opt-in and requires `--nominatimUrl`. This is intended for your own Nominatim instance or another approved geocoder.
