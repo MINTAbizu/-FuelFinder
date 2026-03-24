@@ -348,6 +348,42 @@ body {
   background: var(--surface-2);
 }
 
+.region-station-groups {
+  display: grid;
+  gap: 18px;
+}
+
+.region-station-group {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  background: linear-gradient(180deg, rgba(15, 118, 110, 0.05), rgba(255, 253, 249, 0.96));
+}
+
+.region-station-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.region-station-head div {
+  display: grid;
+  gap: 4px;
+}
+
+.region-station-head h4 {
+  margin: 0;
+}
+
+.region-station-head span:not(.pill) {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .city-station-groups {
   display: grid;
   gap: 16px;

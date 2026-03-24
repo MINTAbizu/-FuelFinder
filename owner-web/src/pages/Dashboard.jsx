@@ -725,6 +725,9 @@ export default function Dashboard() {
   }, [cityScopedStations, woredaFilter]);
 
   const cityStationGroups = useMemo(() => {
+    const groups = [];
+    const knownCityKeys = new Set();
+
     if (directoryCities.length) {
       const scopedCities = directoryCities
         .filter((item) => {
@@ -737,99 +740,160 @@ export default function Dashboard() {
         .slice()
         .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
 
-      return scopedCities.map((cityItem) => {
+      scopedCities.forEach((cityItem) => {
         const cityIdValue = String(cityItem.id || cityItem._id || "").trim();
-        const regionRecord = regionDirectoryById.get(String(cityItem.regionId || "").trim()) || null;
+        const regionIdValue = String(cityItem.regionId || "").trim();
+        const regionRecord = regionDirectoryById.get(regionIdValue) || null;
         const cityStations = filteredStations
-          .filter((stationItem) => String(stationItem.cityLabelKey || "") === cityIdValue)
+          .filter((stationItem) => String(stationItem.cityLabelKey || "").trim() === cityIdValue)
           .slice()
           .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
 
-        const woredaGroups = [];
-        const cityWoredas = directoryWoredas
-          .filter((item) => {
-            const itemCityId = String(item.cityId || "").trim();
-            const itemWoredaId = String(item.id || item._id || "").trim();
-            const matchesCity = itemCityId === cityIdValue;
-            const matchesWoreda = woredaFilter === "all" || itemWoredaId === String(woredaFilter || "").trim();
-            return matchesCity && matchesWoreda;
-          })
-          .slice()
-          .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
-
-        cityWoredas.forEach((woredaItem) => {
-          const woredaIdValue = String(woredaItem.id || woredaItem._id || "").trim();
-          woredaGroups.push({
-            key: woredaIdValue,
-            label: woredaItem.name || "Unnamed woreda",
-            stations: cityStations.filter((stationItem) => String(stationItem.woredaKey || "") === woredaIdValue)
-          });
-        });
-
-        const unassignedStations = cityStations.filter((stationItem) => {
-          return !cityWoredas.some(
-            (woredaItem) => String(woredaItem.id || woredaItem._id || "") === String(stationItem.woredaKey || "")
-          );
-        });
-
-        if (unassignedStations.length || !woredaGroups.length) {
-          woredaGroups.push({
-            key: `${cityIdValue}:unassigned`,
-            label: !woredaGroups.length ? "All woredas" : "Unassigned woreda",
-            stations: unassignedStations.length ? unassignedStations : cityStations
-          });
-        }
-
-        return {
-          key: cityIdValue,
+        knownCityKeys.add(cityIdValue);
+        groups.push({
+          key: cityIdValue || `city:${normalizeKey(cityItem.name) || "unspecified"}`,
           cityLabel: cityItem.name || "Unspecified city",
           regionLabel: regionRecord?.name || "Unspecified region",
-          woredaGroups
-        };
+          regionKey:
+            regionRecord?.id ||
+            regionIdValue ||
+            `region:${normalizeKey(regionRecord?.name || cityItem.name) || "unspecified"}`,
+          stationCount: cityStations.length,
+          stations: cityStations
+        });
       });
     }
 
-    const groups = new Map();
-
+    const fallbackGroups = new Map();
     filteredStations.forEach((item) => {
-      const cityGroupKey = String(item.cityLabelKey || `city:${normalizeKey(item.cityLabel) || "unspecified"}`);
-      if (!groups.has(cityGroupKey)) {
-        groups.set(cityGroupKey, {
+      const cityGroupKey = String(
+        item.cityLabelKey || `city:${normalizeKey(item.cityLabel) || "unspecified"}`
+      ).trim();
+      if (!cityGroupKey || knownCityKeys.has(cityGroupKey)) return;
+
+      if (!fallbackGroups.has(cityGroupKey)) {
+        fallbackGroups.set(cityGroupKey, {
           key: cityGroupKey,
           cityLabel: item.cityLabel || "Unspecified city",
           regionLabel: item.regionLabel || "Unspecified region",
-          woredaGroups: new Map()
-        });
-      }
-
-      const cityGroup = groups.get(cityGroupKey);
-      const woredaGroupKey = String(item.woredaKey || `woreda:${normalizeKey(item.woredaLabel) || "unspecified"}`);
-      if (!cityGroup.woredaGroups.has(woredaGroupKey)) {
-        cityGroup.woredaGroups.set(woredaGroupKey, {
-          key: woredaGroupKey,
-          label: item.woredaLabel || "Unspecified woreda",
+          regionKey: String(
+            item.regionKey || `region:${normalizeKey(item.regionLabel) || "unspecified"}`
+          ).trim(),
+          stationCount: 0,
           stations: []
         });
       }
-      cityGroup.woredaGroups.get(woredaGroupKey).stations.push(item);
+
+      const nextGroup = fallbackGroups.get(cityGroupKey);
+      nextGroup.stations.push(item);
+      nextGroup.stationCount += 1;
+    });
+
+    return [
+      ...groups,
+      ...Array.from(fallbackGroups.values())
+        .map((group) => ({
+          ...group,
+          stations: group.stations
+            .slice()
+            .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+        }))
+        .sort((a, b) => String(a.cityLabel || "").localeCompare(String(b.cityLabel || "")))
+    ];
+  }, [cityFilter, directoryCities, filteredStations, regionDirectoryById, regionFilter]);
+
+  const regionStationGroups = useMemo(() => {
+    const finalizeRegionGroup = (group) => {
+      const cityGroups = (group.cityGroups || [])
+        .slice()
+        .sort((a, b) => String(a.cityLabel || "").localeCompare(String(b.cityLabel || "")));
+
+      return {
+        ...group,
+        cityGroups,
+        cityCount: cityGroups.length,
+        stationCount: cityGroups.reduce(
+          (total, cityGroup) => total + Number(cityGroup.stationCount || cityGroup.stations?.length || 0),
+          0
+        )
+      };
+    };
+
+    if (directoryRegions.length) {
+      const scopedRegions = directoryRegions
+        .filter((item) => {
+          const regionIdValue = String(item.id || item._id || "").trim();
+          return regionFilter === "all" || regionIdValue === String(regionFilter || "").trim();
+        })
+        .slice()
+        .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+
+      const knownRegionKeys = new Set();
+      const regionGroups = scopedRegions.map((regionItem) => {
+        const regionKey =
+          String(regionItem.id || regionItem._id || "").trim() ||
+          `region:${normalizeKey(regionItem.name) || "unspecified"}`;
+        knownRegionKeys.add(regionKey);
+        return finalizeRegionGroup({
+          key: regionKey,
+          regionLabel: regionItem.name || "Unspecified region",
+          cityGroups: cityStationGroups.filter(
+            (cityGroup) => String(cityGroup.regionKey || "").trim() === regionKey
+          )
+        });
+      });
+
+      const fallbackRegionMap = new Map();
+      cityStationGroups.forEach((cityGroup) => {
+        const regionKey = String(
+          cityGroup.regionKey || `region:${normalizeKey(cityGroup.regionLabel) || "unspecified"}`
+        ).trim();
+        if (!regionKey || knownRegionKeys.has(regionKey)) return;
+
+        if (!fallbackRegionMap.has(regionKey)) {
+          fallbackRegionMap.set(regionKey, {
+            key: regionKey,
+            regionLabel: cityGroup.regionLabel || "Unspecified region",
+            cityGroups: []
+          });
+        }
+
+        fallbackRegionMap.get(regionKey).cityGroups.push(cityGroup);
+      });
+
+      const allRegionGroups = [
+        ...regionGroups,
+        ...Array.from(fallbackRegionMap.values())
+          .map((group) => finalizeRegionGroup(group))
+          .sort((a, b) => String(a.regionLabel || "").localeCompare(String(b.regionLabel || "")))
+      ];
+
+      if (regionFilter === "all" && (cityFilter !== "all" || woredaFilter !== "all")) {
+        return allRegionGroups.filter((group) => group.cityCount > 0);
+      }
+
+      return allRegionGroups;
+    }
+
+    const groups = new Map();
+    cityStationGroups.forEach((cityGroup) => {
+      const regionKey = String(
+        cityGroup.regionKey || `region:${normalizeKey(cityGroup.regionLabel) || "unspecified"}`
+      ).trim();
+      if (!groups.has(regionKey)) {
+        groups.set(regionKey, {
+          key: regionKey,
+          regionLabel: cityGroup.regionLabel || "Unspecified region",
+          cityGroups: []
+        });
+      }
+      groups.get(regionKey).cityGroups.push(cityGroup);
     });
 
     return Array.from(groups.values())
-      .map((group) => ({
-        key: group.key,
-        cityLabel: group.cityLabel,
-        regionLabel: group.regionLabel,
-        woredaGroups: Array.from(group.woredaGroups.values())
-          .map((woredaGroup) => ({
-            ...woredaGroup,
-            stations: woredaGroup.stations
-              .slice()
-              .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
-          }))
-          .sort((a, b) => a.label.localeCompare(b.label))
-      }))
-      .sort((a, b) => a.cityLabel.localeCompare(b.cityLabel));
-  }, [cityFilter, directoryCities, directoryWoredas, filteredStations, regionDirectoryById, regionFilter, woredaFilter]);
+      .map((group) => finalizeRegionGroup(group))
+      .sort((a, b) => String(a.regionLabel || "").localeCompare(String(b.regionLabel || "")));
+  }, [cityFilter, cityStationGroups, directoryRegions, regionFilter, woredaFilter]);
 
   const createStationRegionOptions = useMemo(() => {
     return directoryRegions
@@ -996,6 +1060,7 @@ export default function Dashboard() {
     if (!session?.tokens?.accessToken || !canManageStations) {
       setDirectoryRegions([]);
       setDirectoryCities([]);
+      setDirectoryWoredas([]);
       return;
     }
 
@@ -1003,14 +1068,20 @@ export default function Dashboard() {
 
     const loadLocationDirectory = async () => {
       try {
-        const [regionsData, citiesData] = await Promise.all([listAdminRegions(), listAdminCities()]);
+        const [regionsData, citiesData, woredasData] = await Promise.all([
+          listAdminRegions(),
+          listAdminCities(),
+          listAdminWoredas()
+        ]);
         if (!isActive) return;
         setDirectoryRegions(regionsData?.regions || []);
         setDirectoryCities(citiesData?.cities || []);
+        setDirectoryWoredas(woredasData?.woredas || []);
       } catch {
         if (!isActive) return;
         setDirectoryRegions([]);
         setDirectoryCities([]);
+        setDirectoryWoredas([]);
       }
     };
 
@@ -1041,6 +1112,13 @@ export default function Dashboard() {
       setCityFilter("all");
     }
   }, [cityFilter, cityOptions]);
+
+  useEffect(() => {
+    const validWoredaKeys = new Set(woredaOptions.map((item) => item.key));
+    if (!validWoredaKeys.has(woredaFilter)) {
+      setWoredaFilter("all");
+    }
+  }, [woredaFilter, woredaOptions]);
 
   useEffect(() => {
     if (!filteredStations.length) {
@@ -2331,15 +2409,16 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {isSuperAdmin && stations.length >= 1 && (
+        {isSuperAdmin && (
           <div className="super-admin-workspace card">
             <div className="super-admin-head">
               <div className="super-admin-copy">
                 <p className="section-title">Simple super admin flow</p>
                 <h3>Choose region, then city, then open the station task you need.</h3>
                 <p>
-                  This keeps large network data easier to handle on web: filter the network first,
-                  pick one station, then jump straight to queue, fuel, payments, users, or settings.
+                  This keeps the Ethiopia station network easier to scan on web: filter by region,
+                  narrow to a city or woreda if needed, then jump straight to queue, fuel, payments,
+                  users, or settings.
                 </p>
               </div>
               <div className="pill">{filteredStations.length} stations ready</div>
@@ -2353,6 +2432,7 @@ export default function Dashboard() {
                   onChange={(event) => {
                     setRegionFilter(event.target.value);
                     setCityFilter("all");
+                    setWoredaFilter("all");
                   }}
                 >
                   {regionOptions.map((option) => (
@@ -2367,7 +2447,10 @@ export default function Dashboard() {
                 <strong>2. City</strong>
                 <select
                   value={cityFilter}
-                  onChange={(event) => setCityFilter(event.target.value)}
+                  onChange={(event) => {
+                    setCityFilter(event.target.value);
+                    setWoredaFilter("all");
+                  }}
                   disabled={cityOptions.length <= 1}
                 >
                   {cityOptions.map((option) => (
@@ -2378,16 +2461,32 @@ export default function Dashboard() {
                 </select>
               </label>
 
+              <label className="super-admin-step">
+                <strong>3. Woreda</strong>
+                <select
+                  value={woredaFilter}
+                  onChange={(event) => setWoredaFilter(event.target.value)}
+                  disabled={woredaOptions.length <= 1}
+                >
+                  {woredaOptions.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.count !== undefined ? `${option.label} (${option.count})` : option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <div className="super-admin-step">
-                <strong>3. Reset filters</strong>
+                <strong>4. Reset filters</strong>
                 <button
                   className="btn alt small"
                   type="button"
                   onClick={() => {
                     setRegionFilter("all");
                     setCityFilter("all");
+                    setWoredaFilter("all");
                   }}
-                  disabled={regionFilter === "all" && cityFilter === "all"}
+                  disabled={regionFilter === "all" && cityFilter === "all" && woredaFilter === "all"}
                 >
                   Show whole network
                 </button>
@@ -2427,61 +2526,82 @@ export default function Dashboard() {
               </div>
             ) : null}
 
-            {cityStationGroups.length ? (
-              <div className="city-station-groups">
-                {cityStationGroups.map((group) => (
-                  <div className="city-station-group" key={group.key}>
-                    <div className="city-station-head">
+            {regionStationGroups.length ? (
+              <div className="region-station-groups">
+                {regionStationGroups.map((regionGroup) => (
+                  <div className="region-station-group" key={regionGroup.key}>
+                    <div className="region-station-head">
                       <div>
-                        <p className="section-title">City station list</p>
-                        <h4>{group.cityLabel}</h4>
-                        <span>{group.regionLabel}</span>
+                        <p className="section-title">Region network</p>
+                        <h4>{regionGroup.regionLabel}</h4>
+                        <span>{regionGroup.cityCount} cities configured</span>
                       </div>
-                      <span className="pill">{group.stations.length} stations</span>
+                      <span className="pill">{regionGroup.stationCount} stations</span>
                     </div>
 
-                    <div className="station-browser">
-                      {group.stations.length ? (
-                        group.stations.map((item) => {
-                          const selected = String(item.id) === String(stationId);
-                          return (
-                            <button
-                              key={item.id}
-                              type="button"
-                              className={`station-browser-card${selected ? " selected" : ""}`}
-                              onClick={() => setStationId(String(item.id))}
-                            >
-                              <div className="station-browser-top">
-                                <div>
-                                  <strong>{item.name || `Station ${item.id}`}</strong>
-                                  <span>
-                                    {item.cityLabel} - {item.regionLabel}
-                                  </span>
+                    {regionGroup.cityGroups.length ? (
+                      <div className="city-station-groups">
+                        {regionGroup.cityGroups.map((group) => (
+                          <div className="city-station-group" key={group.key}>
+                            <div className="city-station-head">
+                              <div>
+                                <p className="section-title">City station list</p>
+                                <h4>{group.cityLabel}</h4>
+                                <span>{group.regionLabel}</span>
+                              </div>
+                              <span className="pill">{group.stationCount} stations</span>
+                            </div>
+
+                            <div className="station-browser">
+                              {group.stations.length ? (
+                                group.stations.map((item) => {
+                                  const selected = String(item.id) === String(stationId);
+                                  return (
+                                    <button
+                                      key={item.id}
+                                      type="button"
+                                      className={`station-browser-card${selected ? " selected" : ""}`}
+                                      onClick={() => selectStation(String(item.id))}
+                                    >
+                                      <div className="station-browser-top">
+                                        <div>
+                                          <strong>{item.name || `Station ${item.id}`}</strong>
+                                          <span>
+                                            {item.cityLabel} / {item.woredaLabel || "Unspecified woreda"}
+                                          </span>
+                                        </div>
+                                        <span className={`pill ${item.isActive ? "" : "warn"}`}>
+                                          {item.isActive ? "Open" : "Inactive"}
+                                        </span>
+                                      </div>
+                                      <p>{item.address || "Address not set yet."}</p>
+                                      <div className="station-browser-meta">
+                                        <span>Fuel: {formatFuelStatusLabel(item.fuelStatus)}</span>
+                                        <span>Updated: {formatDateTime(item.fuelInventory?.updatedAt || item.updatedAt)}</span>
+                                      </div>
+                                    </button>
+                                  );
+                                })
+                              ) : (
+                                <div className="station-browser-empty">
+                                  No stations have been added for {group.cityLabel} yet.
                                 </div>
-                                <span className={`pill ${item.isActive ? "" : "warn"}`}>
-                                  {item.isActive ? "Open" : "Inactive"}
-                                </span>
-                              </div>
-                              <p>{item.address || "Address not set yet."}</p>
-                              <div className="station-browser-meta">
-                                <span>Fuel: {formatFuelStatusLabel(item.fuelStatus)}</span>
-                                <span>Updated: {formatDateTime(item.fuelInventory?.updatedAt || item.updatedAt)}</span>
-                              </div>
-                            </button>
-                          );
-                        })
-                      ) : (
-                        <div className="station-browser-empty">
-                          No stations have been added for {group.cityLabel} yet.
-                        </div>
-                      )}
-                    </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="station-browser-empty">
+                        No cities are linked to {regionGroup.regionLabel} yet.
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             ) : (
               <div className="station-browser-empty">
-                No stations match this region and city. Reset the filters or choose a different area.
+                No stations match this region, city, or woreda. Reset the filters or choose a different area.
               </div>
             )}
           </div>
