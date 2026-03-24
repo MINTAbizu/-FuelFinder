@@ -76,10 +76,13 @@ Protected endpoints use:
 
 ## Ethiopia Location Directory
 - Stations can now store `regionId`, `cityId`, `subcity`, `woreda`, `landmark`, and `locationCategories`.
-- Seed Ethiopia regions and common cities:
+- The built-in `src/data/ethiopiaLocations.js` file is only a starter directory, not the full Ethiopia administrative list.
+- Seed the built-in starter directory:
   `npm run locations:seed`
 - Re-seed and overwrite matching seed records:
   `npm run locations:seed -- --overwrite`
+- Seed a full custom Ethiopia hierarchy from JSON:
+  `npm run locations:seed -- --file=./examples/ethiopia-locations.import.template.json --overwrite`
 
 Example admin station payload:
 ```json
@@ -100,10 +103,21 @@ Example admin station payload:
 Import stations from JSON:
 `npm run stations:import -- --file=./stations.json`
 
+If you want every Ethiopia region, city, woreda, and station in the root admin page:
+1. Prepare a full hierarchy JSON file using `examples/ethiopia-locations.import.template.json`
+2. Seed it with:
+   `npm run locations:seed -- --file=./path/to/ethiopia-locations.full.json --overwrite`
+3. Prepare a station JSON file using `examples/stations.import.template.json`
+4. Import it with:
+   `npm run stations:import -- --file=./path/to/ethiopia-stations.full.json`
+
+The owner root admin page will then display all imported regions and cities, including places that do not yet have stations.
+
 Supported station import fields:
 - `name`, `address`, `latitude`, `longitude`
 - `regionId` or `regionName`
 - `cityId` or `cityName`
+- `woredaId` or `woredaName`
 - `subcity`, `woreda`, `landmark`
 - `locationCategories`
 - `contact`, `fuelStatus`, `isActive`

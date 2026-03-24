@@ -1,0 +1,43 @@
+{
+  "stations": [
+    {
+      "name": "FuelFinder Bole Demo",
+      "address": "Bole Road, Addis Ababa, Ethiopia",
+      "latitude": 8.9806,
+      "longitude": 38.7578,
+      "regionName": "Addis Ababa",
+      "regionCategory": "chartered_city",
+      "cityName": "Addis Ababa",
+      "cityCode": "AA-ADD",
+      "woredaName": "Bole",
+      "woredaCategory": "subcity",
+      "subcity": "Bole",
+      "landmark": "Near Millennium Hall",
+      "locationCategories": ["airport-corridor", "24-7", "cashless"],
+      "contact": "+251900000000",
+      "fuelStatus": "partial",
+      "isActive": true,
+      "externalSource": "manual-seed",
+      "externalSourceId": "aa-add-bole-demo-001"
+    },
+    {
+      "name": "FuelFinder Adama Demo",
+      "address": "Main Road, Adama, Oromia, Ethiopia",
+      "latitude": 8.5409,
+      "longitude": 39.2681,
+      "regionName": "Oromia",
+      "regionCategory": "regional_state",
+      "cityName": "Adama",
+      "cityCode": "OR-ADAMA",
+      "woredaName": "01",
+      "woredaCategory": "woreda",
+      "landmark": "Near bus terminal",
+      "locationCategories": ["main-road"],
+      "contact": "+251911111111",
+      "fuelStatus": "full",
+      "isActive": true,
+      "externalSource": "manual-seed",
+      "externalSourceId": "or-adama-demo-001"
+    }
+  ]
+}

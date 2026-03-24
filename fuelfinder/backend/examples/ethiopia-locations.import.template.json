@@ -1,0 +1,52 @@
+{
+  "regions": [
+    {
+      "name": "Addis Ababa",
+      "code": "AA",
+      "category": "chartered_city",
+      "isActive": true,
+      "cities": [
+        {
+          "name": "Addis Ababa",
+          "code": "AA-ADD",
+          "isActive": true,
+          "woredas": [
+            {
+              "name": "Bole",
+              "code": "AA-BOLE",
+              "category": "subcity",
+              "isActive": true
+            },
+            {
+              "name": "Yeka",
+              "code": "AA-YEKA",
+              "category": "subcity",
+              "isActive": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Oromia",
+      "code": "OR",
+      "category": "regional_state",
+      "isActive": true,
+      "cities": [
+        {
+          "name": "Adama",
+          "code": "OR-ADAMA",
+          "isActive": true,
+          "woredas": [
+            {
+              "name": "01",
+              "code": "OR-AD-01",
+              "category": "woreda",
+              "isActive": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

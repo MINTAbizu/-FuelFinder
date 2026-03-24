@@ -372,6 +372,7 @@ async function ensureWoredaByName(input = {}) {
 
 async function seedEthiopiaLocationDirectory(options = {}) {
   const overwrite = Boolean(options.overwrite);
+  const seedEntries = Array.isArray(options.entries) ? options.entries : ETHIOPIA_LOCATIONS;
   const summary = {
     regionsCreated: 0,
     regionsUpdated: 0,
@@ -381,7 +382,7 @@ async function seedEthiopiaLocationDirectory(options = {}) {
     woredasUpdated: 0
   };
 
-  for (const regionEntry of ETHIOPIA_LOCATIONS) {
+  for (const regionEntry of seedEntries) {
     const slug = slugify(regionEntry.name);
     const nextRegion = {
       name: asText(regionEntry.name),
