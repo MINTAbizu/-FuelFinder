@@ -36,7 +36,7 @@ function buildNetworkErrorMessage() {
     : "This usually means the API is unreachable.";
   const originHint =
     browserOrigin && isCrossOrigin
-      ? `Current site origin is ${browserOrigin}; the backend must allow it in CLIENT_ORIGIN, CLIENT_ORIGINS, or CORS_ALLOWED_ORIGINS.`
+      ? `Current site origin is ${browserOrigin}; the backend must allow it in CLIENT_ORIGIN, CLIENT_ORIGINS, CORS_ALLOWED_ORIGINS, OWNER_WEB_ORIGIN, or OWNER_WEB_ORIGINS.`
       : "";
   const apiHint = import.meta.env.VITE_API_BASE_URL
     ? `API base is ${API_BASE}.`

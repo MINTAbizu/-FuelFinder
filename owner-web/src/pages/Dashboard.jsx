@@ -304,6 +304,149 @@ function looksLikeRoadOrLandmark(value) {
   return roadHints.some((hint) => text.includes(hint) || text.endsWith(hint.trim()));
 }
 
+const LIVE_STATION_NAME_PREFIXES = [
+  "fuel station",
+  "fuel stop",
+  "fuel",
+  "gas station",
+  "service station",
+  "shell fuel",
+  "shell",
+  "total fuelstop",
+  "total fuel",
+  "totalenergies",
+  "total",
+  "nile petroleum",
+  "nile",
+  "national oil company",
+  "national oil ethiopia plc noc",
+  "noc ethiopia",
+  "noc",
+  "oilibya ethiopia orbis",
+  "oilibya ethiopia",
+  "oilibya",
+  "oilibya",
+  "mobil fuel",
+  "mobil",
+  "kobil",
+  "ybp",
+  "yetebaberut gas station",
+  "yetebaberut",
+  "yeshi",
+  "gomeju oil ethiopia",
+  "gomeju",
+  "ola",
+  "taf",
+  "was",
+  "baro",
+  "calub",
+  "bp fuel",
+  "bp lubricants",
+  "bp",
+  "green",
+  "united",
+  "global",
+  "delta",
+  "allway",
+  "african"
+].sort((a, b) => b.length - a.length);
+
+function titleCaseWords(value) {
+  return String(value || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      if (word.length <= 3 && word === word.toUpperCase()) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(" ");
+}
+
+function cleanLiveLocalityCandidate(value, cityLabel, regionLabel) {
+  const text = String(value || "")
+    .replace(/[()[\]]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  if (isPlaceholderLocationText(text) || isCoordinateFragment(text)) return "";
+
+  const normalized = normalizeKey(text);
+  if (!normalized) return "";
+  if (normalized === normalizeKey(cityLabel) || normalized === normalizeKey(regionLabel)) return "";
+  if (normalized.startsWith("node ") || normalized.startsWith("way ")) return "";
+  if (["fuel", "fuel station", "fuel stop", "gas station", "service station"].includes(normalized)) {
+    return "";
+  }
+
+  return text;
+}
+
+function deriveLocalityFromLiveStationName(name, cityLabel, regionLabel) {
+  const raw = String(name || "").trim();
+  if (!raw) return "";
+
+  const candidates = [];
+  const parenMatches = raw.match(/\(([^)]+)\)/g) || [];
+  parenMatches.forEach((match) => {
+    const inner = String(match || "").replace(/[()]/g, "").trim();
+    if (inner) candidates.push(inner);
+  });
+
+  raw
+    .split(/\s[-/]\s| - | \/ /)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(1)
+    .forEach((part) => candidates.push(part));
+
+  const normalizedRaw = normalizeKey(raw);
+  LIVE_STATION_NAME_PREFIXES.forEach((prefix) => {
+    if (!normalizedRaw.startsWith(`${prefix} `)) return;
+    const remainder = normalizedRaw.slice(prefix.length).trim();
+    if (remainder) {
+      candidates.push(titleCaseWords(remainder));
+    }
+  });
+
+  for (const candidate of candidates) {
+    const cleaned = cleanLiveLocalityCandidate(candidate, cityLabel, regionLabel);
+    if (cleaned) return cleaned;
+  }
+
+  return "";
+}
+
+function buildHumanReadableLiveAddress(station, cityLabel, regionLabel) {
+  const directAddress = String(station?.address || "").trim();
+  if (!isPlaceholderLocationText(directAddress)) {
+    return directAddress;
+  }
+
+  const parts = [
+    String(station?.landmark || "").trim(),
+    String(station?.subcity || "").trim(),
+    String(station?.woreda || "").trim(),
+    deriveLocalityFromLiveStationName(station?.name, cityLabel, regionLabel),
+    String(cityLabel || "").trim(),
+    String(regionLabel || "").trim()
+  ].filter(Boolean);
+
+  const uniqueParts = [];
+  const seen = new Set();
+  parts.forEach((part) => {
+    const key = normalizeKey(part);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    uniqueParts.push(part);
+  });
+
+  if (uniqueParts.length) {
+    return `Near ${uniqueParts.join(", ")}`;
+  }
+
+  return "Live map location";
+}
+
 function deriveCityRegion(station) {
   const countryTokens = new Set(["ethiopia", "ethiopia.", "et", "eth", "ethiopian"]);
   const rawAddress = String(station?.address || "").trim();
@@ -2907,7 +3050,27 @@ export default function Dashboard() {
                       <div className="city-station-groups">
                         {regionGroup.cityGroups.map((group) => (
                           <div className="city-station-group" key={group.key}>
-                            {String(cityFilter || "").trim() === String(group.key || "").trim() ? (
+                            {(() => {
+                              const isSelectedCityGroup =
+                                String(cityFilter || "").trim() === String(group.key || "").trim();
+                              const linkedStationIds = new Set(
+                                (group.stations || []).map((item) => String(item?.id || "").trim()).filter(Boolean)
+                              );
+                              const nearbySavedStations = isSelectedCityGroup
+                                ? liveCityStations
+                                    .map((item) => {
+                                      const stationRecord = stationGeoById.get(String(item?.stationId || "").trim());
+                                      return stationRecord || null;
+                                    })
+                                    .filter((item) => item && !linkedStationIds.has(String(item.id || "").trim()))
+                                : [];
+                              const combinedSavedStations = [...(group.stations || []), ...nearbySavedStations].sort((a, b) =>
+                                String(a?.name || "").localeCompare(String(b?.name || ""))
+                              );
+
+                              return (
+                                <>
+                                  {isSelectedCityGroup ? (
                               <div className="city-live-panel">
                                 <div className="city-station-head">
                                   <div>
@@ -2945,12 +3108,17 @@ export default function Dashboard() {
                                               {linkedStationId ? "Linked" : "Live map only"}
                                             </span>
                                           </div>
-                                          <p>{item.address || "Address not set yet."}</p>
+                                          <p>{buildHumanReadableLiveAddress(item, group.cityLabel, group.regionLabel)}</p>
                                           <div className="station-browser-meta">
                                             <span>Fuel: {formatFuelStatusLabel(item.fuel_status || item.fuelStatus)}</span>
                                             <span>Queue: {Number(item.queue_length || 0)} drivers</span>
                                             {Number.isFinite(Number(item.distanceMeters)) ? (
                                               <span>{Math.round(Number(item.distanceMeters) / 1000)} km from city center</span>
+                                            ) : null}
+                                            {Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)) ? (
+                                              <span>
+                                                Coords: {Number(item.latitude).toFixed(5)}, {Number(item.longitude).toFixed(5)}
+                                              </span>
                                             ) : null}
                                           </div>
                                         </>
@@ -2985,53 +3153,65 @@ export default function Dashboard() {
                                   )}
                                 </div>
                               </div>
-                            ) : null}
+                                  ) : null}
 
-                            <div className="city-station-head">
-                              <div>
-                                <p className="section-title">Saved admin stations</p>
-                                <h4>{group.cityLabel}</h4>
-                                <span>{group.regionLabel}</span>
-                              </div>
-                              <span className="pill">{group.stationCount} stations</span>
-                            </div>
+                                  <div className="city-station-head">
+                                    <div>
+                                      <p className="section-title">Saved admin stations</p>
+                                      <h4>{group.cityLabel}</h4>
+                                      <span>
+                                        {isSelectedCityGroup && nearbySavedStations.length
+                                          ? "Includes nearby saved records not linked to this city yet"
+                                          : group.regionLabel}
+                                      </span>
+                                    </div>
+                                    <span className="pill">{combinedSavedStations.length} stations</span>
+                                  </div>
 
-                            <div className="station-browser">
-                              {group.stations.length ? (
-                                group.stations.map((item) => {
-                                  const selected = String(item.id) === String(stationId);
-                                  return (
-                                    <button
-                                      key={item.id}
-                                      type="button"
-                                      className={`station-browser-card${selected ? " selected" : ""}`}
-                                      onClick={() => selectStation(String(item.id))}
-                                    >
-                                      <div className="station-browser-top">
-                                        <div>
-                                          <strong>{item.name || `Station ${item.id}`}</strong>
-                                          <span>
-                                            {item.cityLabel} / {item.woredaLabel || "Unspecified woreda"}
-                                          </span>
-                                        </div>
-                                        <span className={`pill ${item.isActive ? "" : "warn"}`}>
-                                          {item.isActive ? "Open" : "Inactive"}
-                                        </span>
+                                  <div className="station-browser">
+                                    {combinedSavedStations.length ? (
+                                      combinedSavedStations.map((item) => {
+                                        const selected = String(item.id) === String(stationId);
+                                        const isSuggestedOnly =
+                                          isSelectedCityGroup &&
+                                          !linkedStationIds.has(String(item.id || "").trim());
+                                        return (
+                                          <button
+                                            key={item.id}
+                                            type="button"
+                                            className={`station-browser-card${selected ? " selected" : ""}`}
+                                            onClick={() => selectStation(String(item.id))}
+                                          >
+                                            <div className="station-browser-top">
+                                              <div>
+                                                <strong>{item.name || `Station ${item.id}`}</strong>
+                                                <span>
+                                                  {isSuggestedOnly
+                                                    ? `${group.cityLabel} / Suggested saved record`
+                                                    : `${item.cityLabel} / ${item.woredaLabel || "Unspecified woreda"}`}
+                                                </span>
+                                              </div>
+                                              <span className={`pill ${item.isActive ? "" : "warn"}`}>
+                                                {isSuggestedOnly ? "Needs city link" : item.isActive ? "Open" : "Inactive"}
+                                              </span>
+                                            </div>
+                                            <p>{item.address || "Address not set yet."}</p>
+                                            <div className="station-browser-meta">
+                                              <span>Fuel: {formatFuelStatusLabel(item.fuelStatus)}</span>
+                                              <span>Updated: {formatDateTime(item.fuelInventory?.updatedAt || item.updatedAt)}</span>
+                                            </div>
+                                          </button>
+                                        );
+                                      })
+                                    ) : (
+                                      <div className="station-browser-empty">
+                                        No saved database stations are linked to {group.cityLabel} yet.
                                       </div>
-                                      <p>{item.address || "Address not set yet."}</p>
-                                      <div className="station-browser-meta">
-                                        <span>Fuel: {formatFuelStatusLabel(item.fuelStatus)}</span>
-                                        <span>Updated: {formatDateTime(item.fuelInventory?.updatedAt || item.updatedAt)}</span>
-                                      </div>
-                                    </button>
-                                  );
-                                })
-                              ) : (
-                                <div className="station-browser-empty">
-                                  No saved database stations are linked to {group.cityLabel} yet.
-                                </div>
-                              )}
-                            </div>
+                                    )}
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
                         ))}
                       </div>

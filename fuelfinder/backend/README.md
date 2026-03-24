@@ -15,7 +15,7 @@
 Server runs on `http://localhost:5000` by default.
 
 `CLIENT_ORIGIN` can be a comma-separated list such as
-`http://localhost:5174,https://fuel-centeral-command.netlify.app`.
+`http://localhost:5174,https://fuel-centeral-command.netlify.app,https://fuel-command-center-station.netlify.app`.
 Wildcard entries such as `https://*.netlify.app` are also supported.
 
 ## API
