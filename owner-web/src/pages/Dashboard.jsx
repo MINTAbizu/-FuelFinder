@@ -222,6 +222,23 @@ function normalizeKey(value) {
     .replace(/\s+/g, " ");
 }
 
+function buildDirectoryNameMap(items) {
+  const map = new Map();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const key = normalizeKey(item?.name);
+    if (!key) return;
+    const existing = map.get(key) || [];
+    existing.push(item);
+    map.set(key, existing);
+  });
+  return map;
+}
+
+function getDirectoryMatchesByName(map, value) {
+  const key = normalizeKey(value);
+  return key ? map.get(key) || [] : [];
+}
+
 function isPlaceholderLocationText(value) {
   const text = String(value || "").trim().toLowerCase();
   if (!text) return true;
@@ -598,6 +615,14 @@ export default function Dashboard() {
     return map;
   }, [directoryCities]);
 
+  const regionDirectoryByName = useMemo(() => {
+    return buildDirectoryNameMap(directoryRegions);
+  }, [directoryRegions]);
+
+  const cityDirectoryByName = useMemo(() => {
+    return buildDirectoryNameMap(directoryCities);
+  }, [directoryCities]);
+
   const woredaDirectoryById = useMemo(() => {
     const map = new Map();
     directoryWoredas.forEach((item) => {
@@ -614,11 +639,34 @@ export default function Dashboard() {
       const cityIdValue = String(item?.cityId || "").trim();
       const regionIdValue = String(item?.regionId || "").trim();
       const woredaIdValue = String(item?.woredaId || "").trim();
-      const cityRecord = cityDirectoryById.get(cityIdValue) || null;
-      const regionRecord =
-        regionDirectoryById.get(regionIdValue) ||
-        regionDirectoryById.get(String(cityRecord?.regionId || "").trim()) ||
-        null;
+      const explicitCityRecord = cityDirectoryById.get(cityIdValue) || null;
+      const explicitRegionRecord = regionDirectoryById.get(regionIdValue) || null;
+      const namedRegionMatches = getDirectoryMatchesByName(regionDirectoryByName, fallback.regionLabel);
+      let regionRecord = explicitRegionRecord || (namedRegionMatches.length === 1 ? namedRegionMatches[0] : null);
+
+      const namedCityMatches = getDirectoryMatchesByName(cityDirectoryByName, fallback.cityLabel);
+      let cityRecord = explicitCityRecord;
+      if (!cityRecord && namedCityMatches.length) {
+        const scopedMatches = regionRecord
+          ? namedCityMatches.filter(
+              (candidate) =>
+                String(candidate?.regionId || "").trim() ===
+                String(regionRecord?.id || regionRecord?._id || "").trim()
+            )
+          : namedCityMatches;
+
+        if (scopedMatches.length === 1) {
+          cityRecord = scopedMatches[0];
+        } else if (!regionRecord && namedCityMatches.length === 1) {
+          cityRecord = namedCityMatches[0];
+        }
+      }
+
+      const cityRegionRecord = regionDirectoryById.get(String(cityRecord?.regionId || "").trim()) || null;
+      if (!regionRecord || (cityRegionRecord && String(cityRegionRecord?.id || cityRegionRecord?._id || "") !== String(regionRecord?.id || regionRecord?._id || ""))) {
+        regionRecord = cityRegionRecord || regionRecord;
+      }
+
       const woredaRecord = woredaDirectoryById.get(woredaIdValue) || null;
       const cityLabel = cityRecord?.name || fallback.cityLabel;
       const regionLabel = regionRecord?.name || fallback.regionLabel;
@@ -637,7 +685,14 @@ export default function Dashboard() {
         woredaRecord
       };
     });
-  }, [cityDirectoryById, directoryWoredas, regionDirectoryById, stations, woredaDirectoryById]);
+  }, [
+    cityDirectoryById,
+    cityDirectoryByName,
+    regionDirectoryById,
+    regionDirectoryByName,
+    stations,
+    woredaDirectoryById
+  ]);
 
   const stationGeoById = useMemo(() => {
     const map = new Map();
