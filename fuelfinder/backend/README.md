@@ -113,6 +113,18 @@ If you want every Ethiopia region, city, woreda, and station in the root admin p
 
 The owner root admin page will then display all imported regions and cities, including places that do not yet have stations.
 
+Import Ethiopia fuel stations directly from OpenStreetMap:
+1. Export a nationwide OSM station file:
+   `npm run stations:export-osm -- --out=./exports/ethiopia-osm-stations.json`
+2. Import it into MongoDB:
+   `npm run stations:import -- --file=./exports/ethiopia-osm-stations.json`
+
+Notes for OSM import:
+- The exporter uses Overpass to fetch `amenity=fuel` features in Ethiopia.
+- It will try to enrich missing `regionName` and `cityName` fields with Nominatim unless you pass `--no-reverse`.
+- OSM is community-maintained, so it may still miss some stations or use inconsistent city/woreda names.
+- OpenStreetMap data has attribution and license requirements. See: https://www.openstreetmap.org/copyright
+
 Supported station import fields:
 - `name`, `address`, `latitude`, `longitude`
 - `regionId` or `regionName`
