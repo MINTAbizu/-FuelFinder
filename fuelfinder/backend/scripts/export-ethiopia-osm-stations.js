@@ -13,6 +13,7 @@ const DEFAULT_USER_AGENT =
   process.env.GEOCODER_USER_AGENT ||
   "fuelfinder-ethiopia-osm-export/1.0 (contact: admin@fuelfinder.local)";
 const DEFAULT_CONTACT_EMAIL = process.env.GEOCODER_EMAIL || "";
+const DEFAULT_NOMINATIM_BASE_URL = process.env.NOMINATIM_BASE_URL || "";
 
 function hasFlag(name) {
   return process.argv.includes(`--${name}`);
@@ -198,10 +199,14 @@ function formatFromAddressObject(addr) {
   };
 }
 
-async function reverseGeocode(lat, lon, userAgent, email) {
+async function reverseGeocode(lat, lon, userAgent, email, baseUrl) {
+  const normalizedBaseUrl = asText(baseUrl).replace(/\/+$/, "");
+  if (!normalizedBaseUrl) {
+    throw new Error("nominatimUrl is required for reverse geocoding.");
+  }
   const emailPart = email ? `&email=${encodeURIComponent(email)}` : "";
   const url =
-    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}` +
+    `${normalizedBaseUrl}/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}` +
     `&lon=${encodeURIComponent(lon)}&zoom=18&addressdetails=1&accept-language=en${emailPart}`;
 
   const response = await fetch(url, {
@@ -251,7 +256,7 @@ function buildStationRecord(element) {
   };
 }
 
-async function enrichMissingLocationFields(records, { userAgent, email }) {
+async function enrichMissingLocationFields(records, { userAgent, email, nominatimUrl }) {
   const cache = new Map();
   let resolved = 0;
   let failed = 0;
@@ -268,7 +273,7 @@ async function enrichMissingLocationFields(records, { userAgent, email }) {
     const cacheKey = `${lat.toFixed(5)},${lon.toFixed(5)}`;
     if (!cache.has(cacheKey)) {
       try {
-        const geo = await reverseGeocode(lat, lon, userAgent, email);
+        const geo = await reverseGeocode(lat, lon, userAgent, email, nominatimUrl);
         cache.set(cacheKey, geo);
         resolved += 1;
       } catch (_error) {
@@ -340,9 +345,17 @@ async function main() {
   }
 
   const outputFile = getArg("out", DEFAULT_OUTPUT_PATH);
-  const doReverse = !hasFlag("no-reverse");
+  const doReverse = hasFlag("reverse");
   const userAgent = getArg("userAgent", DEFAULT_USER_AGENT);
   const email = getArg("email", DEFAULT_CONTACT_EMAIL);
+  const nominatimUrl = getArg("nominatimUrl", DEFAULT_NOMINATIM_BASE_URL);
+
+  if (doReverse && !nominatimUrl) {
+    throw new Error(
+      "Reverse enrichment requires --nominatimUrl=<your-nominatim-base-url>. " +
+      "Do not bulk-geocode a nationwide dataset against the public Nominatim service."
+    );
+  }
 
   console.log("Fetching Ethiopia fuel stations from OpenStreetMap (Overpass)...");
   const elements = await fetchOverpassStations();
@@ -351,8 +364,12 @@ async function main() {
 
   let reverseSummary = { resolved: 0, failed: 0 };
   if (doReverse) {
-    console.log("Reverse geocoding missing location fields with Nominatim...");
-    reverseSummary = await enrichMissingLocationFields(baseRecords, { userAgent, email });
+    console.log("Reverse geocoding missing location fields...");
+    reverseSummary = await enrichMissingLocationFields(baseRecords, {
+      userAgent,
+      email,
+      nominatimUrl
+    });
   }
 
   const stations = dedupeRecords(baseRecords);

@@ -119,11 +119,15 @@ Import Ethiopia fuel stations directly from OpenStreetMap:
 2. Import it into MongoDB:
    `npm run stations:import -- --file=./exports/ethiopia-osm-stations.json`
 
+Optional location enrichment with your own Nominatim instance:
+`npm run stations:export-osm -- --out=./exports/ethiopia-osm-stations.json --reverse --nominatimUrl=http://localhost:8080`
+
 Notes for OSM import:
 - The exporter uses Overpass to fetch `amenity=fuel` features in Ethiopia.
-- It will try to enrich missing `regionName` and `cityName` fields with Nominatim unless you pass `--no-reverse`.
+- Reverse enrichment is opt-in and requires `--nominatimUrl`. This is intended for your own Nominatim instance or another approved geocoder.
 - OSM is community-maintained, so it may still miss some stations or use inconsistent city/woreda names.
 - OpenStreetMap data has attribution and license requirements. See: https://www.openstreetmap.org/copyright
+- The public Nominatim service is not intended for nationwide bulk geocoding. See: https://operations.osmfoundation.org/policies/nominatim/
 
 Supported station import fields:
 - `name`, `address`, `latitude`, `longitude`
