@@ -12,6 +12,7 @@
     "telebirr:flow": "node scripts/telebirr-flow.js",
     "stations:merge": "node scripts/merge-stations.js",
     "stations:backfill-address": "node scripts/backfill-station-addresses.js",
+    "stations:backfill-location": "node scripts/backfill-station-locations.js",
     "owner:bootstrap": "node scripts/bootstrap-owner.js"
   },
   "dependencies": {
