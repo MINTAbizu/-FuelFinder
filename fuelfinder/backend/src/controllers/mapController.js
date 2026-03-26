@@ -224,18 +224,23 @@ function buildStationDisplayAddress(doc, fallback = {}, directory = {}) {
   const cityRecord = resolveDirectoryRecord(doc?.cityId || fallback?.cityId, directory.cities);
   const woredaRecord = resolveDirectoryRecord(doc?.woredaId || fallback?.woredaId, directory.woredas);
   const rawAddress = String(doc?.address || fallback?.address || "").trim();
+  const stationName = String(doc?.name || fallback?.name || "").trim();
   const parts = [];
   const seen = new Set();
 
-  if (!isPlaceholderAddress(rawAddress)) {
+  if (
+    rawAddress &&
+    !isPlaceholderAddress(rawAddress) &&
+    rawAddress.toLowerCase() !== stationName.toLowerCase()
+  ) {
     splitAddressParts(rawAddress).forEach((part) => pushUniqueAddressPart(parts, seen, part));
   }
 
   pushUniqueAddressPart(parts, seen, doc?.landmark || fallback?.landmark);
   pushUniqueAddressPart(parts, seen, doc?.subcity || fallback?.subcity);
   pushUniqueAddressPart(parts, seen, doc?.woreda || fallback?.woreda || woredaRecord?.name);
-  pushUniqueAddressPart(parts, seen, cityRecord?.name);
-  pushUniqueAddressPart(parts, seen, regionRecord?.name);
+  pushUniqueAddressPart(parts, seen, cityRecord?.name || fallback?.cityName);
+  pushUniqueAddressPart(parts, seen, regionRecord?.name || fallback?.regionName);
 
   if (parts.length) {
     return parts.join(", ");
@@ -368,11 +373,18 @@ function buildClientStationPayload(doc, fallback = {}, directory = {}) {
 
 function buildStationInsertPayload(station, sourceId, lat, lon) {
   const incomingAddress = String(station?.address || "").trim();
+  const nextLocationCategories = Array.isArray(station?.locationCategories)
+    ? station.locationCategories
+    : [];
 
   return {
     name: String(station?.name || "Fuel Station").trim(),
     address: incomingAddress || "Address not listed",
     contact: String(station?.contact || "").trim(),
+    subcity: String(station?.subcity || "").trim(),
+    woreda: String(station?.woreda || "").trim(),
+    landmark: String(station?.landmark || "").trim(),
+    locationCategories: nextLocationCategories,
     externalSource: "osm",
     externalSourceId: sourceId,
     fuelStatus: "partial",
@@ -386,6 +398,12 @@ function buildStationSyncPatch(doc, station, sourceId, lat, lon) {
   const nextName = String(station?.name || doc?.name || "Fuel Station").trim();
   const nextContact = String(station?.contact || doc?.contact || "").trim();
   const incomingAddress = String(station?.address || "").trim();
+  const nextSubcity = String(station?.subcity || "").trim();
+  const nextWoreda = String(station?.woreda || "").trim();
+  const nextLandmark = String(station?.landmark || "").trim();
+  const nextLocationCategories = Array.isArray(station?.locationCategories)
+    ? station.locationCategories
+    : [];
   const currentAddress = String(doc?.address || "").trim();
   const currentCoords = Array.isArray(doc?.location?.coordinates) ? doc.location.coordinates : [];
   const currentLon = Number(currentCoords[0]);
@@ -410,6 +428,27 @@ function buildStationSyncPatch(doc, station, sourceId, lat, lon) {
 
   if (nextContact !== String(doc?.contact || "").trim()) {
     patch.contact = nextContact;
+  }
+
+  if (nextSubcity && nextSubcity !== String(doc?.subcity || "").trim()) {
+    patch.subcity = nextSubcity;
+  }
+
+  if (nextWoreda && nextWoreda !== String(doc?.woreda || "").trim()) {
+    patch.woreda = nextWoreda;
+  }
+
+  if (nextLandmark && nextLandmark !== String(doc?.landmark || "").trim()) {
+    patch.landmark = nextLandmark;
+  }
+
+  if (nextLocationCategories.length) {
+    const currentLocationCategories = Array.isArray(doc?.locationCategories) ? doc.locationCategories : [];
+    const currentSerialized = JSON.stringify(currentLocationCategories);
+    const nextSerialized = JSON.stringify(nextLocationCategories);
+    if (currentSerialized !== nextSerialized) {
+      patch.locationCategories = nextLocationCategories;
+    }
   }
 
   if (hasMeaningfulCoordinateChange(currentLat, currentLon, lat, lon)) {

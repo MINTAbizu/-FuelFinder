@@ -92,33 +92,63 @@ function resolveSupportedFuels(tags) {
   };
 }
 
+function normalizeAddressText(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function pushUniqueAddressPart(parts, seen, value) {
+  const text = normalizeAddressText(value);
+  if (!text) return;
+  const key = text.toLowerCase();
+  if (seen.has(key)) return;
+  seen.add(key);
+  parts.push(text);
+}
+
+function pickFirstTag(tags = {}, keys = []) {
+  for (const key of keys) {
+    const value = normalizeAddressText(tags?.[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
 function buildAddress(tags, latitude, longitude) {
-  const house = String(tags["addr:housenumber"] || "").trim();
-  const street = String(tags["addr:street"] || "").trim();
+  const fullAddress = pickFirstTag(tags, ["addr:full", "address"]);
+  if (fullAddress) return fullAddress;
+
+  const house = normalizeAddressText(tags["addr:housenumber"]);
+  const street = normalizeAddressText(tags["addr:street"]);
   const line1 = [house, street].filter(Boolean).join(" ");
 
-  const locality = [
-    tags["addr:neighbourhood"],
-    tags["addr:suburb"],
-    tags["addr:district"],
-    tags["addr:city"],
-    tags["addr:town"],
-    tags["addr:village"],
-    tags["addr:hamlet"],
-    tags["addr:place"]
-  ]
-    .map((item) => String(item || "").trim())
-    .find(Boolean);
+  const district = pickFirstTag(tags, [
+    "addr:neighbourhood",
+    "addr:suburb",
+    "addr:district",
+    "addr:city_district"
+  ]);
+  const city = pickFirstTag(tags, [
+    "addr:city",
+    "addr:town",
+    "addr:village",
+    "addr:hamlet",
+    "addr:place",
+    "is_in:city"
+  ]);
+  const region = pickFirstTag(tags, ["addr:state", "addr:province", "is_in:state", "is_in:region"]);
+  const country = pickFirstTag(tags, ["addr:country", "is_in:country"]);
+  const postcode = normalizeAddressText(tags["addr:postcode"]);
+  const genericArea = pickFirstTag(tags, ["is_in"]);
 
-  const region = [tags["addr:state"], tags["addr:province"], tags["is_in:state"]]
-    .map((item) => String(item || "").trim())
-    .find(Boolean);
-
-  const country = String(tags["addr:country"] || tags["is_in:country"] || "").trim();
-  const postcode = String(tags["addr:postcode"] || "").trim();
-
-  const parts = [line1, locality, region, country, postcode].filter(Boolean);
+  const parts = [];
+  const seen = new Set();
+  [line1, district, city, region, country, postcode].forEach((part) =>
+    pushUniqueAddressPart(parts, seen, part)
+  );
   if (parts.length) return parts.join(", ");
+  if (genericArea) return genericArea;
 
   const lat = Number(latitude);
   const lon = Number(longitude);
@@ -182,6 +212,23 @@ out center tags;
               supportedFuels: resolveSupportedFuels(tags),
               image: "",
               address: buildAddress(tags, latitude, longitude),
+              subcity: pickFirstTag(tags, ["addr:suburb", "addr:neighbourhood"]),
+              woreda: pickFirstTag(tags, ["addr:district", "addr:city_district"]),
+              cityName: pickFirstTag(tags, [
+                "addr:city",
+                "addr:town",
+                "addr:village",
+                "addr:hamlet",
+                "addr:place",
+                "is_in:city"
+              ]),
+              regionName: pickFirstTag(tags, [
+                "addr:state",
+                "addr:province",
+                "is_in:state",
+                "is_in:region"
+              ]),
+              landmark: pickFirstTag(tags, ["operator", "brand"]),
               contact: tags.phone || tags["contact:phone"] || ""
             };
           })
