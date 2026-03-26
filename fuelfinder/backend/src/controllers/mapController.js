@@ -4,6 +4,7 @@ const Station = require("../models/Station");
 const QueueTicket = require("../models/QueueTicket");
 const City = require("../models/City");
 const Region = require("../models/Region");
+const Woreda = require("../models/Woreda");
 const { normalizePaymentDetails } = require("../utils/stationPaymentDetails");
 
 const STATION_SYNC_SELECT =
@@ -164,6 +165,128 @@ function buildRegionDirectoryPayload(region) {
   };
 }
 
+function buildPublicCityPayload(city) {
+  if (!city?._id) return null;
+  return {
+    id: String(city._id),
+    name: String(city.name || ""),
+    slug: String(city.slug || ""),
+    code: String(city.code || ""),
+    regionId: city.regionId ? String(city.regionId) : null
+  };
+}
+
+function buildPublicWoredaPayload(woreda) {
+  if (!woreda?._id) return null;
+  return {
+    id: String(woreda._id),
+    name: String(woreda.name || ""),
+    slug: String(woreda.slug || ""),
+    code: String(woreda.code || ""),
+    category: String(woreda.category || "woreda"),
+    regionId: woreda.regionId ? String(woreda.regionId) : null,
+    cityId: woreda.cityId ? String(woreda.cityId) : null
+  };
+}
+
+function resolveDirectoryRecord(value, directoryMap) {
+  if (value && typeof value === "object" && value._id) return value;
+  const key = String(value || "").trim();
+  if (!key || !directoryMap) return null;
+  return directoryMap.get(key) || null;
+}
+
+function normalizeAddressPart(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function pushUniqueAddressPart(parts, seen, value) {
+  const text = normalizeAddressPart(value);
+  if (!text) return;
+  if (isPlaceholderAddress(text)) return;
+  const key = text.toLowerCase();
+  if (seen.has(key)) return;
+  seen.add(key);
+  parts.push(text);
+}
+
+function splitAddressParts(address) {
+  return String(address || "")
+    .split(",")
+    .map((part) => normalizeAddressPart(part))
+    .filter(Boolean);
+}
+
+function buildStationDisplayAddress(doc, fallback = {}, directory = {}) {
+  const regionRecord = resolveDirectoryRecord(doc?.regionId || fallback?.regionId, directory.regions);
+  const cityRecord = resolveDirectoryRecord(doc?.cityId || fallback?.cityId, directory.cities);
+  const woredaRecord = resolveDirectoryRecord(doc?.woredaId || fallback?.woredaId, directory.woredas);
+  const rawAddress = String(doc?.address || fallback?.address || "").trim();
+  const parts = [];
+  const seen = new Set();
+
+  if (!isPlaceholderAddress(rawAddress)) {
+    splitAddressParts(rawAddress).forEach((part) => pushUniqueAddressPart(parts, seen, part));
+  }
+
+  pushUniqueAddressPart(parts, seen, doc?.landmark || fallback?.landmark);
+  pushUniqueAddressPart(parts, seen, doc?.subcity || fallback?.subcity);
+  pushUniqueAddressPart(parts, seen, doc?.woreda || fallback?.woreda || woredaRecord?.name);
+  pushUniqueAddressPart(parts, seen, cityRecord?.name);
+  pushUniqueAddressPart(parts, seen, regionRecord?.name);
+
+  if (parts.length) {
+    return parts.join(", ");
+  }
+
+  if (rawAddress && !isPlaceholderAddress(rawAddress)) {
+    return rawAddress;
+  }
+
+  return "Address not listed";
+}
+
+async function loadStationDirectoryMaps(stations = []) {
+  const regionIds = new Set();
+  const cityIds = new Set();
+  const woredaIds = new Set();
+
+  (Array.isArray(stations) ? stations : []).forEach((station) => {
+    const regionId = String(station?.regionId || "").trim();
+    const cityId = String(station?.cityId || "").trim();
+    const woredaId = String(station?.woredaId || "").trim();
+    if (regionId && mongoose.isValidObjectId(regionId)) regionIds.add(regionId);
+    if (cityId && mongoose.isValidObjectId(cityId)) cityIds.add(cityId);
+    if (woredaId && mongoose.isValidObjectId(woredaId)) woredaIds.add(woredaId);
+  });
+
+  const [regions, cities, woredas] = await Promise.all([
+    regionIds.size
+      ? Region.find({ _id: { $in: Array.from(regionIds) } })
+          .select("_id name slug code")
+          .lean()
+      : [],
+    cityIds.size
+      ? City.find({ _id: { $in: Array.from(cityIds) } })
+          .select("_id name slug code regionId")
+          .lean()
+      : [],
+    woredaIds.size
+      ? Woreda.find({ _id: { $in: Array.from(woredaIds) } })
+          .select("_id name slug code category regionId cityId")
+          .lean()
+      : []
+  ]);
+
+  return {
+    regions: new Map(regions.map((item) => [String(item._id), item])),
+    cities: new Map(cities.map((item) => [String(item._id), item])),
+    woredas: new Map(woredas.map((item) => [String(item._id), item]))
+  };
+}
+
 function buildCityDirectoryPayload(city, stats = {}, region = null) {
   if (!city?._id) return null;
   const latitude = Number(stats.latitude);
@@ -181,7 +304,7 @@ function buildCityDirectoryPayload(city, stats = {}, region = null) {
   };
 }
 
-function buildClientStationPayload(doc, fallback = {}) {
+function buildClientStationPayload(doc, fallback = {}, directory = {}) {
   const docCoords = Array.isArray(doc?.location?.coordinates) ? doc.location.coordinates : [];
   const docLon = Number(docCoords[0]);
   const docLat = Number(docCoords[1]);
@@ -191,12 +314,17 @@ function buildClientStationPayload(doc, fallback = {}) {
     String(doc?._id || fallback?.stationId || fallback?._id || fallback?.id || "").trim();
   const publicId = stationId || String(fallback?.id || "").trim();
   const distanceMeters = Number(doc?.distanceMeters ?? fallback?.distanceMeters);
+  const regionRecord = resolveDirectoryRecord(doc?.regionId || fallback?.regionId, directory.regions);
+  const cityRecord = resolveDirectoryRecord(doc?.cityId || fallback?.cityId, directory.cities);
+  const woredaRecord = resolveDirectoryRecord(doc?.woredaId || fallback?.woredaId, directory.woredas);
+  const displayAddress = buildStationDisplayAddress(doc, fallback, directory);
 
   return {
     id: publicId,
     stationId,
     name: String(doc?.name || fallback?.name || "Fuel Station"),
-    address: String(doc?.address || fallback?.address || "Address not listed"),
+    address: displayAddress,
+    rawAddress: String(doc?.address || fallback?.address || "Address not listed"),
     contact: String(doc?.contact || fallback?.contact || ""),
     fuel_status: resolveFuelStatusForClient(doc, fallback),
     fuelInventory: {
@@ -212,8 +340,11 @@ function buildClientStationPayload(doc, fallback = {}) {
       supportedFuels: deriveSupportedFuels(doc, fallback),
       paymentDetails: normalizePaymentDetails(doc?.paymentDetails || fallback?.paymentDetails),
       regionId: doc?.regionId ? String(doc.regionId) : null,
+      region: buildRegionDirectoryPayload(regionRecord),
       cityId: doc?.cityId ? String(doc.cityId) : null,
+      city: buildPublicCityPayload(cityRecord),
       woredaId: doc?.woredaId ? String(doc.woredaId) : null,
+      woredaDirectory: buildPublicWoredaPayload(woredaRecord),
       subcity: String(doc?.subcity || fallback?.subcity || ""),
       woreda: String(doc?.woreda || fallback?.woreda || ""),
       landmark: String(doc?.landmark || fallback?.landmark || ""),
@@ -479,11 +610,13 @@ async function queryNearbyStationsFromDatabase(lat, lon, radius, limit = MAX_NEA
     }
   ]);
 
+  const directory = await loadStationDirectoryMaps(stations);
+
   return stations.map((station) =>
     buildClientStationPayload(station, {
       distanceMeters: station.distanceMeters,
       queue_length: station.queue_length
-    })
+    }, directory)
   );
 }
 
@@ -543,10 +676,12 @@ async function queryDirectoryStations(matchQuery, limit = DEFAULT_DIRECTORY_STAT
     }
   ]);
 
+  const directory = await loadStationDirectoryMaps(stations);
+
   return stations.map((station) =>
     buildClientStationPayload(station, {
       queue_length: station.queue_length
-    })
+    }, directory)
   );
 }
 
@@ -725,8 +860,10 @@ exports.getStationDetails = async (req, res) => {
       return res.status(404).json({ message: "Station not found." });
     }
 
+    const directory = await loadStationDirectoryMaps([station]);
+
     return res.json({
-      station: buildClientStationPayload(station)
+      station: buildClientStationPayload(station, {}, directory)
     });
   } catch (_error) {
     return res.status(500).json({ message: "Failed to load station details." });
