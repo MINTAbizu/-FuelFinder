@@ -42,6 +42,8 @@ Wildcard entries such as `https://*.netlify.app` are also supported.
 - `POST /api/queue/leave`
 - `GET /api/queue/station/:stationId`
 - `POST /api/queue/next`
+- `GET /api/map/cities`
+- `GET /api/map/stations`
 
 Queue reservation flow:
 1. `POST /api/queue/reserve` with `stationId`, `requestedBand` (`10-20|20-40|40+`), optional `fuelType`.
@@ -120,6 +122,13 @@ Import Ethiopia fuel stations directly from OpenStreetMap:
    `npm run stations:export-osm -- --out=./exports/ethiopia-osm-stations.json`
 2. Import it into MongoDB:
    `npm run stations:import -- --file=./exports/ethiopia-osm-stations.json`
+
+Important for city browsing:
+- The plain OSM export only guarantees coordinates and basic station metadata.
+- To browse "all stations in a city", station records must have `regionId` and `cityId`.
+- The safest way to get that is either:
+  `npm run stations:export-osm -- --out=./exports/ethiopia-osm-stations.json --reverse --nominatimUrl=http://localhost:8080`
+  and then import it, or import your own JSON that already includes `regionName` and `cityName`.
 
 Optional location enrichment with your own Nominatim instance:
 `npm run stations:export-osm -- --out=./exports/ethiopia-osm-stations.json --reverse --nominatimUrl=http://localhost:8080`

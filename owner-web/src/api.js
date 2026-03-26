@@ -400,6 +400,13 @@ export async function listAdminWoredas(params = {}) {
   return apiRequest(`/admin/woredas${query ? `?${query}` : ""}`, {}, { cacheTtlMs: 1000 * 60 * 10 });
 }
 
+export async function seedEthiopiaLocations(payload = {}) {
+  return apiRequest("/admin/locations/seed-ethiopia", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function createAdminStation(payload) {
   return apiRequest("/admin/stations", {
     method: "POST",

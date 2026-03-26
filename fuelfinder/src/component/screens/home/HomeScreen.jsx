@@ -37,9 +37,11 @@ const SORT_OPTIONS = ["distance", "queue", "name"];
 const HOME_STATIONS_CACHE_KEY = "ff_home_nearby_stations_v1";
 const HOME_STATIONS_CACHE_TTL_MS = 1000 * 60 * 10;
 const HOME_STATIONS_MEMORY_TTL_MS = 1000 * 45;
+const HOME_MANAGER_FUEL_TTL_MS = 1000 * 15;
 const LOCATION_REFRESH_THRESHOLD_DEGREES = 0.01;
 const nearbyStationsMemoryCache = new Map();
 const nearbyStationsInflightRequests = new Map();
+const managerFuelSnapshotCache = new Map();
 
 // Translations are handled by i18next (`src/i18n/locales/*.json`).
 
@@ -241,6 +243,18 @@ function markerColor(status) {
   return "gray";
 }
 
+function isObjectId(value) {
+  return /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
+}
+
+function normalizeManagerFuelStatus(value) {
+  const status = String(value || "").trim().toLowerCase();
+  if (status === "full" || status === "available") return "available";
+  if (status === "partial" || status === "limited") return "limited";
+  if (status === "empty") return "empty";
+  return "";
+}
+
 function getStationIdentity(station) {
   return String(station?.stationId || station?._id || station?.id || "").trim();
 }
@@ -284,6 +298,67 @@ function normalizeRouteStation(station) {
   };
 }
 
+function getCachedManagerFuelSnapshot(stationId) {
+  const key = String(stationId || "").trim();
+  if (!key) return null;
+
+  const entry = managerFuelSnapshotCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    managerFuelSnapshotCache.delete(key);
+    return null;
+  }
+  return entry.snapshot;
+}
+
+function setCachedManagerFuelSnapshot(stationId, snapshot) {
+  const key = String(stationId || "").trim();
+  if (!key || !snapshot) return;
+
+  managerFuelSnapshotCache.set(key, {
+    snapshot,
+    expiresAt: Date.now() + HOME_MANAGER_FUEL_TTL_MS,
+  });
+}
+
+async function fetchStationManagerFuelSnapshot(stationId, { forceRefresh = false } = {}) {
+  const normalizedStationId = String(stationId || "").trim();
+  if (!isObjectId(normalizedStationId)) return null;
+
+  if (!forceRefresh) {
+    const cached = getCachedManagerFuelSnapshot(normalizedStationId);
+    if (cached) return cached;
+  }
+
+  const { data } = await api.get(`/queue/station/${normalizedStationId}/fuel-status`);
+  const snapshot = {
+    stationId: normalizedStationId,
+    fuel_status: normalizeManagerFuelStatus(data?.fuelStatus),
+    fuelInventory: {
+      gasolineLiters: Number(data?.fuelInventory?.gasolineLiters || 0),
+      dieselLiters: Number(data?.fuelInventory?.dieselLiters || 0),
+      otherLiters: Number(data?.fuelInventory?.otherLiters || 0),
+      updatedAt: data?.fuelInventory?.updatedAt || null,
+    },
+  };
+
+  setCachedManagerFuelSnapshot(normalizedStationId, snapshot);
+  return snapshot;
+}
+
+function applyManagerFuelSnapshot(station, snapshot) {
+  if (!snapshot) return station;
+
+  return {
+    ...station,
+    fuel_status: snapshot.fuel_status || String(station?.fuel_status || "").trim(),
+    fuelInventory: {
+      ...(station?.fuelInventory || {}),
+      ...(snapshot?.fuelInventory || {}),
+    },
+  };
+}
+
 export default function HomeScreen({ navigation, route }) {
   const { t } = useLanguage();
 
@@ -324,6 +399,7 @@ export default function HomeScreen({ navigation, route }) {
   const [promotions, setPromotions] = useState([]);
   const [promotionsLoading, setPromotionsLoading] = useState(false);
   const [promotionIndex, setPromotionIndex] = useState(0);
+  const [liveStationSnapshots, setLiveStationSnapshots] = useState({});
   const deferredCityQuery = useDeferredValue(cityQuery);
   const deferredSearchText = useDeferredValue(searchText);
 
@@ -413,9 +489,9 @@ export default function HomeScreen({ navigation, route }) {
       setRouteCoords([]);
       setRouteSummary(null);
       setActiveRouteStationId("");
-       setRouteDestinationStation(null);
-       setPendingRouteStation(null);
-       setRoutingError("");
+      setRouteDestinationStation(null);
+      setPendingRouteStation(null);
+      setRoutingError("");
       await loadCityStations(city);
     },
     [loadCityStations]
@@ -796,7 +872,11 @@ export default function HomeScreen({ navigation, route }) {
     let topStationId = "";
     let topStationScore = Number.NEGATIVE_INFINITY;
 
-    for (const station of stations) {
+    for (const stationEntry of stations) {
+      const station = applyManagerFuelSnapshot(
+        stationEntry,
+        liveStationSnapshots[getStationIdentity(stationEntry)]
+      );
       const stationName = String(station?.name || "").toLowerCase();
       const stationAddress = String(station?.address || "").toLowerCase();
       const stationSubcity = String(station?.subcity || "").toLowerCase();
@@ -869,7 +949,81 @@ export default function HomeScreen({ navigation, route }) {
       ...station,
       isTopPick: getStationIdentity(station) === topStationId,
     }));
-  }, [browseMode, stations, location, mapCenter, deferredSearchText, statusFilter, fuelFilter, sortBy, t]);
+  }, [
+    browseMode,
+    deferredSearchText,
+    fuelFilter,
+    liveStationSnapshots,
+    location,
+    mapCenter,
+    sortBy,
+    stations,
+    statusFilter,
+    t
+  ]);
+
+  const trackedStationIds = useMemo(() => {
+    const nextIds = [];
+    const seen = new Set();
+
+    for (const station of filteredStations) {
+      if (nextIds.length >= 60) break;
+
+      const stationId = getStationIdentity(station);
+      if (!isObjectId(stationId) || seen.has(stationId)) continue;
+
+      seen.add(stationId);
+      nextIds.push(stationId);
+    }
+
+    return nextIds;
+  }, [filteredStations]);
+
+  const trackedStationIdsSignature = useMemo(
+    () => trackedStationIds.join("|"),
+    [trackedStationIds]
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    if (!trackedStationIds.length) {
+      return undefined;
+    }
+
+    const refreshManagerFuelStatuses = async (forceRefresh = false) => {
+      const results = await Promise.allSettled(
+        trackedStationIds.map((stationId) =>
+          fetchStationManagerFuelSnapshot(stationId, { forceRefresh })
+        )
+      );
+
+      if (!active) return;
+
+      const nextSnapshots = {};
+      results.forEach((result) => {
+        if (result.status !== "fulfilled" || !result.value?.stationId) return;
+        nextSnapshots[result.value.stationId] = result.value;
+      });
+
+      if (!Object.keys(nextSnapshots).length) return;
+
+      setLiveStationSnapshots((current) => ({
+        ...current,
+        ...nextSnapshots,
+      }));
+    };
+
+    void refreshManagerFuelStatuses();
+    const intervalId = setInterval(() => {
+      void refreshManagerFuelStatuses(true);
+    }, 15000);
+
+    return () => {
+      active = false;
+      clearInterval(intervalId);
+    };
+  }, [trackedStationIds, trackedStationIdsSignature]);
 
   const onToggleSavedStation = useCallback(
     async (station) => {
