@@ -12,11 +12,23 @@ const ROUTE_ENDPOINTS = [
 
 const NEARBY_STATIONS_CACHE_TTL_MS = 1000 * 45;
 const ROUTE_CACHE_TTL_MS = 1000 * 60 * 5;
+const REVERSE_GEOCODE_CACHE_TTL_MS = 1000 * 60 * 60 * 12;
 const MAX_CACHE_ENTRIES = 200;
+const DEFAULT_NOMINATIM_BASE_URL =
+  String(process.env.NOMINATIM_BASE_URL || "https://nominatim.openstreetmap.org")
+    .trim()
+    .replace(/\/+$/, "");
+const DEFAULT_GEOCODER_USER_AGENT = String(
+  process.env.GEOCODER_USER_AGENT ||
+    "fuelfinder-map-service/1.0 (contact: admin@fuelfinder.local)"
+).trim();
+const DEFAULT_GEOCODER_EMAIL = String(process.env.GEOCODER_EMAIL || "").trim();
 
 const nearbyStationsCache = new Map();
 const routeCache = new Map();
+const reverseGeocodeCache = new Map();
 const nearbyStationsInflightRequests = new Map();
+const reverseGeocodeInflightRequests = new Map();
 
 function getValidCacheEntry(cache, key) {
   const entry = cache.get(key);
@@ -60,6 +72,10 @@ function buildRouteCacheKey(fromLat, fromLon, toLat, toLon) {
     Number(toLat).toFixed(4),
     Number(toLon).toFixed(4)
   ].join(":");
+}
+
+function buildReverseGeocodeCacheKey(lat, lon) {
+  return [Number(lat).toFixed(5), Number(lon).toFixed(5)].join(":");
 }
 
 function parseTagBoolean(value) {
@@ -115,6 +131,18 @@ function pickFirstTag(tags = {}, keys = []) {
   return "";
 }
 
+function normalizePlaceName(value) {
+  const text = normalizeAddressText(value);
+  if (!text) return "";
+
+  const parts = text
+    .split("/")
+    .map((part) => normalizeAddressText(part))
+    .filter(Boolean);
+  const latinPart = parts.find((part) => /[A-Za-z]/.test(part));
+  return latinPart || parts[0] || text;
+}
+
 function buildAddress(tags, latitude, longitude) {
   const fullAddress = pickFirstTag(tags, ["addr:full", "address"]);
   if (fullAddress) return fullAddress;
@@ -157,6 +185,147 @@ function buildAddress(tags, latitude, longitude) {
   }
 
   return "Address not listed";
+}
+
+function buildReverseGeocodeUrl(lat, lon, baseUrl = DEFAULT_NOMINATIM_BASE_URL, email = DEFAULT_GEOCODER_EMAIL) {
+  const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "");
+  if (!normalizedBaseUrl) {
+    throw new Error("nominatimUrl is required.");
+  }
+
+  const emailPart = email ? `&email=${encodeURIComponent(email)}` : "";
+  return (
+    `${normalizedBaseUrl}/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}` +
+    `&lon=${encodeURIComponent(lon)}&zoom=18&addressdetails=1&accept-language=en${emailPart}`
+  );
+}
+
+function formatReverseGeocodeResult(data) {
+  const addressObject = data?.address;
+  if (!addressObject || typeof addressObject !== "object") {
+    const displayName = normalizeAddressText(data?.display_name);
+    return displayName
+      ? {
+          address: displayName,
+          regionName: "",
+          cityName: "",
+          woredaName: "",
+          subcity: "",
+          countryCode: ""
+        }
+      : null;
+  }
+
+  const line1 = [addressObject.house_number, addressObject.road].filter(Boolean).join(" ");
+  const locality =
+    addressObject.neighbourhood ||
+    addressObject.suburb ||
+    addressObject.city_district ||
+    addressObject.county ||
+    addressObject.district ||
+    "";
+  const city =
+    addressObject.city ||
+    addressObject.town ||
+    addressObject.village ||
+    addressObject.municipality ||
+    "";
+  const region = addressObject.state || addressObject.region || "";
+  const country = addressObject.country || "";
+
+  const parts = [];
+  const seen = new Set();
+  [line1, locality, city, region, country].forEach((part) =>
+    pushUniqueAddressPart(parts, seen, part)
+  );
+
+  return {
+    address: parts.join(", ") || normalizeAddressText(data?.display_name),
+    regionName: normalizePlaceName(region),
+    cityName: normalizePlaceName(city),
+    woredaName: normalizePlaceName(
+      addressObject.city_district ||
+        addressObject.county ||
+        addressObject.district ||
+        addressObject.suburb
+    ),
+    subcity: normalizePlaceName(
+      addressObject.suburb ||
+        addressObject.neighbourhood ||
+        addressObject.city_district
+    ),
+    countryCode: normalizeAddressText(addressObject.country_code).toUpperCase()
+  };
+}
+
+async function reverseGeocodeStationLocation(latitude, longitude, options = {}) {
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return null;
+  }
+  if (typeof fetch !== "function") {
+    return null;
+  }
+
+  const baseUrl = String(options.baseUrl || DEFAULT_NOMINATIM_BASE_URL).trim();
+  if (!baseUrl) {
+    return null;
+  }
+
+  const userAgent = String(options.userAgent || DEFAULT_GEOCODER_USER_AGENT).trim();
+  const email = String(options.email || DEFAULT_GEOCODER_EMAIL).trim();
+  const cacheKey = buildReverseGeocodeCacheKey(lat, lon);
+  const cachedResult = getValidCacheEntry(reverseGeocodeCache, cacheKey);
+  if (cachedResult) {
+    return cachedResult;
+  }
+
+  if (reverseGeocodeInflightRequests.has(cacheKey)) {
+    return reverseGeocodeInflightRequests.get(cacheKey);
+  }
+
+  const staleResult = getStaleCacheEntry(reverseGeocodeCache, cacheKey);
+
+  const requestPromise = (async () => {
+    try {
+      const response = await fetch(buildReverseGeocodeUrl(lat, lon, baseUrl, email), {
+        headers: {
+          "User-Agent": userAgent,
+          Accept: "application/json"
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`Reverse geocode failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const result = formatReverseGeocodeResult(data);
+      if (!result?.address) {
+        return staleResult || null;
+      }
+
+      return setCacheEntry(
+        reverseGeocodeCache,
+        cacheKey,
+        result,
+        REVERSE_GEOCODE_CACHE_TTL_MS
+      );
+    } catch (error) {
+      if (staleResult) {
+        return staleResult;
+      }
+      throw error;
+    }
+  })();
+
+  reverseGeocodeInflightRequests.set(cacheKey, requestPromise);
+
+  try {
+    return await requestPromise;
+  } finally {
+    reverseGeocodeInflightRequests.delete(cacheKey);
+  }
 }
 
 async function fetchNearbyFuelStations(lat, lon, radiusMeters = 12000) {
@@ -307,5 +476,6 @@ async function fetchDrivingRoute(fromLat, fromLon, toLat, toLon) {
 
 module.exports = {
   fetchNearbyFuelStations,
-  fetchDrivingRoute
+  fetchDrivingRoute,
+  reverseGeocodeStationLocation
 };

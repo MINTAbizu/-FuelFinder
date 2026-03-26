@@ -1,11 +1,21 @@
 const mongoose = require("mongoose");
-const { fetchNearbyFuelStations, fetchDrivingRoute } = require("../services/mapService");
+const {
+  fetchNearbyFuelStations,
+  fetchDrivingRoute,
+  reverseGeocodeStationLocation
+} = require("../services/mapService");
 const Station = require("../models/Station");
 const QueueTicket = require("../models/QueueTicket");
 const City = require("../models/City");
 const Region = require("../models/Region");
 const Woreda = require("../models/Woreda");
 const { normalizePaymentDetails } = require("../utils/stationPaymentDetails");
+const {
+  asLocationText,
+  ensureRegionByName,
+  ensureCityByName,
+  ensureWoredaByName
+} = require("../utils/locationDirectory");
 
 const STATION_SYNC_SELECT =
   "_id name address contact externalSource externalSourceId fuelStatus fuelInventory paymentDetails isActive location regionId cityId woredaId subcity woreda landmark locationCategories";
@@ -17,6 +27,7 @@ const MAX_NEARBY_RESULTS = 100;
 const DEFAULT_DIRECTORY_LIMIT = 24;
 const DEFAULT_DIRECTORY_STATION_LIMIT = 120;
 const MAX_DIRECTORY_LIMIT = 250;
+const MAX_LIVE_ADDRESS_ENRICHMENTS = 8;
 const PUBLIC_QUEUE_STATUSES = ["waiting", "called"];
 
 const nearbyStationsResponseCache = new Map();
@@ -251,6 +262,184 @@ function buildStationDisplayAddress(doc, fallback = {}, directory = {}) {
   }
 
   return "Address not listed";
+}
+
+function hasWeakStationAddress(station) {
+  const rawAddress = String(station?.address || "").trim();
+  const stationName = String(station?.name || "").trim().toLowerCase();
+  if (!rawAddress) return true;
+  if (isPlaceholderAddress(rawAddress)) return true;
+  return Boolean(stationName) && rawAddress.toLowerCase() === stationName;
+}
+
+function normalizePlaceName(value) {
+  const text = asLocationText(value);
+  if (!text) return "";
+
+  const parts = text
+    .split("/")
+    .map((item) => asLocationText(item))
+    .filter(Boolean);
+  const latinPart = parts.find((item) => /[A-Za-z]/.test(item));
+  return latinPart || parts[0] || text;
+}
+
+function inferRegionCategory(name) {
+  const normalized = normalizePlaceName(name).toLowerCase();
+  return normalized === "addis ababa" || normalized === "dire dawa"
+    ? "chartered_city"
+    : "regional_state";
+}
+
+function inferWoredaCategory(value) {
+  const normalized = normalizePlaceName(value).toLowerCase();
+  if (!normalized) return "";
+  if (normalized.includes("district") || normalized.includes("kebele")) return "district";
+  if (
+    normalized.includes("subcity") ||
+    ["arada", "bole", "yeka", "kirkos", "lideta", "gullele", "akaky kaliti"].includes(normalized)
+  ) {
+    return "subcity";
+  }
+  return "woreda";
+}
+
+async function resolveDirectoryLocationFromGeocode(geo) {
+  const regionName = normalizePlaceName(geo?.regionName);
+  const cityName = normalizePlaceName(geo?.cityName);
+  const woredaName = normalizePlaceName(geo?.woredaName);
+
+  if (!regionName || !cityName) {
+    return {
+      regionId: null,
+      cityId: null,
+      woredaId: null,
+      woredaName
+    };
+  }
+
+  const region = await ensureRegionByName(regionName, {
+    category: inferRegionCategory(regionName)
+  });
+
+  const city = await ensureCityByName({
+    name: cityName,
+    regionId: region._id
+  });
+
+  let woredaId = null;
+  let resolvedWoredaName = woredaName;
+  if (woredaName) {
+    const woreda = await ensureWoredaByName({
+      name: woredaName,
+      regionId: region._id,
+      cityId: city._id,
+      category: inferWoredaCategory(woredaName)
+    });
+    woredaId = String(woreda._id);
+    resolvedWoredaName = woreda.name;
+  }
+
+  return {
+    regionId: String(region._id),
+    cityId: String(city._id),
+    woredaId,
+    woredaName: resolvedWoredaName
+  };
+}
+
+function buildStationAddressPatchFromGeocode(station, geo, location = {}) {
+  const patch = {};
+  const nextAddress = asLocationText(geo?.address);
+  const nextSubcity = normalizePlaceName(geo?.subcity);
+  const nextWoreda = normalizePlaceName(location?.woredaName || geo?.woredaName);
+  const currentAddress = String(station?.address || "").trim();
+
+  if (
+    nextAddress &&
+    !isPlaceholderAddress(nextAddress) &&
+    (hasWeakStationAddress(station) || currentAddress !== nextAddress)
+  ) {
+    patch.address = nextAddress;
+  }
+
+  if (nextSubcity && nextSubcity !== asLocationText(station?.subcity)) {
+    patch.subcity = nextSubcity;
+  }
+
+  if (nextWoreda && nextWoreda !== asLocationText(station?.woreda)) {
+    patch.woreda = nextWoreda;
+  }
+
+  if (location?.regionId && String(station?.regionId || "") !== location.regionId) {
+    patch.regionId = location.regionId;
+  }
+
+  if (location?.cityId && String(station?.cityId || "") !== location.cityId) {
+    patch.cityId = location.cityId;
+  }
+
+  if (location?.woredaId && String(station?.woredaId || "") !== location.woredaId) {
+    patch.woredaId = location.woredaId;
+  }
+
+  return Object.keys(patch).length ? patch : null;
+}
+
+async function enrichStationsWithLiveAddress(stations = []) {
+  const stationList = Array.isArray(stations) ? stations : [];
+  const candidates = stationList
+    .filter((station) => {
+      if (!station?._id) return false;
+      if (!hasWeakStationAddress(station)) return false;
+      const coords = Array.isArray(station?.location?.coordinates) ? station.location.coordinates : [];
+      const lon = Number(coords[0]);
+      const lat = Number(coords[1]);
+      return Number.isFinite(lat) && Number.isFinite(lon);
+    })
+    .slice(0, MAX_LIVE_ADDRESS_ENRICHMENTS);
+
+  if (!candidates.length) {
+    return stationList;
+  }
+
+  const updatedStations = new Map();
+  const operations = [];
+
+  for (const station of candidates) {
+    const coords = Array.isArray(station?.location?.coordinates) ? station.location.coordinates : [];
+    const lon = Number(coords[0]);
+    const lat = Number(coords[1]);
+
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const geo = await reverseGeocodeStationLocation(lat, lon);
+      if (!geo || (geo.countryCode && geo.countryCode !== "ET")) {
+        continue;
+      }
+
+      // eslint-disable-next-line no-await-in-loop
+      const location = await resolveDirectoryLocationFromGeocode(geo);
+      const patch = buildStationAddressPatchFromGeocode(station, geo, location);
+      if (!patch) continue;
+
+      operations.push({
+        updateOne: {
+          filter: { _id: station._id },
+          update: { $set: patch }
+        }
+      });
+      updatedStations.set(String(station._id), { ...station, ...patch });
+    } catch (_error) {
+      // Keep the public station response working even if reverse geocoding fails.
+    }
+  }
+
+  if (operations.length) {
+    await Station.bulkWrite(operations, { ordered: false });
+  }
+
+  return stationList.map((station) => updatedStations.get(String(station?._id || "")) || station);
 }
 
 async function loadStationDirectoryMaps(stations = []) {
