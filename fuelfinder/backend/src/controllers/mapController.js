@@ -64,7 +64,14 @@ function buildNearbyResponseCacheKey(lat, lon, radius) {
 function getCachedNearbyResponse(cacheKey) {
   const entry = nearbyStationsResponseCache.get(cacheKey);
   if (!entry) return null;
-  if (entry.expiresAt <= Date.now()) return null;
+  if (entry.expiresAt <= Date.now()) {
+    nearbyStationsResponseCache.delete(cacheKey);
+    return null;
+  }
+  if (Array.isArray(entry.value) && entry.value.some((station) => hasWeakStationAddress(station))) {
+    nearbyStationsResponseCache.delete(cacheKey);
+    return null;
+  }
   return entry.value;
 }
 
@@ -838,9 +845,10 @@ async function queryNearbyStationsFromDatabase(lat, lon, radius, limit = MAX_NEA
     }
   ]);
 
-  const directory = await loadStationDirectoryMaps(stations);
+  const enrichedStations = await enrichStationsWithLiveAddress(stations);
+  const directory = await loadStationDirectoryMaps(enrichedStations);
 
-  return stations.map((station) =>
+  return enrichedStations.map((station) =>
     buildClientStationPayload(station, {
       distanceMeters: station.distanceMeters,
       queue_length: station.queue_length
@@ -904,9 +912,10 @@ async function queryDirectoryStations(matchQuery, limit = DEFAULT_DIRECTORY_STAT
     }
   ]);
 
-  const directory = await loadStationDirectoryMaps(stations);
+  const enrichedStations = await enrichStationsWithLiveAddress(stations);
+  const directory = await loadStationDirectoryMaps(enrichedStations);
 
-  return stations.map((station) =>
+  return enrichedStations.map((station) =>
     buildClientStationPayload(station, {
       queue_length: station.queue_length
     }, directory)
@@ -1088,10 +1097,11 @@ exports.getStationDetails = async (req, res) => {
       return res.status(404).json({ message: "Station not found." });
     }
 
-    const directory = await loadStationDirectoryMaps([station]);
+    const [enrichedStation] = await enrichStationsWithLiveAddress([station]);
+    const directory = await loadStationDirectoryMaps([enrichedStation]);
 
     return res.json({
-      station: buildClientStationPayload(station, {}, directory)
+      station: buildClientStationPayload(enrichedStation, {}, directory)
     });
   } catch (_error) {
     return res.status(500).json({ message: "Failed to load station details." });

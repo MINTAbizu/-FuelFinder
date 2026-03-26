@@ -34,7 +34,7 @@ const DEFAULT_REGION = {
 const STATUS_FILTERS = ["all", "available", "limited", "empty"];
 const FUEL_FILTERS = ["any", "gasoline", "diesel", "other"];
 const SORT_OPTIONS = ["distance", "queue", "name"];
-const HOME_STATIONS_CACHE_KEY = "ff_home_nearby_stations_v1";
+const HOME_STATIONS_CACHE_KEY = "ff_home_nearby_stations_v2";
 const HOME_STATIONS_CACHE_TTL_MS = 1000 * 60 * 10;
 const HOME_STATIONS_MEMORY_TTL_MS = 1000 * 45;
 const HOME_MANAGER_FUEL_TTL_MS = 1000 * 15;
@@ -53,10 +53,25 @@ function buildNearbyStationsCacheKey(basePoint, radiusMeters = 12000) {
   return [lat.toFixed(3), lon.toFixed(3), Math.round(Number(radiusMeters) || 0)].join(":");
 }
 
+function hasWeakStationAddress(station) {
+  const address = String(station?.address || "").trim().toLowerCase();
+  if (!address) return true;
+  if (address === "address not listed") return true;
+  return address.startsWith("approx location");
+}
+
+function hasWeakStationAddresses(stations) {
+  return Array.isArray(stations) && stations.some((station) => hasWeakStationAddress(station));
+}
+
 function getNearbyStationsFromMemory(cacheKey) {
   const entry = nearbyStationsMemoryCache.get(cacheKey);
   if (!entry) return null;
   if (entry.expiresAt <= Date.now()) {
+    nearbyStationsMemoryCache.delete(cacheKey);
+    return null;
+  }
+  if (hasWeakStationAddresses(entry.stations)) {
     nearbyStationsMemoryCache.delete(cacheKey);
     return null;
   }
@@ -83,6 +98,9 @@ async function readCachedNearbyStations() {
     }
 
     if (!Array.isArray(parsed.stations)) {
+      return null;
+    }
+    if (hasWeakStationAddresses(parsed.stations)) {
       return null;
     }
 
