@@ -269,6 +269,27 @@ function deriveFuelStatusFromInventory(inventory) {
   return "full";
 }
 
+function hasManagedFuelInventory(inventory) {
+  const gasoline = Number(inventory?.gasolineLiters || 0);
+  const diesel = Number(inventory?.dieselLiters || 0);
+  const other = Number(inventory?.otherLiters || 0);
+  return Boolean(inventory?.updatedAt) || gasoline > 0 || diesel > 0 || other > 0;
+}
+
+function resolveStationFuelStatus(station = {}) {
+  const inventory = station?.fuelInventory || {};
+  if (hasManagedFuelInventory(inventory)) {
+    return deriveFuelStatusFromInventory(inventory);
+  }
+
+  const storedStatus = String(station?.fuelStatus || "").trim().toLowerCase();
+  if (storedStatus === "full" || storedStatus === "partial" || storedStatus === "empty") {
+    return storedStatus;
+  }
+
+  return deriveFuelStatusFromInventory(inventory);
+}
+
 function getWaitingExpiresAt() {
   const minutes = Number.isFinite(WAITING_WINDOW_MINUTES) && WAITING_WINDOW_MINUTES > 0
     ? WAITING_WINDOW_MINUTES
@@ -284,7 +305,7 @@ async function getStationFuelSnapshot(stationId) {
   const inventory = station.fuelInventory || {};
   return {
     stationId: String(station._id),
-    fuelStatus: station.fuelStatus || deriveFuelStatusFromInventory(inventory),
+    fuelStatus: resolveStationFuelStatus(station),
     fuelInventory: {
       gasolineLiters: Number(inventory.gasolineLiters || 0),
       dieselLiters: Number(inventory.dieselLiters || 0),

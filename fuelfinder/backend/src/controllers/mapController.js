@@ -84,6 +84,32 @@ function mapFuelStatusForClient(value) {
   return "empty";
 }
 
+function deriveFuelStatusFromInventory(inventory) {
+  const gasoline = Number(inventory?.gasolineLiters || 0);
+  const diesel = Number(inventory?.dieselLiters || 0);
+  const other = Number(inventory?.otherLiters || 0);
+  const total = gasoline + diesel + other;
+  if (total <= 0) return "empty";
+  if (total <= 300) return "partial";
+  return "full";
+}
+
+function hasManagedFuelInventory(inventory) {
+  const gasoline = Number(inventory?.gasolineLiters || 0);
+  const diesel = Number(inventory?.dieselLiters || 0);
+  const other = Number(inventory?.otherLiters || 0);
+  return Boolean(inventory?.updatedAt) || gasoline > 0 || diesel > 0 || other > 0;
+}
+
+function resolveFuelStatusForClient(doc, fallback = {}) {
+  const inventory = doc?.fuelInventory || fallback?.fuelInventory || {};
+  if (doc?._id && hasManagedFuelInventory(inventory)) {
+    return mapFuelStatusForClient(deriveFuelStatusFromInventory(inventory));
+  }
+
+  return mapFuelStatusForClient(doc?.fuelStatus || fallback?.fuel_status || "partial");
+}
+
 function hasMeaningfulCoordinateChange(currentLat, currentLon, nextLat, nextLon) {
   if (!Number.isFinite(currentLat) || !Number.isFinite(currentLon)) return true;
   return Math.abs(currentLat - nextLat) > 0.00001 || Math.abs(currentLon - nextLon) > 0.00001;
@@ -172,7 +198,7 @@ function buildClientStationPayload(doc, fallback = {}) {
     name: String(doc?.name || fallback?.name || "Fuel Station"),
     address: String(doc?.address || fallback?.address || "Address not listed"),
     contact: String(doc?.contact || fallback?.contact || ""),
-    fuel_status: mapFuelStatusForClient(doc?.fuelStatus || fallback?.fuel_status || "partial"),
+    fuel_status: resolveFuelStatusForClient(doc, fallback),
     fuelInventory: {
       gasolineLiters: Number(
         doc?.fuelInventory?.gasolineLiters || fallback?.fuelInventory?.gasolineLiters || 0

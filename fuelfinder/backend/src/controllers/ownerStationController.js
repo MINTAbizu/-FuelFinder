@@ -10,6 +10,37 @@ const {
   isAssignedStationOnlyRole
 } = require("../utils/stationScope");
 
+function deriveFuelStatusFromInventory(inventory) {
+  const gasoline = Number(inventory?.gasolineLiters || 0);
+  const diesel = Number(inventory?.dieselLiters || 0);
+  const other = Number(inventory?.otherLiters || 0);
+  const total = gasoline + diesel + other;
+  if (total <= 0) return "empty";
+  if (total <= 300) return "partial";
+  return "full";
+}
+
+function hasManagedFuelInventory(inventory) {
+  const gasoline = Number(inventory?.gasolineLiters || 0);
+  const diesel = Number(inventory?.dieselLiters || 0);
+  const other = Number(inventory?.otherLiters || 0);
+  return Boolean(inventory?.updatedAt) || gasoline > 0 || diesel > 0 || other > 0;
+}
+
+function resolveStationFuelStatus(station = {}) {
+  const inventory = station?.fuelInventory || {};
+  if (hasManagedFuelInventory(inventory)) {
+    return deriveFuelStatusFromInventory(inventory);
+  }
+
+  const storedStatus = String(station?.fuelStatus || "").trim().toLowerCase();
+  if (storedStatus === "full" || storedStatus === "partial" || storedStatus === "empty") {
+    return storedStatus;
+  }
+
+  return deriveFuelStatusFromInventory(inventory);
+}
+
 function buildStationResponse(station) {
   const coords = Array.isArray(station.location?.coordinates) ? station.location.coordinates : [];
   const fuelInventory = station.fuelInventory || {};
@@ -18,7 +49,7 @@ function buildStationResponse(station) {
     name: station.name || "",
     address: station.address || "",
     contact: station.contact || "",
-    fuelStatus: station.fuelStatus || "partial",
+    fuelStatus: resolveStationFuelStatus(station),
     fuelInventory: {
       gasolineLiters: Number(fuelInventory.gasolineLiters || 0),
       dieselLiters: Number(fuelInventory.dieselLiters || 0),

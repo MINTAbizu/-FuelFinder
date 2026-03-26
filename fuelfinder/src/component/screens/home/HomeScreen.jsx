@@ -986,14 +986,18 @@ export default function HomeScreen({ navigation, route }) {
 
   useEffect(() => {
     let active = true;
+    const stationIds = trackedStationIdsSignature
+      .split("|")
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
 
-    if (!trackedStationIds.length) {
+    if (!stationIds.length) {
       return undefined;
     }
 
     const refreshManagerFuelStatuses = async (forceRefresh = false) => {
       const results = await Promise.allSettled(
-        trackedStationIds.map((stationId) =>
+        stationIds.map((stationId) =>
           fetchStationManagerFuelSnapshot(stationId, { forceRefresh })
         )
       );
@@ -1023,7 +1027,7 @@ export default function HomeScreen({ navigation, route }) {
       active = false;
       clearInterval(intervalId);
     };
-  }, [trackedStationIds, trackedStationIdsSignature]);
+  }, [trackedStationIdsSignature]);
 
   const onToggleSavedStation = useCallback(
     async (station) => {
