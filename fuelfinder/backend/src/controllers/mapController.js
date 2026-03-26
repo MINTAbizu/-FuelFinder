@@ -27,7 +27,7 @@ const MAX_NEARBY_RESULTS = 100;
 const DEFAULT_DIRECTORY_LIMIT = 24;
 const DEFAULT_DIRECTORY_STATION_LIMIT = 120;
 const MAX_DIRECTORY_LIMIT = 250;
-const MAX_LIVE_ADDRESS_ENRICHMENTS = 8;
+const MAX_LIVE_ADDRESS_ENRICHMENTS = 20;
 const PUBLIC_QUEUE_STATUSES = ["waiting", "called"];
 
 const nearbyStationsResponseCache = new Map();
