@@ -1438,6 +1438,7 @@ exports.verifyCheckIn = async (req, res) => {
 
     let qrPayload = null;
     let ticketFilter = null;
+    let proofFailureMessage = "";
     if (ticketOrReservationId) {
       ticketFilter = {
         _id: ticketOrReservationId,
@@ -1450,8 +1451,18 @@ exports.verifyCheckIn = async (req, res) => {
       };
     } else {
       qrPayload = verifyCheckInQrToken(qrToken);
-      if (!qrPayload || !isObjectId(qrPayload.ticketId)) {
-        return res.status(401).json({ message: "Invalid OTP/QR check-in proof." });
+      if (!qrPayload) {
+        return res.status(401).json({
+          message:
+            "QR check-in proof is invalid or expired. Ask the customer to open Check-In again and show the latest QR or OTP.",
+          reason: "invalid_or_expired_qr"
+        });
+      }
+      if (!isObjectId(qrPayload.ticketId)) {
+        return res.status(401).json({
+          message: "QR check-in proof is malformed. Ask the customer to generate a fresh QR or OTP.",
+          reason: "malformed_qr"
+        });
       }
       ticketFilter = {
         _id: qrPayload.ticketId,
@@ -1501,12 +1512,15 @@ exports.verifyCheckIn = async (req, res) => {
     let verified = false;
     if (qrToken) {
       const payload = qrPayload || verifyCheckInQrToken(qrToken);
-      if (
-        payload &&
-        String(payload.ticketId) === String(ticket._id) &&
-        String(payload.stationId) === String(ticket.stationId) &&
-        String(payload.nonce) === String(ticket.checkInQrNonce || "")
-      ) {
+      if (!payload) {
+        proofFailureMessage =
+          "QR check-in proof is invalid or expired. Ask the customer to open Check-In again and show the latest QR or OTP.";
+      } else if (String(payload.ticketId) !== String(ticket._id) || String(payload.stationId) !== String(ticket.stationId)) {
+        proofFailureMessage = "This QR belongs to a different reservation or station. Please scan the current check-in QR.";
+      } else if (String(payload.nonce) !== String(ticket.checkInQrNonce || "")) {
+        proofFailureMessage =
+          "This QR is no longer active. The customer probably restarted check-in. Ask for the latest QR or OTP.";
+      } else {
         verified = true;
       }
     }
@@ -1521,13 +1535,19 @@ exports.verifyCheckIn = async (req, res) => {
       ) {
         verified = true;
       } else {
+        if (!proofFailureMessage) {
+          proofFailureMessage =
+            "OTP does not match the active check-in session. Ask the customer to restart check-in or use the latest QR.";
+        }
         ticket.checkInOtpAttempts = Number(ticket.checkInOtpAttempts || 0) + 1;
         await ticket.save();
       }
     }
 
     if (!verified) {
-      return res.status(401).json({ message: "Invalid OTP/QR check-in proof." });
+      return res.status(401).json({
+        message: proofFailureMessage || "Invalid OTP/QR check-in proof."
+      });
     }
 
     const verifiedAt = new Date();
@@ -1604,8 +1624,16 @@ exports.validateReservationIdForStaff = async (req, res) => {
       ticket = await QueueTicket.findOne({ publicTicketCode: reservationCode }).lean();
     } else {
       const qrPayload = verifyCheckInQrToken(qrToken);
-      if (!qrPayload || !isObjectId(qrPayload.ticketId)) {
-        return res.status(401).json({ message: "Invalid QR token." });
+      if (!qrPayload) {
+        return res.status(401).json({
+          message:
+            "QR check-in proof is invalid or expired. Ask the customer to open Check-In again and show the latest QR or OTP."
+        });
+      }
+      if (!isObjectId(qrPayload.ticketId)) {
+        return res.status(401).json({
+          message: "QR check-in proof is malformed. Ask the customer to generate a fresh QR or OTP."
+        });
       }
       ticket = await QueueTicket.findById(qrPayload.ticketId).lean();
     }
