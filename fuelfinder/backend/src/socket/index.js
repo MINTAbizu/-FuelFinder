@@ -5,6 +5,10 @@ const { createCorsOriginHandler } = require("../config/corsOrigins");
 
 let io = null;
 
+function userRoom(userId) {
+  return `user:${String(userId || "").trim()}`;
+}
+
 function initSocket(server) {
   const isProduction = process.env.NODE_ENV === "production";
   io = new Server(server, {
@@ -50,6 +54,11 @@ function initSocket(server) {
   });
 
   io.on("connection", (socket) => {
+    const socketUserId = String(socket.data?.user?.id || "").trim();
+    if (socketUserId) {
+      socket.join(userRoom(socketUserId));
+    }
+
     socket.on("join_station_room", (stationId, ack) => {
       const stationValue = String(stationId || "").trim();
       if (!stationValue) {
@@ -94,4 +103,4 @@ function getIO() {
   return io;
 }
 
-module.exports = { initSocket, getIO };
+module.exports = { initSocket, getIO, userRoom };

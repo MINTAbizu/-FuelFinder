@@ -113,3 +113,47 @@ export function subscribeStationRealtime({
   };
 }
 
+export function subscribeQueueTurnAlerts({
+  token,
+  onQueueTurnAlert,
+  onConnectionState,
+  onError,
+}) {
+  const sock = getSocket(token);
+  if (!sock) {
+    return () => {};
+  }
+
+  const handleConnect = () => {
+    if (typeof onConnectionState === "function") onConnectionState(true);
+  };
+  const handleDisconnect = () => {
+    if (typeof onConnectionState === "function") onConnectionState(false);
+  };
+  const handleQueueTurnAlert = (payload) => {
+    if (typeof onQueueTurnAlert === "function") onQueueTurnAlert(payload);
+  };
+  const handleConnectError = (err) => {
+    if (typeof onError === "function") {
+      onError(err?.message || "Realtime connection failed.");
+    }
+  };
+
+  sock.on("connect", handleConnect);
+  sock.on("disconnect", handleDisconnect);
+  sock.on("queue_turn_alert", handleQueueTurnAlert);
+  sock.on("connect_error", handleConnectError);
+
+  if (sock.connected) {
+    handleConnect();
+  } else if (!sock.active) {
+    sock.connect();
+  }
+
+  return () => {
+    sock.off("connect", handleConnect);
+    sock.off("disconnect", handleDisconnect);
+    sock.off("queue_turn_alert", handleQueueTurnAlert);
+    sock.off("connect_error", handleConnectError);
+  };
+}

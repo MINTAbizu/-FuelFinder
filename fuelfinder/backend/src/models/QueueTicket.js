@@ -62,6 +62,16 @@ const queueTicketSchema = new mongoose.Schema(
       lon: { type: Number },
       accuracy: { type: Number }
     },
+    calledNotificationStatus: {
+      type: String,
+      enum: ["pending", "sent", "failed", "skipped"],
+      default: "pending",
+      index: true
+    },
+    calledNotificationChannel: { type: String, default: "" },
+    calledNotificationSentAt: { type: Date, default: null },
+    calledNotificationLastAttemptAt: { type: Date, default: null },
+    calledNotificationError: { type: String, default: "" },
     verifiedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     joinedAt: { type: Date, default: Date.now, index: true },
     paymentExpiresAt: { type: Date, index: true },

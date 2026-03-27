@@ -6,6 +6,7 @@ import * as WebBrowser from "expo-web-browser";
 import QRCode from "react-native-qrcode-svg";
 import { useLanguage } from "../../context/LanguageContext";
 import { useAuth } from "../../context/AuthContext";
+import { storeQueueTurnAlert } from "../../services/fuelAlertService";
 import {
   getMyQueueTicket,
   getPublicStationDetails,
@@ -243,6 +244,7 @@ export default function StationDetails({ navigation, route }) {
   const [copiedField, setCopiedField] = useState("");
   const pollRef = useRef(null);
   const copyTimerRef = useRef(null);
+  const queueTurnAlertKeyRef = useRef("");
 
   const stationId = useMemo(
     () => String(station?.stationId || station?._id || station?.id || "").trim(),
@@ -529,6 +531,61 @@ export default function StationDetails({ navigation, route }) {
       clearInterval(id);
     };
   }, [queueEnabled, stationId]);
+
+  useEffect(() => {
+    const ticketId = String(myTicket?.ticketId || "").trim();
+    const ticketStatus = String(myTicket?.status || "").trim().toLowerCase();
+    if (!ticketId || ticketStatus !== "called") {
+      return;
+    }
+
+    const alertKey = `queue_turn_${ticketId}`;
+    if (queueTurnAlertKeyRef.current === alertKey) {
+      return;
+    }
+    queueTurnAlertKeyRef.current = alertKey;
+
+    const stationName =
+      String(detail?.name || stationMeta?.name || station?.name || t.stationFallback).trim() || "Fuel Station";
+    const reservationCode = String(myTicket?.reservationCode || "").trim();
+    const title = tr("stationDetails.queueTurnAlertTitle", { defaultValue: "It's your turn" });
+    const message = `FuelFinder: It's your turn at ${stationName}.${
+      reservationCode ? ` Ticket ${reservationCode}.` : ""
+    } Please go to the station now.`;
+
+    void (async () => {
+      const event = await storeQueueTurnAlert(
+        {
+          alertId: alertKey,
+          ticketId,
+          reservationCode,
+          stationId,
+          stationName,
+          address: String(detail?.address || stationMeta?.address || station?.address || "").trim(),
+          title,
+          message,
+        },
+        { showSystemNotification: false }
+      );
+
+      if (event?.created) {
+        Alert.alert(event.title || title, event.body || message);
+      }
+    })();
+  }, [
+    detail?.address,
+    detail?.name,
+    myTicket?.reservationCode,
+    myTicket?.status,
+    myTicket?.ticketId,
+    station?.address,
+    station?.name,
+    stationId,
+    stationMeta?.address,
+    stationMeta?.name,
+    t.stationFallback,
+    tr,
+  ]);
 
   const refreshMyTicket = useCallback(async () => {
     if (!queueEnabled) return;

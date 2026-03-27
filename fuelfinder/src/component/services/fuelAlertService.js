@@ -54,6 +54,10 @@ function toPreferredFuel(value) {
   return "gasoline";
 }
 
+function trimText(value) {
+  return String(value || "").trim();
+}
+
 function haversineDistanceKm(from, to) {
   if (!from || !to) return null;
   const lat1 = Number(from.latitude);
@@ -362,6 +366,91 @@ async function loadFuelAlertLedger() {
 
 async function saveFuelAlertLedger(ledger) {
   await AsyncStorage.setItem(ALERT_LEDGER_KEY, JSON.stringify(ledger || {}));
+}
+
+function buildQueueTurnAlertId(payload) {
+  const explicitId = trimText(payload?.alertId);
+  if (explicitId) return explicitId;
+
+  const ticketId = trimText(payload?.ticketId || payload?.reservationId);
+  if (ticketId) return `queue_turn_${ticketId}`;
+
+  const reservationCode = trimText(payload?.reservationCode);
+  if (reservationCode) return `queue_turn_${reservationCode}`;
+
+  const stationId = trimText(payload?.stationId);
+  return stationId ? `queue_turn_${stationId}` : `queue_turn_${Date.now()}`;
+}
+
+function buildQueueTurnAlertBody(payload) {
+  const serverMessage = trimText(payload?.message || payload?.body);
+  if (serverMessage) return serverMessage;
+
+  const stationName = trimText(payload?.stationName) || "your station";
+  const reservationCode = trimText(payload?.reservationCode);
+  const callWindowMinutes = Number(payload?.callWindowMinutes || 0);
+  const codeText = reservationCode ? ` Ticket ${reservationCode}.` : "";
+  const windowText =
+    Number.isFinite(callWindowMinutes) && callWindowMinutes > 0
+      ? ` Please arrive within ${callWindowMinutes} minutes.`
+      : " Please arrive as soon as possible.";
+
+  return `FuelFinder: It's your turn at ${stationName}.${codeText}${windowText}`;
+}
+
+export async function storeQueueTurnAlert(payload, options = {}) {
+  const alertId = buildQueueTurnAlertId(payload);
+  const history = await loadFuelAlertHistory();
+  const existing = history.find((item) => String(item?.id || "").trim() === alertId);
+  if (existing) {
+    return { ...existing, created: false };
+  }
+
+  const callWindowMinutes = Number(payload?.callWindowMinutes || 0);
+  const queueSummary =
+    Number.isFinite(callWindowMinutes) && callWindowMinutes > 0
+      ? `Arrive within ${callWindowMinutes} minutes.`
+      : "Please go to the station now.";
+  const event = {
+    id: alertId,
+    type: "queue_turn_called",
+    title: trimText(payload?.title) || "It's your turn",
+    body: buildQueueTurnAlertBody(payload),
+    stationId: trimText(payload?.stationId),
+    stationName: trimText(payload?.stationName) || "Fuel Station",
+    address: trimText(payload?.address),
+    reservationCode: trimText(payload?.reservationCode),
+    ticketId: trimText(payload?.ticketId || payload?.reservationId),
+    queueSummary,
+    triggeredAt: trimText(payload?.sentAt) || new Date().toISOString(),
+    readAt: null,
+  };
+
+  await saveFuelAlertHistory([event, ...history]);
+
+  if (options.showSystemNotification !== false) {
+    await configureFuelAlertNotificationsAsync();
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: event.title,
+          body: event.body,
+          sound: "default",
+          data: {
+            type: event.type,
+            stationId: event.stationId,
+            ticketId: event.ticketId,
+            reservationCode: event.reservationCode,
+          },
+        },
+        trigger: null,
+      });
+    } catch (_error) {
+      // Keep the alert stored in-app even if the OS notification cannot be shown.
+    }
+  }
+
+  return { ...event, created: true };
 }
 
 export async function evaluatePreferredFuelAlert(currentLocation) {

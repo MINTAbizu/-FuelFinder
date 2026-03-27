@@ -91,6 +91,11 @@ export async function getMyQueueTicket(stationId) {
   }
 }
 
+export async function getMyActiveTickets() {
+  const { data } = await api.get("/queue/me");
+  return Array.isArray(data?.tickets) ? data.tickets : [];
+}
+
 export async function leaveQueue(ticketId) {
   try {
     const { data } = await api.post("/queue/leave", { ticketId });

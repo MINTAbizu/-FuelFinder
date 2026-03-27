@@ -30,6 +30,7 @@ function formatAlertTime(value) {
 function formatFuelLabel(value) {
   if (value === "diesel") return "Diesel";
   if (value === "electric") return "Electric";
+  if (value === "other") return "Other";
   return "Gasoline";
 }
 
@@ -174,7 +175,7 @@ export default function AlertsScreen({ navigation }) {
           <Text style={styles.title}>{t("alerts")}</Text>
           <Text style={styles.subtitle}>
             {t("alertsInboxSubtitle", {
-              defaultValue: "Preferred-fuel alerts appear here with live station details while you travel.",
+              defaultValue: "Fuel and queue alerts appear here with live station details when something needs your attention.",
             })}
           </Text>
         </View>
@@ -233,6 +234,11 @@ export default function AlertsScreen({ navigation }) {
             </View>
 
             <View style={styles.detailStack}>
+              {alert.reservationCode ? (
+                <Text style={styles.detailText}>
+                  {t("stationDetails.reservationCodeLabel", { defaultValue: "Reservation Code" })}: {alert.reservationCode}
+                </Text>
+              ) : null}
               {alert.availabilityLabel ? (
                 <Text style={styles.detailText}>
                   {t("alertsAvailabilityLabel", { defaultValue: "Availability" })}: {alert.availabilityLabel}

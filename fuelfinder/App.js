@@ -24,6 +24,7 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import FuelAlertMonitor from "./src/component/alerts/FuelAlertMonitor";
+import QueueTurnAlertMonitor from "./src/component/alerts/QueueTurnAlertMonitor";
 import HomeScreen from "./src/component/screens/home/HomeScreen";
 import StationDetails from "./src/component/screens/home/StationDetails";
 import MapScreen from "./src/component/screens/map/MapScreen";
@@ -2366,6 +2367,7 @@ function AppNavigator() {
         <OfflineStatusBanner />
         {isAuthenticated ? <AppTabs /> : <AuthStack />}
         <FuelAlertMonitor enabled={isAuthenticated && !requiresBiometricUnlock} />
+        <QueueTurnAlertMonitor enabled={isAuthenticated && !requiresBiometricUnlock} />
         {isAuthenticated && requiresBiometricUnlock ? (
           <View style={styles.biometricOverlay}>
             <View style={styles.biometricCard}>

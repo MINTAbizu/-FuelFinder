@@ -13,6 +13,7 @@ router.post("/payments/telebirr/webhook", queueController.handleTelebirrWebhook)
 router.get("/reservation/:reservationId", auth, queueController.getMyReservationStatus);
 router.post("/confirm-payment", auth, queueController.confirmReservationPayment);
 router.post("/join", auth, queueController.joinQueue);
+router.get("/me", auth, queueController.getMyActiveTickets);
 router.get("/me/:stationId", auth, queueController.getMyTicket);
 router.post("/leave", auth, queueController.leaveQueue);
 router.post("/check-in/start", auth, queueController.startCheckIn);
