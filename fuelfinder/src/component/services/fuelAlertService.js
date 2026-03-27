@@ -382,6 +382,20 @@ function buildQueueTurnAlertId(payload) {
   return stationId ? `queue_turn_${stationId}` : `queue_turn_${Date.now()}`;
 }
 
+function buildQueueApproachingAlertId(payload) {
+  const explicitId = trimText(payload?.alertId);
+  if (explicitId) return explicitId;
+
+  const ticketId = trimText(payload?.ticketId || payload?.reservationId);
+  if (ticketId) return `queue_approaching_${ticketId}`;
+
+  const reservationCode = trimText(payload?.reservationCode);
+  if (reservationCode) return `queue_approaching_${reservationCode}`;
+
+  const stationId = trimText(payload?.stationId);
+  return stationId ? `queue_approaching_${stationId}` : `queue_approaching_${Date.now()}`;
+}
+
 function buildQueueTurnAlertBody(payload) {
   const serverMessage = trimText(payload?.message || payload?.body);
   if (serverMessage) return serverMessage;
@@ -396,6 +410,27 @@ function buildQueueTurnAlertBody(payload) {
       : " Please arrive as soon as possible.";
 
   return `FuelFinder: It's your turn at ${stationName}.${codeText}${windowText}`;
+}
+
+function buildQueueApproachingAlertBody(payload) {
+  const serverMessage = trimText(payload?.message || payload?.body);
+  if (serverMessage) return serverMessage;
+
+  const stationName = trimText(payload?.stationName) || "your station";
+  const reservationCode = trimText(payload?.reservationCode);
+  const peopleAhead = Math.max(0, Number(payload?.peopleAhead || 0));
+  const etaMinutes = Math.max(0, Number(payload?.etaMinutes || 0));
+  const codeText = reservationCode ? ` Ticket ${reservationCode}.` : "";
+  const peopleText =
+    peopleAhead > 0
+      ? ` Only ${peopleAhead} ${peopleAhead === 1 ? "customer is" : "customers are"} ahead of you`
+      : " Your turn is getting close";
+  const etaText =
+    etaMinutes > 0
+      ? ` About ${etaMinutes} ${etaMinutes === 1 ? "minute" : "minutes"} left, please start heading to the station.`
+      : " Please start heading to the station.";
+
+  return `FuelFinder: ${peopleText} at ${stationName}.${codeText}${etaText}`;
 }
 
 export async function storeQueueTurnAlert(payload, options = {}) {
@@ -441,6 +476,72 @@ export async function storeQueueTurnAlert(payload, options = {}) {
             stationId: event.stationId,
             ticketId: event.ticketId,
             reservationCode: event.reservationCode,
+          },
+        },
+        trigger: null,
+      });
+    } catch (_error) {
+      // Keep the alert stored in-app even if the OS notification cannot be shown.
+    }
+  }
+
+  return { ...event, created: true };
+}
+
+export async function storeQueueApproachingAlert(payload, options = {}) {
+  const alertId = buildQueueApproachingAlertId(payload);
+  const history = await loadFuelAlertHistory();
+  const existing = history.find((item) => String(item?.id || "").trim() === alertId);
+  if (existing) {
+    return { ...existing, created: false };
+  }
+
+  const peopleAhead = Math.max(0, Number(payload?.peopleAhead || 0));
+  const etaMinutes = Math.max(0, Number(payload?.etaMinutes || 0));
+  const queueSummaryParts = [];
+  if (peopleAhead > 0) {
+    queueSummaryParts.push(
+      `${peopleAhead} ${peopleAhead === 1 ? "customer" : "customers"} ahead`
+    );
+  }
+  if (etaMinutes > 0) {
+    queueSummaryParts.push(`about ${etaMinutes} ${etaMinutes === 1 ? "minute" : "minutes"} left`);
+  }
+
+  const event = {
+    id: alertId,
+    type: "queue_turn_approaching",
+    title: trimText(payload?.title) || "Please arrive soon",
+    body: buildQueueApproachingAlertBody(payload),
+    stationId: trimText(payload?.stationId),
+    stationName: trimText(payload?.stationName) || "Fuel Station",
+    address: trimText(payload?.address),
+    reservationCode: trimText(payload?.reservationCode),
+    ticketId: trimText(payload?.ticketId || payload?.reservationId),
+    queueSummary: queueSummaryParts.join(", ") || "Your turn is getting close.",
+    peopleAhead,
+    etaMinutes,
+    triggeredAt: trimText(payload?.sentAt) || new Date().toISOString(),
+    readAt: null,
+  };
+
+  await saveFuelAlertHistory([event, ...history]);
+
+  if (options.showSystemNotification !== false) {
+    await configureFuelAlertNotificationsAsync();
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: event.title,
+          body: event.body,
+          sound: "default",
+          data: {
+            type: event.type,
+            stationId: event.stationId,
+            ticketId: event.ticketId,
+            reservationCode: event.reservationCode,
+            peopleAhead: event.peopleAhead,
+            etaMinutes: event.etaMinutes,
           },
         },
         trigger: null,

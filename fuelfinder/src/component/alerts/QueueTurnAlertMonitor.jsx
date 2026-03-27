@@ -3,10 +3,15 @@ import { Alert, AppState } from "react-native";
 
 import { useAuth } from "../context/AuthContext";
 import { subscribeQueueTurnAlerts } from "../services/realtimeSocket";
-import { storeQueueTurnAlert } from "../services/fuelAlertService";
+import {
+  storeQueueApproachingAlert,
+  storeQueueTurnAlert,
+} from "../services/fuelAlertService";
 import { getMyActiveTickets } from "../services/queueService";
 
 const POLL_INTERVAL_MS = 15000;
+const QUEUE_APPROACHING_PEOPLE_AHEAD_THRESHOLD = 3;
+const AVERAGE_MINUTES_PER_CAR = 3;
 
 function buildQueueTurnPayload(ticket) {
   const stationName = String(ticket?.stationName || "").trim() || "Fuel Station";
@@ -23,13 +28,36 @@ function buildQueueTurnPayload(ticket) {
   };
 }
 
+function buildQueueApproachingPayload(ticket) {
+  const ticketId = String(ticket?.ticketId || ticket?.reservationId || "").trim();
+  const position = Number(ticket?.position || 0);
+  const peopleAhead = Math.max(0, position - 1);
+  if (!ticketId || peopleAhead <= 0 || peopleAhead > QUEUE_APPROACHING_PEOPLE_AHEAD_THRESHOLD) {
+    return null;
+  }
+
+  const stationName = String(ticket?.stationName || "").trim() || "Fuel Station";
+  const reservationCode = String(ticket?.reservationCode || "").trim();
+  return {
+    alertId: `queue_approaching_${ticketId}`,
+    ticketId,
+    reservationCode,
+    stationId: String(ticket?.stationId || "").trim(),
+    stationName,
+    address: String(ticket?.address || "").trim(),
+    title: "Please arrive soon",
+    peopleAhead,
+    etaMinutes: Math.max(1, peopleAhead * AVERAGE_MINUTES_PER_CAR),
+  };
+}
+
 export default function QueueTurnAlertMonitor({ enabled }) {
   const { accessToken } = useAuth();
   const appStateRef = React.useRef(AppState.currentState);
   const lastPopupAlertIdRef = React.useRef("");
 
-  const maybeShowAlert = React.useCallback(async (payload, showSystemNotification) => {
-    const event = await storeQueueTurnAlert(payload, {
+  const maybeShowAlert = React.useCallback(async (storeAlert, payload, showSystemNotification, fallbackTitle, fallbackBody) => {
+    const event = await storeAlert(payload, {
       showSystemNotification,
     });
     if (!event?.created || showSystemNotification) {
@@ -41,22 +69,39 @@ export default function QueueTurnAlertMonitor({ enabled }) {
     }
     lastPopupAlertIdRef.current = event.id;
 
-    Alert.alert(event.title || "It's your turn", event.body || "Your turn has arrived.");
+    Alert.alert(event.title || fallbackTitle, event.body || fallbackBody);
   }, []);
 
-  const pollCalledTickets = React.useCallback(async () => {
+  const pollQueueTickets = React.useCallback(async () => {
     try {
       const tickets = await getMyActiveTickets();
       const activeCalledTickets = tickets.filter(
         (ticket) => String(ticket?.status || "").trim().toLowerCase() === "called"
       );
-      if (!activeCalledTickets.length) {
-        return;
-      }
+      const approachingTickets = tickets
+        .filter((ticket) => String(ticket?.status || "").trim().toLowerCase() === "waiting")
+        .map(buildQueueApproachingPayload)
+        .filter(Boolean);
 
       const shouldShowPopup = appStateRef.current === "active";
       for (const ticket of activeCalledTickets) {
-        await maybeShowAlert(buildQueueTurnPayload(ticket), !shouldShowPopup);
+        await maybeShowAlert(
+          storeQueueTurnAlert,
+          buildQueueTurnPayload(ticket),
+          !shouldShowPopup,
+          "It's your turn",
+          "Your turn has arrived."
+        );
+      }
+
+      for (const payload of approachingTickets) {
+        await maybeShowAlert(
+          storeQueueApproachingAlert,
+          payload,
+          !shouldShowPopup,
+          payload.title || "Please arrive soon",
+          "Your turn is getting close. Please start heading to the station."
+        );
       }
     } catch (_error) {
       // Ignore transient polling errors. Realtime and the next poll will retry.
@@ -68,28 +113,34 @@ export default function QueueTurnAlertMonitor({ enabled }) {
       const previousState = appStateRef.current;
       appStateRef.current = nextState;
       if ((previousState === "background" || previousState === "inactive") && nextState === "active") {
-        void pollCalledTickets();
+        void pollQueueTickets();
       }
     });
 
     return () => subscription.remove();
-  }, [pollCalledTickets]);
+  }, [pollQueueTickets]);
 
   React.useEffect(() => {
     if (!enabled || !accessToken) {
       return undefined;
     }
 
-    void pollCalledTickets();
+    void pollQueueTickets();
     const pollIntervalId = setInterval(() => {
-      void pollCalledTickets();
+      void pollQueueTickets();
     }, POLL_INTERVAL_MS);
 
     const unsubscribe = subscribeQueueTurnAlerts({
       token: accessToken,
       onQueueTurnAlert: async (payload) => {
         const shouldShowPopup = appStateRef.current === "active";
-        await maybeShowAlert(payload, !shouldShowPopup);
+        await maybeShowAlert(
+          storeQueueTurnAlert,
+          payload,
+          !shouldShowPopup,
+          "It's your turn",
+          "Your turn has arrived."
+        );
       },
     });
 
@@ -97,7 +148,7 @@ export default function QueueTurnAlertMonitor({ enabled }) {
       clearInterval(pollIntervalId);
       unsubscribe?.();
     };
-  }, [accessToken, enabled, maybeShowAlert, pollCalledTickets]);
+  }, [accessToken, enabled, maybeShowAlert, pollQueueTickets]);
 
   return null;
 }

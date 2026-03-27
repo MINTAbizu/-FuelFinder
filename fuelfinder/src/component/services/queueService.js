@@ -96,6 +96,22 @@ export async function getMyActiveTickets() {
   return Array.isArray(data?.tickets) ? data.tickets : [];
 }
 
+export async function getMyTransactionHistory(limit = 10) {
+  return requestWithOfflineCache({
+    cacheKey: buildOfflineCacheKey("queue.history", { limit }),
+    maxAgeMs: 1000 * 60 * 10,
+    request: async () => {
+      const { data } = await api.get("/queue/me/history", {
+        params: { limit },
+      });
+      return {
+        total: Number(data?.total || 0),
+        items: Array.isArray(data?.items) ? data.items : [],
+      };
+    },
+  });
+}
+
 export async function leaveQueue(ticketId) {
   try {
     const { data } = await api.post("/queue/leave", { ticketId });

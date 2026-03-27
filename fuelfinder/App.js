@@ -67,6 +67,7 @@ import { AuthProvider, useAuth } from "./src/component/context/AuthContext";
 import { OfflineProvider, useOffline } from "./src/component/context/OfflineContext";
 import { LanguageProvider, useLanguage } from "./src/component/context/LanguageContext";
 import { clearOfflineStorage } from "./src/component/services/offlineService";
+import { getMyTransactionHistory } from "./src/component/services/queueService";
 
 const queryClient = new QueryClient();
 const RootStack = createNativeStackNavigator();
@@ -226,6 +227,57 @@ function getBiometricSetupFailureMessage(t, error) {
   return t("somethingWentWrong");
 }
 
+function formatTransactionMoney(value, currency = "ETB") {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "-";
+  const normalizedCurrency = String(currency || "ETB").trim().toUpperCase() || "ETB";
+  return `${amount.toFixed(2)} ${normalizedCurrency}`;
+}
+
+function formatTransactionDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  try {
+    return date.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch (_error) {
+    return date.toLocaleString();
+  }
+}
+
+function formatTransactionLabel(value, fallback = "-") {
+  const text = String(value || "").trim();
+  if (!text) return fallback;
+  return text.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getTransactionTone(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["authorized", "refunded", "served", "verified", "success", "not_required"].includes(normalized)) {
+    return "success";
+  }
+  if (["pending", "pending_payment", "waiting", "called", "arrived", "initialized"].includes(normalized)) {
+    return "warning";
+  }
+  if (["failed", "cancelled", "expired", "forfeited", "rejected"].includes(normalized)) {
+    return "danger";
+  }
+  return "neutral";
+}
+
+function getTransactionFuelLabel(t, fuelType) {
+  const normalized = String(fuelType || "").trim().toLowerCase();
+  if (normalized === "diesel") return t("fuelDiesel");
+  if (normalized === "other") return t("fuelOther", { defaultValue: "Other" });
+  return t("fuelGasoline");
+}
+
 function ProfileScreen({ navigation }) {
   const {
     user,
@@ -290,6 +342,10 @@ function ProfileScreen({ navigation }) {
   const [twoFactorResending, setTwoFactorResending] = React.useState(false);
   const [vehicleEditorVisible, setVehicleEditorVisible] = React.useState(false);
   const [vehicleDraft, setVehicleDraft] = React.useState(() => createEmptyVehicleDraft());
+  const [transactionHistory, setTransactionHistory] = React.useState([]);
+  const [transactionHistoryTotal, setTransactionHistoryTotal] = React.useState(0);
+  const [transactionHistoryLoading, setTransactionHistoryLoading] = React.useState(true);
+  const [transactionHistoryRefreshing, setTransactionHistoryRefreshing] = React.useState(false);
 
   React.useEffect(() => {
     let mounted = true;
@@ -356,11 +412,43 @@ function ProfileScreen({ navigation }) {
     }
   }, [t]);
 
+  const loadTransactionHistory = React.useCallback(
+    async (refreshing = false) => {
+      if (refreshing) {
+        setTransactionHistoryRefreshing(true);
+      } else {
+        setTransactionHistoryLoading(true);
+      }
+
+      try {
+        const data = await getMyTransactionHistory(8);
+        setTransactionHistory(Array.isArray(data?.items) ? data.items : []);
+        setTransactionHistoryTotal(Number(data?.total || 0));
+      } catch (_error) {
+        Alert.alert(t("somethingWentWrong"));
+      } finally {
+        if (refreshing) {
+          setTransactionHistoryRefreshing(false);
+        } else {
+          setTransactionHistoryLoading(false);
+        }
+      }
+    },
+    [t]
+  );
+
   useFocusEffect(
     React.useCallback(() => {
       refreshAccountCollections();
       return undefined;
     }, [refreshAccountCollections])
+  );
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadTransactionHistory(transactionHistory.length > 0);
+      return undefined;
+    }, [loadTransactionHistory, transactionHistory.length])
   );
 
   React.useEffect(() => {
@@ -1762,6 +1850,205 @@ function ProfileScreen({ navigation }) {
         />
       </View>
 
+      <Text style={styles.sectionTitle}>
+        {t("transactionHistoryTitle", { defaultValue: "Transaction History" })}
+      </Text>
+      <View style={styles.sectionCard}>
+        <View style={styles.transactionSectionHeader}>
+          <View style={styles.transactionSectionHeaderText}>
+            <Text style={styles.transactionSectionHeading}>
+              {t("transactionHistoryHeading", { defaultValue: "Recent reservations and payments" })}
+            </Text>
+            <Text style={styles.transactionSectionSubtitle}>
+              {t("transactionHistorySubtitle", {
+                defaultValue: "See your latest fuel liters, total amount, station, and payment status in one place.",
+              })}
+            </Text>
+          </View>
+          <View style={styles.transactionSectionActions}>
+            <Text style={styles.transactionCount}>
+              {transactionHistoryTotal} {t("transactionHistoryCount", { defaultValue: "records" })}
+            </Text>
+            <Pressable
+              style={[styles.inlineLinkButton, transactionHistoryRefreshing && styles.modalButtonDisabled]}
+              onPress={() => loadTransactionHistory(true)}
+              disabled={transactionHistoryRefreshing}
+            >
+              {transactionHistoryRefreshing ? (
+                <ActivityIndicator size="small" color="#1D4ED8" />
+              ) : (
+                <Text style={styles.inlineLinkButtonText}>
+                  {t("refreshActionLabel", { defaultValue: "Refresh" })}
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+
+        {transactionHistoryLoading ? (
+          <View style={styles.transactionStateWrap}>
+            <ActivityIndicator size="small" color="#0F766E" />
+            <Text style={styles.inlineLoadingText}>
+              {t("transactionHistoryLoading", { defaultValue: "Loading transaction history..." })}
+            </Text>
+          </View>
+        ) : !transactionHistory.length ? (
+          <View style={styles.transactionEmptyWrap}>
+            <View style={styles.emptyStateCard}>
+              <Ionicons name="receipt-outline" size={24} color="#0F766E" />
+              <Text style={styles.emptyStateTitle}>
+                {t("transactionHistoryEmptyTitle", { defaultValue: "No transactions yet" })}
+              </Text>
+              <Text style={styles.emptyStateSubtitle}>
+                {t("transactionHistoryEmptyBody", {
+                  defaultValue: "When you reserve fuel or complete a payment, it will appear here in your profile.",
+                })}
+              </Text>
+            </View>
+          </View>
+        ) : (
+          transactionHistory.map((item, index) => {
+            const queueTone = getTransactionTone(item?.status);
+            const paymentTone = getTransactionTone(item?.paymentStatus);
+            const activityDate =
+              item?.depositPaidAt || item?.servedAt || item?.createdAt || item?.updatedAt || item?.joinedAt;
+
+            return (
+              <View
+                key={String(item?.id || item?.reservationId || index)}
+                style={[styles.transactionItem, index > 0 && styles.transactionItemBorder]}
+              >
+                <View style={styles.transactionItemHeader}>
+                  <View style={styles.transactionItemHeaderText}>
+                    <Text style={styles.transactionStationName} numberOfLines={1}>
+                      {item?.stationName || t("stationDetails.screenTitle", { defaultValue: "Station" })}
+                    </Text>
+                    <Text style={styles.transactionItemDate}>
+                      {formatTransactionDate(activityDate) ||
+                        t("transactionHistoryDateUnknown", { defaultValue: "Date unavailable" })}
+                    </Text>
+                  </View>
+                  <View style={styles.transactionBadgeWrap}>
+                    <View
+                      style={[
+                        styles.transactionBadge,
+                        queueTone === "success"
+                          ? styles.transactionBadgeSuccess
+                          : queueTone === "warning"
+                            ? styles.transactionBadgeWarning
+                            : queueTone === "danger"
+                              ? styles.transactionBadgeDanger
+                              : styles.transactionBadgeNeutral,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.transactionBadgeText,
+                          queueTone === "success"
+                            ? styles.transactionBadgeTextSuccess
+                            : queueTone === "warning"
+                              ? styles.transactionBadgeTextWarning
+                              : queueTone === "danger"
+                                ? styles.transactionBadgeTextDanger
+                                : styles.transactionBadgeTextNeutral,
+                        ]}
+                      >
+                        {formatTransactionLabel(item?.status)}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.transactionBadge,
+                        paymentTone === "success"
+                          ? styles.transactionBadgeSuccess
+                          : paymentTone === "warning"
+                            ? styles.transactionBadgeWarning
+                            : paymentTone === "danger"
+                              ? styles.transactionBadgeDanger
+                              : styles.transactionBadgeNeutral,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.transactionBadgeText,
+                          paymentTone === "success"
+                            ? styles.transactionBadgeTextSuccess
+                            : paymentTone === "warning"
+                              ? styles.transactionBadgeTextWarning
+                              : paymentTone === "danger"
+                                ? styles.transactionBadgeTextDanger
+                                : styles.transactionBadgeTextNeutral,
+                        ]}
+                      >
+                        {formatTransactionLabel(item?.paymentStatus)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.transactionMetricRow}>
+                  <View style={styles.transactionMetric}>
+                    <Text style={styles.transactionMetricLabel}>
+                      {t("transactionHistoryFuelLabel", { defaultValue: "Fuel" })}
+                    </Text>
+                    <Text style={styles.transactionMetricValue}>
+                      {getTransactionFuelLabel(t, item?.fuelType)}
+                    </Text>
+                  </View>
+                  <View style={styles.transactionMetric}>
+                    <Text style={styles.transactionMetricLabel}>
+                      {t("transactionHistoryLitersLabel", { defaultValue: "Liters" })}
+                    </Text>
+                    <Text style={styles.transactionMetricValue}>
+                      {Number(item?.requestedLiters || 0).toFixed(2)} L
+                    </Text>
+                  </View>
+                  <View style={styles.transactionMetric}>
+                    <Text style={styles.transactionMetricLabel}>
+                      {t("transactionHistoryAmountLabel", { defaultValue: "Amount" })}
+                    </Text>
+                    <Text style={styles.transactionMetricValue}>
+                      {formatTransactionMoney(item?.estimatedAmount, item?.currency)}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={styles.transactionMetaLine}>
+                  {t("transactionHistoryDepositLabel", { defaultValue: "Deposit" })}:{" "}
+                  {formatTransactionMoney(item?.depositAmount, item?.currency)}
+                </Text>
+                {item?.reservationCode ? (
+                  <Text style={styles.transactionMetaLine}>
+                    {t("transactionHistoryReservationLabel", { defaultValue: "Reservation" })}: {item.reservationCode}
+                  </Text>
+                ) : null}
+                {item?.paymentProvider || item?.paymentReference ? (
+                  <Text style={styles.transactionMetaLine}>
+                    {t("transactionHistoryPaymentLabel", { defaultValue: "Payment" })}:{" "}
+                    {formatTransactionLabel(
+                      item?.paymentProvider,
+                      t("transactionHistoryPaymentUnknown", { defaultValue: "Not available" })
+                    )}
+                    {item?.paymentReference ? ` • Ref ${item.paymentReference}` : ""}
+                  </Text>
+                ) : null}
+                {item?.checkInStatus && String(item.checkInStatus).trim().toLowerCase() !== "pending" ? (
+                  <Text style={styles.transactionMetaLine}>
+                    {t("transactionHistoryCheckInLabel", { defaultValue: "Check-in" })}:{" "}
+                    {formatTransactionLabel(item.checkInStatus)}
+                  </Text>
+                ) : null}
+                {item?.address ? (
+                  <Text style={styles.transactionMetaLine} numberOfLines={2}>
+                    {item.address}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          })
+        )}
+      </View>
+
       <Text style={styles.sectionTitle}>{t("preferences")}</Text>
       <View style={styles.sectionCard}>
         <SettingRow
@@ -2636,6 +2923,156 @@ const styles = StyleSheet.create({
     borderColor: "#E2E8F0",
     borderRadius: 16,
     overflow: "hidden",
+  },
+  transactionSectionHeader: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F6",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  transactionSectionHeaderText: {
+    flex: 1,
+  },
+  transactionSectionHeading: {
+    color: "#0F172A",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  transactionSectionSubtitle: {
+    marginTop: 4,
+    color: "#64748B",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
+  },
+  transactionSectionActions: {
+    alignItems: "flex-end",
+    gap: 8,
+  },
+  transactionCount: {
+    color: "#475569",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  transactionStateWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+  },
+  transactionEmptyWrap: {
+    padding: 12,
+  },
+  transactionItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  transactionItemBorder: {
+    borderTopWidth: 1,
+    borderTopColor: "#EEF2F6",
+  },
+  transactionItemHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  transactionItemHeaderText: {
+    flex: 1,
+  },
+  transactionStationName: {
+    color: "#0F172A",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  transactionItemDate: {
+    marginTop: 2,
+    color: "#64748B",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  transactionBadgeWrap: {
+    flexDirection: "row",
+    gap: 6,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    maxWidth: "48%",
+  },
+  transactionBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  transactionBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  transactionBadgeNeutral: {
+    backgroundColor: "#F8FAFC",
+    borderColor: "#CBD5E1",
+  },
+  transactionBadgeTextNeutral: {
+    color: "#475569",
+  },
+  transactionBadgeSuccess: {
+    backgroundColor: "#DCFCE7",
+    borderColor: "#86EFAC",
+  },
+  transactionBadgeTextSuccess: {
+    color: "#166534",
+  },
+  transactionBadgeWarning: {
+    backgroundColor: "#FEF3C7",
+    borderColor: "#FCD34D",
+  },
+  transactionBadgeTextWarning: {
+    color: "#92400E",
+  },
+  transactionBadgeDanger: {
+    backgroundColor: "#FEE2E2",
+    borderColor: "#FCA5A5",
+  },
+  transactionBadgeTextDanger: {
+    color: "#B91C1C",
+  },
+  transactionMetricRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  transactionMetric: {
+    flex: 1,
+    minWidth: 95,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  transactionMetricLabel: {
+    color: "#64748B",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  transactionMetricValue: {
+    marginTop: 4,
+    color: "#0F172A",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  transactionMetaLine: {
+    color: "#475569",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
   },
   settingRow: {
     paddingVertical: 12,

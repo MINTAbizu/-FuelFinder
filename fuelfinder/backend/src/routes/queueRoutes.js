@@ -14,6 +14,7 @@ router.get("/reservation/:reservationId", auth, queueController.getMyReservation
 router.post("/confirm-payment", auth, queueController.confirmReservationPayment);
 router.post("/join", auth, queueController.joinQueue);
 router.get("/me", auth, queueController.getMyActiveTickets);
+router.get("/me/history", auth, queueController.getMyTransactionHistory);
 router.get("/me/:stationId", auth, queueController.getMyTicket);
 router.post("/leave", auth, queueController.leaveQueue);
 router.post("/check-in/start", auth, queueController.startCheckIn);

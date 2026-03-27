@@ -1105,6 +1105,96 @@ exports.getMyActiveTickets = async (req, res) => {
   }
 };
 
+exports.getMyTransactionHistory = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    if (!isObjectId(userId)) {
+      return res.status(400).json({ message: "Invalid userId." });
+    }
+
+    const parsedLimit = Number(req.query.limit || 10);
+    const limit = Math.min(50, Math.max(1, Number.isFinite(parsedLimit) ? parsedLimit : 10));
+
+    let tickets = await QueueTicket.find({ userId })
+      .select(
+        "_id stationId publicTicketCode status position fuelType requestedLiters unitPrice estimatedAmount depositAmount depositCurrency depositStatus paymentProvider paymentReference paymentSessionId checkInStatus createdAt updatedAt joinedAt depositPaidAt calledAt servedAt expiresAt"
+      )
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    const activeStationIds = [
+      ...new Set(
+        tickets
+          .filter((ticket) => ACTIVE_STATUSES.includes(String(ticket?.status || "")))
+          .map((ticket) => String(ticket?.stationId || "").trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    if (activeStationIds.length) {
+      await Promise.all(activeStationIds.map((stationId) => expireStaleTickets(stationId)));
+      tickets = await QueueTicket.find({ userId })
+        .select(
+          "_id stationId publicTicketCode status position fuelType requestedLiters unitPrice estimatedAmount depositAmount depositCurrency depositStatus paymentProvider paymentReference paymentSessionId checkInStatus createdAt updatedAt joinedAt depositPaidAt calledAt servedAt expiresAt"
+        )
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .limit(limit)
+        .lean();
+    }
+
+    const [total, stations] = await Promise.all([
+      QueueTicket.countDocuments({ userId }),
+      Station.find({
+        _id: {
+          $in: [...new Set(tickets.map((ticket) => String(ticket?.stationId || "")).filter(Boolean))],
+        },
+      })
+        .select("_id name address")
+        .lean(),
+    ]);
+
+    const stationMap = new Map(stations.map((station) => [String(station._id), station]));
+
+    return res.json({
+      total,
+      items: tickets.map((ticket) => {
+        const station = stationMap.get(String(ticket.stationId)) || null;
+        return {
+          id: String(ticket._id),
+          reservationId: String(ticket._id),
+          reservationCode: String(ticket.publicTicketCode || ""),
+          stationId: String(ticket.stationId || ""),
+          stationName: String(station?.name || ""),
+          address: String(station?.address || ""),
+          status: String(ticket.status || ""),
+          position: Number(ticket.position || 0),
+          fuelType: String(ticket.fuelType || ""),
+          requestedLiters: Number(ticket.requestedLiters || 0),
+          unitPrice: Number(ticket.unitPrice || 0),
+          estimatedAmount: Number(ticket.estimatedAmount || 0),
+          depositAmount: Number(ticket.depositAmount || 0),
+          currency: String(ticket.depositCurrency || "ETB"),
+          paymentStatus: String(ticket.depositStatus || ""),
+          paymentProvider: String(ticket.paymentProvider || ""),
+          paymentReference: String(ticket.paymentReference || ""),
+          paymentSessionId: String(ticket.paymentSessionId || ""),
+          checkInStatus: String(ticket.checkInStatus || ""),
+          createdAt: ticket.createdAt || null,
+          updatedAt: ticket.updatedAt || null,
+          joinedAt: ticket.joinedAt || null,
+          depositPaidAt: ticket.depositPaidAt || null,
+          calledAt: ticket.calledAt || null,
+          servedAt: ticket.servedAt || null,
+          expiresAt: ticket.expiresAt || null,
+        };
+      }),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to load transaction history." });
+  }
+};
+
 exports.leaveQueue = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -1249,7 +1339,7 @@ exports.getStationQueue = async (req, res) => {
       status: "waiting"
     })
       .sort({ position: 1 })
-      .select("userId position joinedAt expiresAt publicTicketCode checkInStatus checkInVerifiedAt")
+      .select("userId position joinedAt expiresAt publicTicketCode checkInStatus checkInVerifiedAt requestedLiters estimatedAmount fuelType")
       .lean();
 
     const called = await QueueTicket.findOne({
@@ -1258,7 +1348,7 @@ exports.getStationQueue = async (req, res) => {
     })
       .sort({ calledAt: -1 })
       .select(
-        "userId calledAt expiresAt publicTicketCode checkInStatus checkInVerifiedAt calledNotificationStatus calledNotificationChannel calledNotificationSentAt calledNotificationError"
+        "userId calledAt expiresAt publicTicketCode checkInStatus checkInVerifiedAt calledNotificationStatus calledNotificationChannel calledNotificationSentAt calledNotificationError requestedLiters estimatedAmount fuelType"
       )
       .lean();
 
@@ -1299,6 +1389,17 @@ exports.getStationQueue = async (req, res) => {
           reservationCode: item.publicTicketCode || ""
         }))
       : [];
+    const verifiedTickets = [...waitingWithIds, ...(calledWithIds ? [calledWithIds] : [])].filter(
+      (item) => String(item?.checkInStatus || "").trim().toLowerCase() === "verified"
+    );
+    const verifiedSummary = verifiedTickets.reduce(
+      (summary, item) => ({
+        count: summary.count + 1,
+        liters: Number((summary.liters + Number(item?.requestedLiters || 0)).toFixed(2)),
+        amount: Number((summary.amount + Number(item?.estimatedAmount || 0)).toFixed(2))
+      }),
+      { count: 0, liters: 0, amount: 0 }
+    );
     const stationFuel = await getStationFuelSnapshot(stationId);
 
     return res.json({
@@ -1306,6 +1407,7 @@ exports.getStationQueue = async (req, res) => {
       waitingCount: waitingWithIds.length,
       called: calledWithIds,
       waiting: waitingWithIds,
+      verifiedSummary,
       pendingCount: pendingWithIds.length,
       pending: pendingWithIds,
       fuelStatus: stationFuel?.fuelStatus || "partial",
