@@ -186,11 +186,13 @@ function buildPickerDraft(parts) {
 }
 
 function normalizePickerDraft(draft) {
-  const year = Math.max(1, Math.trunc(Number(draft?.yearText || 0)));
+  const rawYear = String(draft?.yearText || "").trim();
+  if (!rawYear) return null;
+  const year = Math.trunc(Number(rawYear));
+  if (!Number.isFinite(year) || year <= 0) return null;
   const month = Math.min(13, Math.max(1, Math.trunc(Number(draft?.month || 1))));
   const maxDay = getEthiopianMonthDayCount(year, month);
   const day = Math.min(maxDay, Math.max(1, Math.trunc(Number(draft?.day || 1))));
-  if (!Number.isFinite(year) || year <= 0) return null;
   return { year, month, day };
 }
 
