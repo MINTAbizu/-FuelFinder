@@ -450,6 +450,34 @@ function buildHumanReadableLiveAddress(station, cityLabel, regionLabel) {
   return "Live map location";
 }
 
+function buildStationFullAddress(station, cityLabel = "", regionLabel = "") {
+  const parts = [];
+  const seen = new Set();
+
+  const pushPart = (value) => {
+    String(value || "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .forEach((part) => {
+        if (isPlaceholderLocationText(part)) return;
+        const key = normalizeKey(part);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        parts.push(part);
+      });
+  };
+
+  pushPart(station?.address);
+  pushPart(station?.landmark);
+  pushPart(station?.subcity);
+  pushPart(station?.woredaDirectory?.name || station?.woreda);
+  pushPart(station?.city?.name || cityLabel);
+  pushPart(station?.region?.name || regionLabel);
+
+  return parts.length ? parts.join(", ") : "Address not set yet.";
+}
+
 function deriveCityRegion(station) {
   const countryTokens = new Set(["ethiopia", "ethiopia.", "et", "eth", "ethiopian"]);
   const rawAddress = String(station?.address || "").trim();
@@ -1272,8 +1300,39 @@ export default function Dashboard() {
   }, [cityFilter, cityScopedStations, directoryWoredas, isSuperAdmin, regionFilter, stationCountByWoreda]);
 
   const filteredStations = useMemo(() => {
-    return cityScopedStations.filter((item) => woredaFilter === "all" || item.woredaKey === woredaFilter);
-  }, [cityScopedStations, woredaFilter]);
+    const normalizedSearch = normalizeKey(isSuperAdmin ? deferredSuperAdminStationSearch : "");
+
+    return cityScopedStations.filter((item) => {
+      if (woredaFilter !== "all" && item.woredaKey !== woredaFilter) {
+        return false;
+      }
+
+      if (!normalizedSearch) {
+        return true;
+      }
+
+      const searchableFields = [
+        item?.name,
+        item?.address,
+        item?.contact,
+        item?.landmark,
+        item?.subcity,
+        item?.woreda,
+        item?.woredaLabel,
+        item?.cityLabel,
+        item?.regionLabel
+      ];
+
+      return searchableFields.some((value) => normalizeKey(value).includes(normalizedSearch));
+    });
+  }, [cityScopedStations, deferredSuperAdminStationSearch, isSuperAdmin, woredaFilter]);
+
+  const visibleStations = useMemo(() => {
+    if (!isSuperAdmin) return filteredStations;
+
+    const startIndex = Math.max(0, (Number(superAdminStationPage || 1) - 1) * SUPER_ADMIN_DIRECTORY_PAGE_LIMIT);
+    return filteredStations.slice(startIndex, startIndex + SUPER_ADMIN_DIRECTORY_PAGE_LIMIT);
+  }, [filteredStations, isSuperAdmin, superAdminStationPage]);
 
   const cityStationGroups = useMemo(() => {
     const groups = [];
@@ -1766,15 +1825,23 @@ export default function Dashboard() {
   }, [cityFilter, isSuperAdmin, selectedCityCenter, selectedCityRecord]);
 
   useEffect(() => {
-    if (!filteredStations.length) {
+    if (!visibleStations.length) {
       setStationId("");
       return;
     }
-    const hasCurrent = filteredStations.some((item) => String(item.id) === String(stationId));
+    const hasCurrent = visibleStations.some((item) => String(item.id) === String(stationId));
     if (!stationId || !hasCurrent) {
-      setStationId(String(filteredStations[0].id));
+      setStationId(String(visibleStations[0].id));
     }
-  }, [filteredStations, stationId]);
+  }, [stationId, visibleStations]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    const totalPages = Math.max(1, Math.ceil(filteredStations.length / SUPER_ADMIN_DIRECTORY_PAGE_LIMIT));
+    if (superAdminStationPage > totalPages) {
+      setSuperAdminStationPage(totalPages);
+    }
+  }, [filteredStations.length, isSuperAdmin, superAdminStationPage]);
 
   const sectionTitle = useMemo(() => {
     const section = sections.find((item) => item.id === active);
@@ -1897,24 +1964,20 @@ export default function Dashboard() {
       try {
         setSuperAdminStationDirectoryLoading(true);
         setSuperAdminStationDirectoryError("");
+        setAllStationsListLoading(true);
+        setAllStationsListError("");
         setStatusMessage("");
 
-        const data = await listAdminStations({
-          page: superAdminStationPage,
-          limit: SUPER_ADMIN_DIRECTORY_PAGE_LIMIT,
-          q: deferredSuperAdminStationSearch,
-          regionId: regionFilter === "all" ? "" : regionFilter,
-          cityId: cityFilter === "all" ? "" : cityFilter,
-          woredaId: woredaFilter === "all" ? "" : woredaFilter
-        });
+        const data = await listAdminStations();
         if (!isActive) return;
 
         const list = Array.isArray(data?.stations) ? data.stations : [];
         setStations(list);
+        setAllStationsList(list);
         setSuperAdminStationDirectoryMeta({
-          total: Number(data?.total || 0),
+          total: Number(data?.total || list.length || 0),
           page: Number(data?.page || 1),
-          limit: Number(data?.limit || SUPER_ADMIN_DIRECTORY_PAGE_LIMIT),
+          limit: Number(data?.limit || list.length || SUPER_ADMIN_DIRECTORY_PAGE_LIMIT),
           totalPages: Math.max(1, Number(data?.totalPages || 1)),
           hasNextPage: Boolean(data?.hasNextPage),
           hasPreviousPage: Boolean(data?.hasPreviousPage)
@@ -1932,6 +1995,7 @@ export default function Dashboard() {
       } catch (error) {
         if (!isActive) return;
         setStations([]);
+        setAllStationsList([]);
         setStationId("");
         setSuperAdminStationDirectoryMeta({
           total: 0,
@@ -1947,6 +2011,7 @@ export default function Dashboard() {
       } finally {
         if (isActive) {
           setSuperAdminStationDirectoryLoading(false);
+          setAllStationsListLoading(false);
         }
       }
     };
@@ -1955,19 +2020,17 @@ export default function Dashboard() {
     return () => {
       isActive = false;
     };
-  }, [
-    cityFilter,
-    deferredSuperAdminStationSearch,
-    isSuperAdmin,
-    regionFilter,
-    session?.tokens?.accessToken,
-    superAdminStationDirectoryRefreshKey,
-    superAdminStationPage,
-    woredaFilter
-  ]);
+  }, [isSuperAdmin, session?.tokens?.accessToken, superAdminStationDirectoryRefreshKey]);
 
   useEffect(() => {
-    if (!session?.tokens?.accessToken || !isSuperAdmin || active !== "all_stations") return;
+    if (
+      !session?.tokens?.accessToken ||
+      !isSuperAdmin ||
+      active !== "all_stations" ||
+      allStationsList.length
+    ) {
+      return;
+    }
 
     let isActive = true;
 
@@ -1995,7 +2058,7 @@ export default function Dashboard() {
     return () => {
       isActive = false;
     };
-  }, [active, isSuperAdmin, session?.tokens?.accessToken]);
+  }, [active, allStationsList.length, isSuperAdmin, session?.tokens?.accessToken]);
 
   useEffect(() => {
     if (!session?.tokens?.accessToken || isSuperAdmin) return;
@@ -3081,15 +3144,21 @@ export default function Dashboard() {
   const consoleSubtitle = isSuperAdmin
     ? "Region -> City -> Station -> Task"
     : "FuelFinder Owner Console";
-  const superAdminDirectoryTotal = Number(superAdminStationDirectoryMeta.total || 0);
-  const superAdminDirectoryPage = Number(superAdminStationDirectoryMeta.page || 1);
-  const superAdminDirectoryTotalPages = Math.max(1, Number(superAdminStationDirectoryMeta.totalPages || 1));
+  const superAdminDirectoryTotal = isSuperAdmin
+    ? filteredStations.length
+    : Number(superAdminStationDirectoryMeta.total || 0);
+  const superAdminDirectoryPage = isSuperAdmin
+    ? Math.max(1, Number(superAdminStationPage || 1))
+    : Number(superAdminStationDirectoryMeta.page || 1);
+  const superAdminDirectoryTotalPages = isSuperAdmin
+    ? Math.max(1, Math.ceil(superAdminDirectoryTotal / SUPER_ADMIN_DIRECTORY_PAGE_LIMIT))
+    : Math.max(1, Number(superAdminStationDirectoryMeta.totalPages || 1));
   const superAdminDirectoryRangeStart =
     superAdminDirectoryTotal > 0
-      ? (superAdminDirectoryPage - 1) * Number(superAdminStationDirectoryMeta.limit || SUPER_ADMIN_DIRECTORY_PAGE_LIMIT) + 1
+      ? (superAdminDirectoryPage - 1) * SUPER_ADMIN_DIRECTORY_PAGE_LIMIT + 1
       : 0;
   const superAdminDirectoryRangeEnd =
-    superAdminDirectoryTotal > 0 ? superAdminDirectoryRangeStart + filteredStations.length - 1 : 0;
+    superAdminDirectoryTotal > 0 ? superAdminDirectoryRangeStart + visibleStations.length - 1 : 0;
 
   return (
     <div className="app-shell">
@@ -3136,9 +3205,9 @@ export default function Dashboard() {
             <div className="station-chip">
               <strong>Station:</strong>
               {canSwitchStation ? (
-                filteredStations.length ? (
+                visibleStations.length ? (
                   <select value={stationId} onChange={(event) => setStationId(event.target.value)}>
-                    {filteredStations.map((item) => (
+                    {visibleStations.map((item) => (
                       <option key={item.id} value={item.id}>
                         {(item.name || `Station ${item.id}`) +
                           (item.cityLabel ? ` - ${item.cityLabel}` : "")}
@@ -3265,7 +3334,7 @@ export default function Dashboard() {
                   }}
                   placeholder="Station name, address, contact, landmark"
                 />
-                <span className="section-title">Server-side search across saved stations.</span>
+                <span className="section-title">Search across the full saved station directory.</span>
               </label>
 
               <div className="super-admin-step">
@@ -3302,7 +3371,7 @@ export default function Dashboard() {
                   <p>
                     {selectedStationGeo.cityLabel} - {selectedStationGeo.regionLabel}
                   </p>
-                  <p>{selectedStationGeo.address || "Address not set yet."}</p>
+                  <p>{buildStationFullAddress(selectedStationGeo, selectedStationGeo.cityLabel, selectedStationGeo.regionLabel)}</p>
                   <div className="super-admin-badges">
                     <span className={`pill ${selectedStationGeo.isActive ? "" : "warn"}`}>
                       {selectedStationGeo.isActive ? "Open" : "Inactive"}
@@ -3446,7 +3515,7 @@ export default function Dashboard() {
                   className="btn alt small"
                   type="button"
                   onClick={() => setSuperAdminStationPage((prev) => Math.max(1, prev - 1))}
-                  disabled={superAdminStationDirectoryLoading || !superAdminStationDirectoryMeta.hasPreviousPage}
+                  disabled={superAdminStationDirectoryLoading || superAdminDirectoryPage <= 1}
                 >
                   Previous
                 </button>
@@ -3458,7 +3527,10 @@ export default function Dashboard() {
                       Math.min(superAdminDirectoryTotalPages, prev + 1)
                     )
                   }
-                  disabled={superAdminStationDirectoryLoading || !superAdminStationDirectoryMeta.hasNextPage}
+                  disabled={
+                    superAdminStationDirectoryLoading ||
+                    superAdminDirectoryPage >= superAdminDirectoryTotalPages
+                  }
                 >
                   Next
                 </button>
@@ -3469,9 +3541,9 @@ export default function Dashboard() {
               <div className="station-browser-empty">
                 Loading the Ethiopia station directory for this filter...
               </div>
-            ) : filteredStations.length ? (
+            ) : visibleStations.length ? (
               <div className="station-browser">
-                {filteredStations.map((item) => {
+                {visibleStations.map((item) => {
                   const selected = String(item.id) === String(stationId);
                   const needsLocationReview = !item.regionId || !item.cityId || !item.woredaId;
                   return (
@@ -3492,7 +3564,7 @@ export default function Dashboard() {
                           {needsLocationReview ? "Needs review" : item.isActive ? "Open" : "Inactive"}
                         </span>
                       </div>
-                      <p>{item.address || "Address not set yet."}</p>
+                      <p>{buildStationFullAddress(item, item.cityLabel, item.regionLabel)}</p>
                       <div className="station-browser-meta">
                         <span>Woreda: {item.woredaLabel || "Unspecified woreda"}</span>
                         <span>Fuel: {formatFuelStatusLabel(item.fuelStatus)}</span>
@@ -3745,7 +3817,7 @@ export default function Dashboard() {
                               {item?.isActive ? "Open" : "Inactive"}
                             </span>
                           </div>
-                          <p>{item?.address || "Address not listed."}</p>
+                          <p>{buildStationFullAddress(item, item?.city?.name, item?.region?.name)}</p>
                           <div className="all-station-meta">
                             <span>{regionLabel}</span>
                             <span>{cityLabel}</span>
