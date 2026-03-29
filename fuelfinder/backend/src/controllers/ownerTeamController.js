@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const Station = require("../models/Station");
+const QueueTicket = require("../models/QueueTicket");
 const User = require("../models/User");
 const {
   getAssignedStationIds,
@@ -38,6 +39,120 @@ function buildUserResponse(user) {
     createdAt: user.createdAt,
     updatedAt: user.updatedAt
   };
+}
+
+function buildEmptyVerificationSummary() {
+  return {
+    verifiedCustomers: 0,
+    liters: 0,
+    amount: 0,
+    lastVerifiedAt: null,
+    fuelBreakdown: []
+  };
+}
+
+function normalizeVerificationSummary(summary) {
+  const next = summary || buildEmptyVerificationSummary();
+  return {
+    verifiedCustomers: Number(next.verifiedCustomers || 0),
+    liters: Number(Number(next.liters || 0).toFixed(2)),
+    amount: Number(Number(next.amount || 0).toFixed(2)),
+    lastVerifiedAt: next.lastVerifiedAt || null,
+    fuelBreakdown: Array.isArray(next.fuelBreakdown)
+      ? next.fuelBreakdown.map((item) => ({
+          fuelType: String(item?.fuelType || "").trim().toLowerCase(),
+          verifiedCustomers: Number(item?.verifiedCustomers || 0),
+          liters: Number(Number(item?.liters || 0).toFixed(2)),
+          amount: Number(Number(item?.amount || 0).toFixed(2)),
+          averageUnitPrice: Number(Number(item?.averageUnitPrice || 0).toFixed(2))
+        }))
+      : []
+  };
+}
+
+async function buildVerificationSummaryByUser(stationId, users = []) {
+  const userIds = (Array.isArray(users) ? users : [])
+    .map((user) => String(user?._id || "").trim())
+    .filter(Boolean)
+    .filter((value, index, list) => list.indexOf(value) === index);
+
+  const summaryByUserId = new Map(userIds.map((userId) => [userId, buildEmptyVerificationSummary()]));
+
+  if (!userIds.length) {
+    return summaryByUserId;
+  }
+
+  const aggregates = await QueueTicket.aggregate([
+    {
+      $match: {
+        stationId: new mongoose.Types.ObjectId(String(stationId)),
+        verifiedByUserId: {
+          $in: userIds.map((userId) => new mongoose.Types.ObjectId(userId))
+        },
+        checkInStatus: "verified"
+      }
+    },
+    {
+      $group: {
+        _id: {
+          userId: "$verifiedByUserId",
+          fuelType: "$fuelType"
+        },
+        verifiedCustomers: { $sum: 1 },
+        liters: { $sum: { $ifNull: ["$requestedLiters", 0] } },
+        amount: { $sum: { $ifNull: ["$estimatedAmount", 0] } },
+        unitPriceTotal: { $sum: { $ifNull: ["$unitPrice", 0] } },
+        unitPriceCount: {
+          $sum: {
+            $cond: [{ $gt: [{ $ifNull: ["$unitPrice", 0] }, 0] }, 1, 0]
+          }
+        },
+        lastVerifiedAt: { $max: "$checkInVerifiedAt" }
+      }
+    },
+    {
+      $sort: {
+        "_id.userId": 1,
+        "_id.fuelType": 1
+      }
+    }
+  ]);
+
+  aggregates.forEach((item) => {
+    const userId = String(item?._id?.userId || "").trim();
+    if (!userId) return;
+
+    const current = summaryByUserId.get(userId) || buildEmptyVerificationSummary();
+    const verifiedCustomers = Number(item?.verifiedCustomers || 0);
+    const liters = Number(item?.liters || 0);
+    const amount = Number(item?.amount || 0);
+    const averageUnitPrice =
+      Number(item?.unitPriceCount || 0) > 0
+        ? Number(item?.unitPriceTotal || 0) / Number(item?.unitPriceCount || 1)
+        : 0;
+
+    summaryByUserId.set(userId, {
+      verifiedCustomers: current.verifiedCustomers + verifiedCustomers,
+      liters: Number((current.liters + liters).toFixed(2)),
+      amount: Number((current.amount + amount).toFixed(2)),
+      lastVerifiedAt:
+        current.lastVerifiedAt && new Date(current.lastVerifiedAt) > new Date(item?.lastVerifiedAt || 0)
+          ? current.lastVerifiedAt
+          : item?.lastVerifiedAt || current.lastVerifiedAt,
+      fuelBreakdown: [
+        ...current.fuelBreakdown,
+        {
+          fuelType: String(item?._id?.fuelType || "").trim().toLowerCase(),
+          verifiedCustomers,
+          liters: Number(liters.toFixed(2)),
+          amount: Number(amount.toFixed(2)),
+          averageUnitPrice: Number(averageUnitPrice.toFixed(2))
+        }
+      ]
+    });
+  });
+
+  return summaryByUserId;
 }
 
 async function canAccessStation(user, stationId) {
@@ -110,9 +225,16 @@ exports.listStationTeam = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
+    const verificationSummaryByUserId = await buildVerificationSummaryByUser(stationId, users);
+
     return res.json({
       total: users.length,
-      users: users.map((user) => buildUserResponse(user))
+      users: users.map((user) => ({
+        ...buildUserResponse(user),
+        verificationSummary: normalizeVerificationSummary(
+          verificationSummaryByUserId.get(String(user._id)) || buildEmptyVerificationSummary()
+        )
+      }))
     });
   } catch (_err) {
     return res.status(500).json({ message: "Failed to load team members." });

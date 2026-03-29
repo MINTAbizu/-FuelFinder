@@ -92,6 +92,11 @@ function formatMoney(value, currency = "ETB") {
   }
 }
 
+function formatPricePerLiter(value, currency = "ETB") {
+  const money = formatMoney(value, currency);
+  return money === "--" ? "--" : `${money}/L`;
+}
+
 function formatLiters(value) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return "--";
@@ -1542,6 +1547,10 @@ export default function Dashboard() {
   const blockedTeamCount = useMemo(() => {
     return teamUsers.filter((item) => Boolean(item?.isBlocked)).length;
   }, [teamUsers]);
+
+  const selectedTeamUser = useMemo(() => {
+    return teamUsers.find((item) => String(item?.id || "") === String(editTeamUserId || "")) || null;
+  }, [editTeamUserId, teamUsers]);
 
   const fuelHealth = useMemo(() => {
     const gasoline = asFiniteNumber(station?.fuelInventory?.gasolineLiters, 0);
@@ -4939,6 +4948,30 @@ export default function Dashboard() {
                               {user.phone ? " - " + String(user.phone) : ""}
                               {user.isBlocked ? " - Blocked" : ""}
                             </span>
+                            <div className="station-browser-meta" style={{ marginTop: "8px" }}>
+                              <span>
+                                {Number(user?.verificationSummary?.verifiedCustomers || 0)} verified customers
+                              </span>
+                              <span>{formatLiters(user?.verificationSummary?.liters || 0)}</span>
+                              <span>{formatMoney(user?.verificationSummary?.amount || 0, "ETB")}</span>
+                              {(Array.isArray(user?.verificationSummary?.fuelBreakdown)
+                                ? user.verificationSummary.fuelBreakdown
+                                : []
+                              )
+                                .filter((item) => Number(item?.verifiedCustomers || 0) > 0)
+                                .map((item) => (
+                                  <span key={`${user.id}-${item.fuelType}`}>
+                                    {formatFuelTypeLabel(item?.fuelType)}: {formatLiters(item?.liters || 0)} /
+                                    {formatMoney(item?.amount || 0, "ETB")} /
+                                    {formatPricePerLiter(item?.averageUnitPrice || 0, "ETB")}
+                                  </span>
+                                ))}
+                              {user?.verificationSummary?.lastVerifiedAt ? (
+                                <span>
+                                  Last verified: {formatDateTime(user.verificationSummary.lastVerifiedAt)}
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
                           <button className="btn small" type="button" onClick={() => startEditTeamUser(user)}>
                             Manage
@@ -5036,6 +5069,27 @@ export default function Dashboard() {
                         </button>
                       </div>
                     </div>
+
+                    {selectedTeamUser ? (
+                      <div className="metrics">
+                        <div className="metric">
+                          <span>Verified customers</span>
+                          <strong>{Number(selectedTeamUser?.verificationSummary?.verifiedCustomers || 0)}</strong>
+                        </div>
+                        <div className="metric">
+                          <span>Total liters</span>
+                          <strong>{formatLiters(selectedTeamUser?.verificationSummary?.liters || 0)}</strong>
+                        </div>
+                        <div className="metric">
+                          <span>Total amount</span>
+                          <strong>{formatMoney(selectedTeamUser?.verificationSummary?.amount || 0, "ETB")}</strong>
+                        </div>
+                        <div className="metric">
+                          <span>Last verified</span>
+                          <strong>{formatDateTime(selectedTeamUser?.verificationSummary?.lastVerifiedAt)}</strong>
+                        </div>
+                      </div>
+                    ) : null}
 
                     <form onSubmit={handleSaveTeamUser} className="form-row" style={{ alignItems: "end" }}>
                       <label>
