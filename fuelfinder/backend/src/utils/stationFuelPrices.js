@@ -3,16 +3,16 @@ const FUEL_PRICE_KEYS = ["gasoline", "diesel", "other"];
 function readFuelPriceValue(source, key) {
   const input = source && typeof source === "object" ? source : {};
 
-  ["fuelPrices", "fuel_prices"].forEach((nestedKey) => {
+  for (const nestedKey of ["fuelPrices", "fuel_prices"]) {
     const nested = input[nestedKey];
     if (
       nested &&
       typeof nested === "object" &&
       Object.prototype.hasOwnProperty.call(nested, key)
     ) {
-      throw { __fuelPriceFound: true, value: nested[key] };
+      return { found: true, value: nested[key] };
     }
-  });
+  }
 
   if (Object.prototype.hasOwnProperty.call(input, `${key}Price`)) {
     return { found: true, value: input[`${key}Price`] };
@@ -25,17 +25,6 @@ function readFuelPriceValue(source, key) {
   }
 
   return { found: false, value: undefined };
-}
-
-function resolveFuelPriceValue(source, key) {
-  try {
-    return readFuelPriceValue(source, key);
-  } catch (error) {
-    if (error && error.__fuelPriceFound) {
-      return { found: true, value: error.value };
-    }
-    throw error;
-  }
 }
 
 function normalizeFuelPriceNumber(value, fieldLabel = "") {
@@ -56,9 +45,9 @@ function normalizeFuelPriceNumber(value, fieldLabel = "") {
 function normalizeFuelPrices(value) {
   const source = value && typeof value === "object" ? value : {};
   return {
-    gasoline: normalizeFuelPriceNumber(resolveFuelPriceValue(source, "gasoline").value),
-    diesel: normalizeFuelPriceNumber(resolveFuelPriceValue(source, "diesel").value),
-    other: normalizeFuelPriceNumber(resolveFuelPriceValue(source, "other").value)
+    gasoline: normalizeFuelPriceNumber(readFuelPriceValue(source, "gasoline").value),
+    diesel: normalizeFuelPriceNumber(readFuelPriceValue(source, "diesel").value),
+    other: normalizeFuelPriceNumber(readFuelPriceValue(source, "other").value)
   };
 }
 
@@ -68,7 +57,7 @@ function pickFuelPricesPayload(value) {
   let hasAny = false;
 
   FUEL_PRICE_KEYS.forEach((key) => {
-    const entry = resolveFuelPriceValue(source, key);
+    const entry = readFuelPriceValue(source, key);
     if (!entry.found) return;
 
     partial[key] = normalizeFuelPriceNumber(entry.value, `${key} price`);
