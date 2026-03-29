@@ -10,6 +10,7 @@ import React, {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import api, { setApiAccessToken } from "../services/api";
+import { disableDevicePushTokenRegistrationAsync } from "../services/fuelAlertService";
 import { clearOfflineStorage, isNetworkError } from "../services/offlineService";
 import {
   biometricLogin,
@@ -352,6 +353,11 @@ export function AuthProvider({ children }) {
   }, [replaceUser]);
 
   const signOut = useCallback(async () => {
+    try {
+      await disableDevicePushTokenRegistrationAsync();
+    } catch (_err) {
+      // Best-effort cleanup only.
+    }
     try {
       await logoutUser();
     } catch (_err) {

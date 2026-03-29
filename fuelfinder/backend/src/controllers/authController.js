@@ -40,6 +40,14 @@ function normalizePhone(phone) {
   return String(phone || "").trim().replace(/[^\d+]/g, "");
 }
 
+function normalizePushToken(value) {
+  return String(value || "").trim();
+}
+
+function isValidExpoPushToken(value) {
+  return /^(ExponentPushToken|ExpoPushToken)\[[^\]]+\]$/.test(normalizePushToken(value));
+}
+
 function buildAuthPayload(user) {
   return {
     sub: String(user._id),
@@ -592,6 +600,80 @@ exports.updateProfile = async (req, res) => {
     });
   } catch (_error) {
     return res.status(500).json({ message: "Failed to update profile." });
+  }
+};
+
+exports.registerPushToken = async (req, res) => {
+  try {
+    const token = normalizePushToken(req.body.token);
+    const platform = ["ios", "android", "web"].includes(String(req.body.platform || "").trim())
+      ? String(req.body.platform || "").trim()
+      : "unknown";
+
+    if (!isValidExpoPushToken(token)) {
+      return res.status(400).json({ message: "A valid Expo push token is required." });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+
+    await User.updateMany(
+      { _id: { $ne: user._id } },
+      {
+        $pull: {
+          pushTokens: { token },
+        },
+      }
+    );
+
+    const currentTokens = Array.isArray(user.pushTokens) ? user.pushTokens : [];
+    const nextTokens = currentTokens
+      .filter((item) => normalizePushToken(item?.token) !== token)
+      .slice(-7);
+
+    nextTokens.push({
+      token,
+      provider: "expo",
+      platform,
+      updatedAt: new Date(),
+    });
+
+    user.pushTokens = nextTokens;
+    await user.save();
+
+    return res.json({
+      message: "Push token registered successfully.",
+      registered: true,
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to register push token." });
+  }
+};
+
+exports.unregisterPushToken = async (req, res) => {
+  try {
+    const token = normalizePushToken(req.body.token);
+    if (!token) {
+      return res.status(400).json({ message: "token is required." });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    user.pushTokens = (Array.isArray(user.pushTokens) ? user.pushTokens : []).filter(
+      (item) => normalizePushToken(item?.token) !== token
+    );
+    await user.save();
+
+    return res.json({
+      message: "Push token removed successfully.",
+      registered: false,
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to remove push token." });
   }
 };
 

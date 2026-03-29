@@ -32,6 +32,8 @@ router.post("/biometric/login", authLimiter, validateBiometricLogin, authControl
 router.post("/logout", auth, authController.logout);
 router.get("/me", auth, authController.me);
 router.patch("/me", auth, validateUpdateProfile, authController.updateProfile);
+router.post("/push-token", auth, authController.registerPushToken);
+router.post("/push-token/remove", auth, authController.unregisterPushToken);
 router.post("/change-password", auth, validateChangePassword, authController.changePassword);
 router.post("/biometric/register", auth, validateBiometricRegister, authController.registerBiometricDevice);
 router.post("/biometric/unregister", auth, validateBiometricRegister, authController.unregisterBiometricDevice);

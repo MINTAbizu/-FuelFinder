@@ -4,6 +4,7 @@ import { Alert, AppState } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { subscribeQueueTurnAlerts } from "../services/realtimeSocket";
 import {
+  hasRegisteredDevicePushTokenAsync,
   storeQueueApproachingAlert,
   storeQueueTurnAlert,
 } from "../services/fuelAlertService";
@@ -57,10 +58,12 @@ export default function QueueTurnAlertMonitor({ enabled }) {
   const lastPopupAlertIdRef = React.useRef("");
 
   const maybeShowAlert = React.useCallback(async (storeAlert, payload, showSystemNotification, fallbackTitle, fallbackBody) => {
+    const remotePushReady = await hasRegisteredDevicePushTokenAsync();
+    const effectiveSystemNotification = showSystemNotification && !remotePushReady;
     const event = await storeAlert(payload, {
-      showSystemNotification,
+      showSystemNotification: effectiveSystemNotification,
     });
-    if (!event?.created || showSystemNotification) {
+    if (!event?.created || effectiveSystemNotification || remotePushReady) {
       return;
     }
 

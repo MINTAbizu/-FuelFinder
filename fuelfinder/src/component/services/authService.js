@@ -55,6 +55,16 @@ export async function updateMyProfile(payload) {
   }
 }
 
+export async function registerDevicePushToken(payload) {
+  const { data } = await api.post("/auth/push-token", payload);
+  return data;
+}
+
+export async function unregisterDevicePushToken(payload) {
+  const { data } = await api.post("/auth/push-token/remove", payload);
+  return data;
+}
+
 export async function registerBiometricLogin(payload) {
   const { data } = await api.post("/auth/biometric/register", payload);
   return data;

@@ -1,9 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
 import api from "./api";
 import { buildOfflineCacheKey, requestWithOfflineCache } from "./offlineService";
+import { registerDevicePushToken, unregisterDevicePushToken } from "./authService";
 
 export const FUEL_ALERT_PREF_KEYS = {
   pushNotifications: "ff_pref_push_notifs",
@@ -19,6 +21,7 @@ const ALERT_LEDGER_KEY = "ff_fuel_alert_ledger";
 const ALERT_CHANNEL_ID = "fuel-alerts";
 const ALERT_HISTORY_LIMIT = 60;
 const ALERT_COOLDOWN_MS = 1000 * 60 * 90;
+const REGISTERED_PUSH_TOKEN_KEY = "ff_registered_push_token";
 
 let notificationsConfigured = false;
 const alertHistoryListeners = new Set();
@@ -56,6 +59,25 @@ function toPreferredFuel(value) {
 
 function trimText(value) {
   return String(value || "").trim();
+}
+
+function hasNotificationPermission(permission) {
+  return (
+    permission?.granted ||
+    permission?.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
+  );
+}
+
+function isExpoPushToken(value) {
+  return /^(ExponentPushToken|ExpoPushToken)\[[^\]]+\]$/.test(trimText(value));
+}
+
+function getExpoProjectId() {
+  return trimText(
+    process.env.EXPO_PUBLIC_EAS_PROJECT_ID ||
+      Constants?.expoConfig?.extra?.eas?.projectId ||
+      Constants?.easConfig?.projectId
+  );
 }
 
 function haversineDistanceKm(from, to) {
@@ -256,9 +278,7 @@ export async function configureFuelAlertNotificationsAsync() {
 export async function ensureFuelAlertNotificationPermissionsAsync() {
   await configureFuelAlertNotificationsAsync();
   const current = await Notifications.getPermissionsAsync();
-  const alreadyGranted =
-    current.granted ||
-    current.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
+  const alreadyGranted = hasNotificationPermission(current);
   if (alreadyGranted) return true;
 
   const requested = await Notifications.requestPermissionsAsync({
@@ -273,6 +293,82 @@ export async function ensureFuelAlertNotificationPermissionsAsync() {
     requested.granted ||
     requested.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
   );
+}
+
+export async function loadRegisteredDevicePushTokenAsync() {
+  return trimText(await AsyncStorage.getItem(REGISTERED_PUSH_TOKEN_KEY));
+}
+
+export async function hasRegisteredDevicePushTokenAsync() {
+  const token = await loadRegisteredDevicePushTokenAsync();
+  return Boolean(token);
+}
+
+export async function clearStoredRegisteredDevicePushTokenAsync() {
+  await AsyncStorage.removeItem(REGISTERED_PUSH_TOKEN_KEY);
+}
+
+export async function disableDevicePushTokenRegistrationAsync() {
+  const storedToken = await loadRegisteredDevicePushTokenAsync();
+  if (storedToken) {
+    try {
+      await unregisterDevicePushToken({ token: storedToken });
+    } catch (_error) {
+      // Clear local state even if the server cannot be reached right now.
+    }
+  }
+
+  await clearStoredRegisteredDevicePushTokenAsync();
+  return { ok: true, token: storedToken || "" };
+}
+
+export async function syncDevicePushTokenRegistrationAsync({ allowPermissionPrompt = false } = {}) {
+  await configureFuelAlertNotificationsAsync();
+
+  const permission = allowPermissionPrompt
+    ? { granted: await ensureFuelAlertNotificationPermissionsAsync() }
+    : await Notifications.getPermissionsAsync();
+  if (!hasNotificationPermission(permission)) {
+    await disableDevicePushTokenRegistrationAsync();
+    return { ok: false, reason: "permissions_not_granted" };
+  }
+
+  const projectId = getExpoProjectId();
+  if (!projectId) {
+    return { ok: false, reason: "missing_project_id" };
+  }
+
+  let tokenResponse;
+  try {
+    tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId });
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "token_lookup_failed",
+      error: trimText(error?.message) || "Unable to fetch Expo push token.",
+    };
+  }
+
+  const token = trimText(tokenResponse?.data);
+  if (!isExpoPushToken(token)) {
+    return { ok: false, reason: "invalid_token" };
+  }
+
+  try {
+    await registerDevicePushToken({
+      token,
+      provider: "expo",
+      platform: Platform.OS,
+    });
+    await AsyncStorage.setItem(REGISTERED_PUSH_TOKEN_KEY, token);
+    return { ok: true, token };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "server_registration_failed",
+      error: trimText(error?.response?.data?.message || error?.message),
+    };
+  }
 }
 
 export async function loadFuelAlertPreferences() {

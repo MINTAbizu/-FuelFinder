@@ -23,6 +23,14 @@ const userSchema = new mongoose.Schema(
         lastUsedAt: { type: Date, default: null }
       }
     ],
+    pushTokens: [
+      {
+        token: { type: String, required: true, trim: true },
+        provider: { type: String, enum: ["expo"], default: "expo" },
+        platform: { type: String, enum: ["ios", "android", "web", "unknown"], default: "unknown" },
+        updatedAt: { type: Date, default: Date.now }
+      }
+    ],
     email: { type: String, required: true, trim: true, lowercase: true, unique: true },
     authProvider: { type: String, enum: ["local", "google"], default: "local" },
     googleSub: { type: String, default: "" },
@@ -44,5 +52,6 @@ const userSchema = new mongoose.Schema(
 
 userSchema.index({ googleSub: 1 }, { sparse: true });
 userSchema.index({ "biometricDevices.deviceId": 1 }, { sparse: true });
+userSchema.index({ "pushTokens.token": 1 }, { sparse: true });
 
 module.exports = mongoose.model("User", userSchema);

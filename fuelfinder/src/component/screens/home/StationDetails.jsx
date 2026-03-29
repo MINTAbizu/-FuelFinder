@@ -6,7 +6,10 @@ import * as WebBrowser from "expo-web-browser";
 import QRCode from "react-native-qrcode-svg";
 import { useLanguage } from "../../context/LanguageContext";
 import { useAuth } from "../../context/AuthContext";
-import { storeQueueTurnAlert } from "../../services/fuelAlertService";
+import {
+  hasRegisteredDevicePushTokenAsync,
+  storeQueueTurnAlert,
+} from "../../services/fuelAlertService";
 import {
   getMyQueueTicket,
   getPublicStationDetails,
@@ -568,7 +571,7 @@ export default function StationDetails({ navigation, route }) {
         { showSystemNotification: false }
       );
 
-      if (event?.created) {
+      if (event?.created && !(await hasRegisteredDevicePushTokenAsync())) {
         Alert.alert(event.title || title, event.body || message);
       }
     })();
