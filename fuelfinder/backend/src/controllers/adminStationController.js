@@ -5,6 +5,11 @@ const {
   pickPaymentDetailsPayload
 } = require("../utils/stationPaymentDetails");
 const {
+  buildFuelPricesResponse,
+  normalizeFuelPrices,
+  pickFuelPricesPayload
+} = require("../utils/stationFuelPrices");
+const {
   normalizeLocationCategories,
   resolveStationLocation
 } = require("../utils/locationDirectory");
@@ -148,6 +153,7 @@ function buildStationResponse(station) {
       updatedByUserId: fuelInventory.updatedByUserId ? String(fuelInventory.updatedByUserId) : null
     },
     paymentDetails: normalizePaymentDetails(station.paymentDetails),
+    ...buildFuelPricesResponse(station.fuelPrices),
     chapaSubaccountId: station.chapaSubaccountId || "",
     isActive: Boolean(station.isActive),
     organizationId: station.organizationId ? String(station.organizationId) : null,
@@ -301,6 +307,7 @@ exports.createStation = async (req, res) => {
     const latitude = asNumber(req.body.latitude, "latitude");
     const longitude = asNumber(req.body.longitude, "longitude");
     const paymentDetails = pickPaymentDetailsPayload(req.body);
+    const fuelPrices = pickFuelPricesPayload(req.body);
     let organizationId = asObjectIdOrNull(req.body.organizationId, "organizationId");
     const requestedRegionId = asObjectIdOrNull(req.body.regionId, "regionId");
     const requestedCityId = asObjectIdOrNull(req.body.cityId, "cityId");
@@ -344,6 +351,7 @@ exports.createStation = async (req, res) => {
       name,
       address,
       contact,
+      ...(fuelPrices ? { fuelPrices: normalizeFuelPrices(fuelPrices) } : {}),
       ...(paymentDetails ? { paymentDetails: normalizePaymentDetails(paymentDetails) } : {}),
       chapaSubaccountId: asText(req.body.chapaSubaccountId),
       fuelStatus,
@@ -436,6 +444,13 @@ exports.updateStation = async (req, res) => {
       station.paymentDetails = {
         ...normalizePaymentDetails(station.paymentDetails),
         ...paymentDetails
+      };
+    }
+    const fuelPrices = pickFuelPricesPayload(req.body);
+    if (fuelPrices) {
+      station.fuelPrices = {
+        ...normalizeFuelPrices(station.fuelPrices),
+        ...fuelPrices
       };
     }
     if (req.body.chapaSubaccountId !== undefined) {

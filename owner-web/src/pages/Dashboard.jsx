@@ -97,6 +97,25 @@ function formatPricePerLiter(value, currency = "ETB") {
   return money === "--" ? "--" : `${money}/L`;
 }
 
+function formatFuelPriceInputValue(value) {
+  if (value === null || value === undefined) return "";
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? String(numeric) : "";
+}
+
+function buildFuelPricesPayload(form) {
+  const asNullableText = (value) => {
+    const text = String(value ?? "").trim();
+    return text ? text : null;
+  };
+
+  return {
+    gasoline: asNullableText(form?.gasolinePrice),
+    diesel: asNullableText(form?.dieselPrice),
+    other: asNullableText(form?.otherPrice)
+  };
+}
+
 function formatLiters(value) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return "--";
@@ -147,11 +166,21 @@ function downloadCsvFile(filename, headers, rows) {
 
 function buildStationFormState(stationId, station) {
   const paymentDetails = station?.paymentDetails || {};
+  const fuelPrices = station?.fuelPrices || station?.fuel_prices || {};
   return {
     _stationId: stationId,
     name: String(station?.name || ""),
     address: String(station?.address || ""),
     contact: String(station?.contact || ""),
+    gasolinePrice: formatFuelPriceInputValue(
+      fuelPrices.gasoline ?? station?.gasolinePrice ?? station?.gasoline_price
+    ),
+    dieselPrice: formatFuelPriceInputValue(
+      fuelPrices.diesel ?? station?.dieselPrice ?? station?.diesel_price
+    ),
+    otherPrice: formatFuelPriceInputValue(
+      fuelPrices.other ?? station?.otherPrice ?? station?.other_price
+    ),
     chapaSubaccountId: String(station?.chapaSubaccountId || ""),
     paymentProviderName: String(paymentDetails.providerName || ""),
     paymentAccountName: String(paymentDetails.accountName || ""),
@@ -170,6 +199,9 @@ function buildCreateStationFormState(defaultOrganizationId = "") {
     latitude: "",
     longitude: "",
     fuelStatus: "partial",
+    gasolinePrice: "",
+    dieselPrice: "",
+    otherPrice: "",
     isActive: true,
     organizationId: String(defaultOrganizationId || ""),
     regionId: "",
@@ -2238,6 +2270,9 @@ export default function Dashboard() {
         prev.name === next.name &&
         prev.address === next.address &&
         prev.contact === next.contact &&
+        prev.gasolinePrice === next.gasolinePrice &&
+        prev.dieselPrice === next.dieselPrice &&
+        prev.otherPrice === next.otherPrice &&
         prev.chapaSubaccountId === next.chapaSubaccountId &&
         prev.paymentProviderName === next.paymentProviderName &&
         prev.paymentAccountName === next.paymentAccountName &&
@@ -2254,6 +2289,9 @@ export default function Dashboard() {
     station?.address,
     station?.chapaSubaccountId,
     station?.contact,
+    station?.fuelPrices?.diesel,
+    station?.fuelPrices?.gasoline,
+    station?.fuelPrices?.other,
     station?.isActive,
     station?.name,
     station?.paymentDetails?.accountName,
@@ -2863,6 +2901,7 @@ export default function Dashboard() {
         latitude: Number(createStationForm.latitude),
         longitude: Number(createStationForm.longitude),
         fuelStatus: String(createStationForm.fuelStatus || "partial").trim().toLowerCase(),
+        fuelPrices: buildFuelPricesPayload(createStationForm),
         isActive: Boolean(createStationForm.isActive),
         organizationId: String(createStationForm.organizationId || "").trim() || null,
         regionId: String(createStationForm.regionId || "").trim() || null,
@@ -2928,6 +2967,7 @@ export default function Dashboard() {
         name: String(stationForm.name || "").trim(),
         address: String(stationForm.address || "").trim(),
         contact: String(stationForm.contact || "").trim(),
+        fuelPrices: buildFuelPricesPayload(stationForm),
         ...(canEditChapaSubaccount
           ? {
               chapaSubaccountId: String(stationForm.chapaSubaccountId || "").trim()
@@ -5163,7 +5203,7 @@ export default function Dashboard() {
                 {canManageStations && (
                   <div className="card full">
                     <h3>Create station</h3>
-                    <p className="section-title">Admin station creation + payout and payment setup</p>
+                    <p className="section-title">Admin station creation + fuel price, payout, and payment setup</p>
 
                     <form onSubmit={handleCreateStation}>
                       <div className="form-row">
@@ -5238,6 +5278,45 @@ export default function Dashboard() {
                             <option value="partial">Partial</option>
                             <option value="empty">Empty</option>
                           </select>
+                        </label>
+                        <label>
+                          Gasoline price (ETB/L)
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={createStationForm.gasolinePrice}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({ ...prev, gasolinePrice: event.target.value }))
+                            }
+                            placeholder="95.00"
+                          />
+                        </label>
+                        <label>
+                          Diesel price (ETB/L)
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={createStationForm.dieselPrice}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({ ...prev, dieselPrice: event.target.value }))
+                            }
+                            placeholder="92.00"
+                          />
+                        </label>
+                        <label>
+                          Other fuel price (ETB/L)
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={createStationForm.otherPrice}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({ ...prev, otherPrice: event.target.value }))
+                            }
+                            placeholder="90.00"
+                          />
                         </label>
                         <label>
                           Station status
@@ -5503,7 +5582,7 @@ export default function Dashboard() {
 
                 <div className="card wide">
                   <h3>{canManageStations ? "Edit selected station" : "Station profile"}</h3>
-                  <p className="section-title">Public details, customer payment details, and Chapa setup</p>
+                  <p className="section-title">Public details, customer fuel prices, payment details, and Chapa setup</p>
 
                   {!stationForm ? (
                     <span>Loading station profile...</span>
@@ -5545,6 +5624,54 @@ export default function Dashboard() {
                                 setStationForm((prev) => (prev ? { ...prev, contact: event.target.value } : prev));
                               }}
                               placeholder="+2519... (optional)"
+                            />
+                          </label>
+                          <label>
+                            Gasoline price (ETB/L)
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={stationForm.gasolinePrice}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) =>
+                                  prev ? { ...prev, gasolinePrice: event.target.value } : prev
+                                );
+                              }}
+                              placeholder="95.00"
+                            />
+                          </label>
+                          <label>
+                            Diesel price (ETB/L)
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={stationForm.dieselPrice}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) =>
+                                  prev ? { ...prev, dieselPrice: event.target.value } : prev
+                                );
+                              }}
+                              placeholder="92.00"
+                            />
+                          </label>
+                          <label>
+                            Other fuel price (ETB/L)
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={stationForm.otherPrice}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) =>
+                                  prev ? { ...prev, otherPrice: event.target.value } : prev
+                                );
+                              }}
+                              placeholder="90.00"
                             />
                           </label>
                           {canEditChapaSubaccount ? (
@@ -5690,6 +5817,24 @@ export default function Dashboard() {
                       <div>
                         <strong>Profile updated</strong>
                         <span>{formatDateTime(station?.updatedAt)}</span>
+                      </div>
+                    </div>
+                    <div className="list-item">
+                      <div>
+                        <strong>Gasoline price</strong>
+                        <span>{formatPricePerLiter(station?.fuelPrices?.gasoline ?? station?.gasolinePrice)}</span>
+                      </div>
+                    </div>
+                    <div className="list-item">
+                      <div>
+                        <strong>Diesel price</strong>
+                        <span>{formatPricePerLiter(station?.fuelPrices?.diesel ?? station?.dieselPrice)}</span>
+                      </div>
+                    </div>
+                    <div className="list-item">
+                      <div>
+                        <strong>Other fuel price</strong>
+                        <span>{formatPricePerLiter(station?.fuelPrices?.other ?? station?.otherPrice)}</span>
                       </div>
                     </div>
                     <div className="list-item">

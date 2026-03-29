@@ -4,6 +4,11 @@ const {
   normalizePaymentDetails,
   pickPaymentDetailsPayload
 } = require("../utils/stationPaymentDetails");
+const {
+  buildFuelPricesResponse,
+  normalizeFuelPrices,
+  pickFuelPricesPayload
+} = require("../utils/stationFuelPrices");
 const { normalizeLocationCategories } = require("../utils/locationDirectory");
 const {
   getAssignedStationIds,
@@ -58,6 +63,7 @@ function buildStationResponse(station) {
       updatedByUserId: fuelInventory.updatedByUserId ? String(fuelInventory.updatedByUserId) : null
     },
     paymentDetails: normalizePaymentDetails(station.paymentDetails),
+    ...buildFuelPricesResponse(station.fuelPrices),
     chapaSubaccountId: station.chapaSubaccountId || "",
     isActive: Boolean(station.isActive),
     organizationId: station.organizationId ? String(station.organizationId) : null,
@@ -194,6 +200,13 @@ exports.updateMyStation = async (req, res) => {
       station.paymentDetails = {
         ...normalizePaymentDetails(station.paymentDetails),
         ...paymentDetails
+      };
+    }
+    const fuelPrices = pickFuelPricesPayload(req.body);
+    if (fuelPrices) {
+      station.fuelPrices = {
+        ...normalizeFuelPrices(station.fuelPrices),
+        ...fuelPrices
       };
     }
     if (req.body.chapaSubaccountId !== undefined) {

@@ -5,6 +5,7 @@ const Station = require("../models/Station");
 const User = require("../models/User");
 const { getIO } = require("../socket");
 const { recordStationFuelSnapshot } = require("../utils/stationFuelHistory");
+const { resolveFuelPriceForType } = require("../utils/stationFuelPrices");
 const { notifyCustomerWhenTicketCalled } = require("../services/queueNotificationService");
 const {
   requestAuthToken,
@@ -547,7 +548,7 @@ exports.reserveQueueSlot = async (req, res) => {
     const requestedBand = resolveRequestedBand(req.body.requestedBand);
     const fuelType = resolveFuelType(req.body.fuelType);
     const requestedLiters = resolveRequestedLiters(req.body.requestedLiters);
-    const unitPrice = resolveUnitPrice(req.body.unitPrice);
+    const requestedUnitPrice = resolveUnitPrice(req.body.unitPrice);
 
     if (!isObjectId(userId) || !isObjectId(stationId)) {
       return res.status(400).json({ message: "Invalid userId or stationId." });
@@ -561,6 +562,19 @@ exports.reserveQueueSlot = async (req, res) => {
     if (requestedLiters === null) {
       return res.status(400).json({ message: "requestedLiters must be a number between 1 and 1000." });
     }
+
+    const station = await Station.findById(stationId)
+      .select("_id isActive fuelPrices")
+      .lean();
+    if (!station) {
+      return res.status(404).json({ message: "Station not found." });
+    }
+    if (station.isActive === false) {
+      return res.status(409).json({ message: "Station is currently inactive." });
+    }
+
+    const stationUnitPrice = resolveFuelPriceForType(station.fuelPrices, fuelType);
+    const unitPrice = stationUnitPrice !== null ? stationUnitPrice : requestedUnitPrice;
     if (unitPrice === null) {
       return res.status(400).json({ message: "unitPrice must be a non-negative number." });
     }

@@ -255,19 +255,38 @@ export default function StationDetails({ navigation, route }) {
   );
   const queueEnabled = isObjectId(stationId);
   const fuelPrices = useMemo(() => {
+    const fromStationMeta = stationMeta?.fuel_prices || stationMeta?.fuelPrices || {};
     const fromMap = station?.fuel_prices || station?.fuelPrices || {};
     return {
       gasoline: Number(
-        fromMap.gasoline ?? station?.gasoline_price ?? station?.gasolinePrice ?? DEFAULT_FUEL_PRICES.gasoline
+        fromStationMeta.gasoline ??
+          stationMeta?.gasoline_price ??
+          stationMeta?.gasolinePrice ??
+          fromMap.gasoline ??
+          station?.gasoline_price ??
+          station?.gasolinePrice ??
+          DEFAULT_FUEL_PRICES.gasoline
       ),
       diesel: Number(
-        fromMap.diesel ?? station?.diesel_price ?? station?.dieselPrice ?? DEFAULT_FUEL_PRICES.diesel
+        fromStationMeta.diesel ??
+          stationMeta?.diesel_price ??
+          stationMeta?.dieselPrice ??
+          fromMap.diesel ??
+          station?.diesel_price ??
+          station?.dieselPrice ??
+          DEFAULT_FUEL_PRICES.diesel
       ),
       other: Number(
-        fromMap.other ?? station?.other_price ?? station?.otherPrice ?? DEFAULT_FUEL_PRICES.other
+        fromStationMeta.other ??
+          stationMeta?.other_price ??
+          stationMeta?.otherPrice ??
+          fromMap.other ??
+          station?.other_price ??
+          station?.otherPrice ??
+          DEFAULT_FUEL_PRICES.other
       ),
     };
-  }, [station]);
+  }, [station, stationMeta]);
   const selectedUnitPrice = Number(fuelPrices[fuelType] || 0);
   const litersValue = Number(requestedLiters);
   const estimatedAmount = Number.isFinite(litersValue) && litersValue > 0

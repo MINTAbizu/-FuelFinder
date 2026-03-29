@@ -9,6 +9,7 @@ const QueueTicket = require("../models/QueueTicket");
 const City = require("../models/City");
 const Region = require("../models/Region");
 const Woreda = require("../models/Woreda");
+const { buildFuelPricesResponse } = require("../utils/stationFuelPrices");
 const { normalizePaymentDetails } = require("../utils/stationPaymentDetails");
 const {
   asLocationText,
@@ -18,7 +19,7 @@ const {
 } = require("../utils/locationDirectory");
 
 const STATION_SYNC_SELECT =
-  "_id name address contact externalSource externalSourceId fuelStatus fuelInventory paymentDetails isActive location regionId cityId woredaId subcity woreda landmark locationCategories";
+  "_id name address contact externalSource externalSourceId fuelStatus fuelInventory fuelPrices paymentDetails isActive location regionId cityId woredaId subcity woreda landmark locationCategories";
 const NEARBY_RESPONSE_CACHE_TTL_MS = 1000 * 45;
 const MAX_NEARBY_RESPONSE_CACHE_ENTRIES = 120;
 const DEFAULT_NEARBY_RADIUS_METERS = 12000;
@@ -519,6 +520,7 @@ function buildClientStationPayload(doc, fallback = {}, directory = {}) {
   const cityRecord = resolveDirectoryRecord(doc?.cityId || fallback?.cityId, directory.cities);
   const woredaRecord = resolveDirectoryRecord(doc?.woredaId || fallback?.woredaId, directory.woredas);
   const displayAddress = buildStationDisplayAddress(doc, fallback, directory);
+  const publicFuelPrices = buildFuelPricesResponse(doc?.fuelPrices || fallback);
 
   return {
     id: publicId,
@@ -537,26 +539,27 @@ function buildClientStationPayload(doc, fallback = {}, directory = {}) {
       ),
       otherLiters: Number(doc?.fuelInventory?.otherLiters || fallback?.fuelInventory?.otherLiters || 0),
       updatedAt: doc?.fuelInventory?.updatedAt || fallback?.fuelInventory?.updatedAt || null
-      },
-      supportedFuels: deriveSupportedFuels(doc, fallback),
-      paymentDetails: normalizePaymentDetails(doc?.paymentDetails || fallback?.paymentDetails),
-      regionId: doc?.regionId ? String(doc.regionId) : null,
-      region: buildRegionDirectoryPayload(regionRecord),
-      cityId: doc?.cityId ? String(doc.cityId) : null,
-      city: buildPublicCityPayload(cityRecord),
-      woredaId: doc?.woredaId ? String(doc.woredaId) : null,
-      woredaDirectory: buildPublicWoredaPayload(woredaRecord),
-      subcity: String(doc?.subcity || fallback?.subcity || ""),
-      woreda: String(doc?.woreda || fallback?.woreda || ""),
-      landmark: String(doc?.landmark || fallback?.landmark || ""),
-      locationCategories: Array.isArray(doc?.locationCategories)
-        ? doc.locationCategories
-        : (Array.isArray(fallback?.locationCategories) ? fallback.locationCategories : []),
-      latitude: Number.isFinite(docLat) ? docLat : (Number.isFinite(fallbackLat) ? fallbackLat : null),
-      longitude: Number.isFinite(docLon) ? docLon : (Number.isFinite(fallbackLon) ? fallbackLon : null),
-      queue_length: normalizeQueueLength(
-        doc?.queue_length ?? doc?.queueLength ?? fallback?.queue_length ?? fallback?.queueLength
-      ),
+    },
+    supportedFuels: deriveSupportedFuels(doc, fallback),
+    paymentDetails: normalizePaymentDetails(doc?.paymentDetails || fallback?.paymentDetails),
+    ...publicFuelPrices,
+    regionId: doc?.regionId ? String(doc.regionId) : null,
+    region: buildRegionDirectoryPayload(regionRecord),
+    cityId: doc?.cityId ? String(doc.cityId) : null,
+    city: buildPublicCityPayload(cityRecord),
+    woredaId: doc?.woredaId ? String(doc.woredaId) : null,
+    woredaDirectory: buildPublicWoredaPayload(woredaRecord),
+    subcity: String(doc?.subcity || fallback?.subcity || ""),
+    woreda: String(doc?.woreda || fallback?.woreda || ""),
+    landmark: String(doc?.landmark || fallback?.landmark || ""),
+    locationCategories: Array.isArray(doc?.locationCategories)
+      ? doc.locationCategories
+      : (Array.isArray(fallback?.locationCategories) ? fallback.locationCategories : []),
+    latitude: Number.isFinite(docLat) ? docLat : (Number.isFinite(fallbackLat) ? fallbackLat : null),
+    longitude: Number.isFinite(docLon) ? docLon : (Number.isFinite(fallbackLon) ? fallbackLon : null),
+    queue_length: normalizeQueueLength(
+      doc?.queue_length ?? doc?.queueLength ?? fallback?.queue_length ?? fallback?.queueLength
+    ),
     distanceMeters: Number.isFinite(distanceMeters) ? Math.round(distanceMeters) : null,
     isActive:
       doc?.isActive !== undefined

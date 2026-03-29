@@ -31,6 +31,11 @@ const stationSchema = new mongoose.Schema(
       updatedAt: { type: Date, default: null },
       updatedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null }
     },
+    fuelPrices: {
+      gasoline: { type: Number, default: null },
+      diesel: { type: Number, default: null },
+      other: { type: Number, default: null }
+    },
     paymentDetails: {
       providerName: { type: String, trim: true, default: "" },
       accountName: { type: String, trim: true, default: "" },
