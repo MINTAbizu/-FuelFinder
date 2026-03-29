@@ -14,9 +14,24 @@ const STATION_POPULATE = [
   { path: "cityId", select: "name slug code regionId isActive" },
   { path: "woredaId", select: "name slug code category regionId cityId isActive" }
 ];
+const DEFAULT_STATION_PAGE = 1;
+const DEFAULT_STATION_LIMIT = 50;
+const MAX_STATION_LIMIT = 200;
 
 function asText(value) {
   return String(value || "").trim();
+}
+
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function asPositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value || "").trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
 }
 
 function asObjectIdOrNull(value, fieldName) {
@@ -175,6 +190,14 @@ function getActorOrgId(req) {
 exports.listStations = async (req, res) => {
   try {
     const query = {};
+    const q = asText(req.query.q);
+    const requestedPage = asPositiveInt(req.query.page, DEFAULT_STATION_PAGE);
+    const requestedLimit = Math.min(
+      asPositiveInt(req.query.limit, DEFAULT_STATION_LIMIT),
+      MAX_STATION_LIMIT
+    );
+    const usePagination = req.query.page !== undefined || req.query.limit !== undefined;
+
     if (req.query.isActive === "true") query.isActive = true;
     if (req.query.isActive === "false") query.isActive = false;
 
@@ -222,6 +245,17 @@ exports.listStations = async (req, res) => {
     if (locationCategory) {
       query.locationCategories = locationCategory;
     }
+    if (q) {
+      const regex = new RegExp(escapeRegex(q), "i");
+      query.$or = [
+        { name: regex },
+        { address: regex },
+        { contact: regex },
+        { subcity: regex },
+        { woreda: regex },
+        { landmark: regex }
+      ];
+    }
 
     if (isOrgAdmin(req)) {
       const actorOrgId = getActorOrgId(req);
@@ -231,13 +265,26 @@ exports.listStations = async (req, res) => {
       query.organizationId = actorOrgId;
     }
 
-    const stations = await Station.find(query)
+    const total = await Station.countDocuments(query);
+    const totalPages = usePagination ? Math.max(1, Math.ceil(total / requestedLimit)) : (total > 0 ? 1 : 0);
+    const page = usePagination ? Math.min(requestedPage, Math.max(totalPages, 1)) : 1;
+    const stationQuery = Station.find(query)
       .populate(STATION_POPULATE)
-      .sort({ createdAt: -1 })
-      .lean();
+      .sort({ updatedAt: -1, createdAt: -1, _id: -1 });
+
+    if (usePagination) {
+      stationQuery.skip((page - 1) * requestedLimit).limit(requestedLimit);
+    }
+
+    const stations = await stationQuery.lean();
 
     return res.json({
-      total: stations.length,
+      total,
+      page,
+      limit: usePagination ? requestedLimit : stations.length,
+      totalPages,
+      hasPreviousPage: usePagination ? page > 1 : false,
+      hasNextPage: usePagination ? page < totalPages : false,
       stations: stations.map((station) => buildStationResponse(station))
     });
   } catch (_err) {

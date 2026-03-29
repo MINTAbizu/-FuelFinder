@@ -400,6 +400,16 @@ export async function listAdminWoredas(params = {}) {
   return apiRequest(`/admin/woredas${query ? `?${query}` : ""}`, {}, { cacheTtlMs: 1000 * 60 * 10 });
 }
 
+export async function listAdminStations(params = {}) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return apiRequest(`/admin/stations${query ? `?${query}` : ""}`, {}, { cacheTtlMs: 1000 * 15 });
+}
+
 export async function seedEthiopiaLocations(payload = {}) {
   return apiRequest("/admin/locations/seed-ethiopia", {
     method: "POST",

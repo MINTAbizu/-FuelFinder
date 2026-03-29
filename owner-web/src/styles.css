@@ -277,6 +277,38 @@ body {
   align-items: flex-start;
 }
 
+.super-admin-results-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.super-admin-results-copy {
+  display: grid;
+  gap: 4px;
+  max-width: 760px;
+}
+
+.super-admin-results-copy h4 {
+  margin: 0;
+}
+
+.super-admin-results-copy span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.super-admin-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .station-browser {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

@@ -1,4 +1,4 @@
-import React, { startTransition, useEffect, useMemo, useState } from "react";
+import React, { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   AUTH_EXPIRED_EVENT,
   AUTH_EXPIRED_MESSAGE,
@@ -10,8 +10,8 @@ import {
   forceLogoutAdminUser,
   forceLogoutStationTeamUser,
   getOwnerStation,
-  listNearbyFuelStations,
   getStationFuelStockSummary,
+  listAdminStations,
   getStationQueue,
   listAdminCities,
   listAdminRegions,
@@ -53,6 +53,7 @@ const roleLabels = {
   org_admin: "Org Owner",
   super_admin: "Super Admin"
 };
+const SUPER_ADMIN_DIRECTORY_PAGE_LIMIT = 50;
 
 function formatMinutes(minutes) {
   if (!Number.isFinite(minutes)) return "--";
@@ -801,6 +802,20 @@ export default function Dashboard() {
   const [regionFilter, setRegionFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
   const [woredaFilter, setWoredaFilter] = useState("all");
+  const [superAdminStationSearch, setSuperAdminStationSearch] = useState("");
+  const deferredSuperAdminStationSearch = useDeferredValue(superAdminStationSearch);
+  const [superAdminStationPage, setSuperAdminStationPage] = useState(1);
+  const [superAdminStationDirectoryMeta, setSuperAdminStationDirectoryMeta] = useState({
+    total: 0,
+    page: 1,
+    limit: SUPER_ADMIN_DIRECTORY_PAGE_LIMIT,
+    totalPages: 1,
+    hasNextPage: false,
+    hasPreviousPage: false
+  });
+  const [superAdminStationDirectoryLoading, setSuperAdminStationDirectoryLoading] = useState(false);
+  const [superAdminStationDirectoryError, setSuperAdminStationDirectoryError] = useState("");
+  const [superAdminStationDirectoryRefreshKey, setSuperAdminStationDirectoryRefreshKey] = useState(0);
   const [liveCityStations, setLiveCityStations] = useState([]);
   const [liveCityStationsLoading, setLiveCityStationsLoading] = useState(false);
   const [liveCityStationsError, setLiveCityStationsError] = useState("");
@@ -817,6 +832,19 @@ export default function Dashboard() {
     setRegionFilter("all");
     setCityFilter("all");
     setWoredaFilter("all");
+    setSuperAdminStationSearch("");
+    setSuperAdminStationPage(1);
+    setSuperAdminStationDirectoryMeta({
+      total: 0,
+      page: 1,
+      limit: SUPER_ADMIN_DIRECTORY_PAGE_LIMIT,
+      totalPages: 1,
+      hasNextPage: false,
+      hasPreviousPage: false
+    });
+    setSuperAdminStationDirectoryLoading(false);
+    setSuperAdminStationDirectoryError("");
+    setSuperAdminStationDirectoryRefreshKey(0);
 
     setAdminUsers([]);
     setAdminUsersError("");
@@ -1107,11 +1135,11 @@ export default function Dashboard() {
           return {
             key,
             label: item.name || key,
-            count: stationCountByRegion.get(key) || 0
+            count: isSuperAdmin ? undefined : stationCountByRegion.get(key) || 0
           };
         });
 
-      return [{ key: "all", label: "All regions", count: options.length }, ...options];
+      return [{ key: "all", label: "All regions", count: isSuperAdmin ? undefined : options.length }, ...options];
     }
 
     const map = new Map();
@@ -1123,7 +1151,7 @@ export default function Dashboard() {
     });
     const options = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
     return [{ key: "all", label: "All regions", count: options.length }, ...options];
-  }, [directoryRegions, stationCountByRegion, stationGeo]);
+  }, [directoryRegions, isSuperAdmin, stationCountByRegion, stationGeo]);
 
   const regionScopedStations = useMemo(() => {
     return stationGeo.filter((item) => {
@@ -1149,12 +1177,19 @@ export default function Dashboard() {
           return {
             key,
             label: item.name || key,
-            count: stationCountByCity.get(key) || 0,
+            count: isSuperAdmin ? undefined : stationCountByCity.get(key) || 0,
             regionId: String(item.regionId || "").trim()
           };
         });
 
-      return [{ key: "all", label: regionFilter === "all" ? "All cities" : "All cities in region", count: options.length }, ...options];
+      return [
+        {
+          key: "all",
+          label: regionFilter === "all" ? "All cities" : "All cities in region",
+          count: isSuperAdmin ? undefined : options.length
+        },
+        ...options
+      ];
     }
 
     const map = new Map();
@@ -1172,7 +1207,7 @@ export default function Dashboard() {
     });
     const options = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
     return [{ key: "all", label: "All cities", count: options.length }, ...options];
-  }, [directoryCities, regionFilter, regionScopedStations.length, stationCountByCity, stationGeo]);
+  }, [directoryCities, isSuperAdmin, regionFilter, regionScopedStations.length, stationCountByCity, stationGeo]);
 
   const cityScopedStations = useMemo(() => {
     return regionScopedStations.filter((item) => cityFilter === "all" || item.cityLabelKey === cityFilter);
@@ -1195,11 +1230,18 @@ export default function Dashboard() {
           return {
             key,
             label: item.name || key,
-            count: stationCountByWoreda.get(key) || 0
+            count: isSuperAdmin ? undefined : stationCountByWoreda.get(key) || 0
           };
         });
 
-      return [{ key: "all", label: cityFilter === "all" ? "All woredas" : "All woredas in city", count: options.length }, ...options];
+      return [
+        {
+          key: "all",
+          label: cityFilter === "all" ? "All woredas" : "All woredas in city",
+          count: isSuperAdmin ? undefined : options.length
+        },
+        ...options
+      ];
     }
 
     const map = new Map();
@@ -1210,7 +1252,7 @@ export default function Dashboard() {
     });
     const options = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
     return [{ key: "all", label: "All woredas", count: options.length }, ...options];
-  }, [cityFilter, cityScopedStations, directoryWoredas, regionFilter, stationCountByWoreda]);
+  }, [cityFilter, cityScopedStations, directoryWoredas, isSuperAdmin, regionFilter, stationCountByWoreda]);
 
   const filteredStations = useMemo(() => {
     return cityScopedStations.filter((item) => woredaFilter === "all" || item.woredaKey === woredaFilter);
@@ -1623,9 +1665,24 @@ export default function Dashboard() {
       !createStationForm.regionId ||
       String(selectedCity.regionId || "") !== String(createStationForm.regionId || "")
     ) {
-      setCreateStationForm((prev) => ({ ...prev, cityId: "" }));
+      setCreateStationForm((prev) => ({ ...prev, cityId: "", woredaId: "" }));
     }
   }, [createStationForm.cityId, createStationForm.regionId, directoryCities]);
+
+  useEffect(() => {
+    if (!createStationForm.woredaId) return;
+    const selectedWoreda = directoryWoredas.find(
+      (item) => String(item.id || item._id || "") === String(createStationForm.woredaId || "")
+    );
+    if (!selectedWoreda) return;
+
+    if (
+      !createStationForm.cityId ||
+      String(selectedWoreda.cityId || "") !== String(createStationForm.cityId || "")
+    ) {
+      setCreateStationForm((prev) => ({ ...prev, woredaId: "" }));
+    }
+  }, [createStationForm.cityId, createStationForm.woredaId, directoryWoredas]);
 
   useEffect(() => {
     const validCityKeys = new Set(cityOptions.map((item) => item.key));
@@ -1642,53 +1699,10 @@ export default function Dashboard() {
   }, [woredaFilter, woredaOptions]);
 
   useEffect(() => {
-    if (!isSuperAdmin || cityFilter === "all") {
-      setLiveCityStations([]);
-      setLiveCityStationsLoading(false);
-      setLiveCityStationsError("");
-      return;
-    }
-
-    if (!selectedCityCenter) {
-      setLiveCityStations([]);
-      setLiveCityStationsLoading(false);
-      setLiveCityStationsError(
-        selectedCityRecord
-          ? `No city-center estimate is available for ${selectedCityRecord.name} yet. Link at least one station to this city first.`
-          : ""
-      );
-      return;
-    }
-
-    let isActive = true;
-
-    const loadLiveCityStations = async () => {
-      try {
-        setLiveCityStationsLoading(true);
-        setLiveCityStationsError("");
-        const data = await listNearbyFuelStations({
-          lat: selectedCityCenter.latitude,
-          lon: selectedCityCenter.longitude,
-          radius: 12000
-        });
-        if (!isActive) return;
-        setLiveCityStations(Array.isArray(data?.stations) ? data.stations : []);
-      } catch (error) {
-        if (!isActive) return;
-        setLiveCityStations([]);
-        setLiveCityStationsError(error?.message || "Failed to load live map stations for this city.");
-      } finally {
-        if (isActive) {
-          setLiveCityStationsLoading(false);
-        }
-      }
-    };
-
-    loadLiveCityStations();
-    return () => {
-      isActive = false;
-    };
-  }, [cityFilter, isSuperAdmin, selectedCityCenter, selectedCityRecord]);
+    setLiveCityStations([]);
+    setLiveCityStationsLoading(false);
+    setLiveCityStationsError("");
+  }, [cityFilter, isSuperAdmin]);
 
   useEffect(() => {
     if (!filteredStations.length) {
@@ -1785,7 +1799,85 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (!session?.tokens?.accessToken) return;
+    if (!session?.tokens?.accessToken || !isSuperAdmin) return;
+
+    let isActive = true;
+
+    const loadSuperAdminStations = async () => {
+      try {
+        setSuperAdminStationDirectoryLoading(true);
+        setSuperAdminStationDirectoryError("");
+        setStatusMessage("");
+
+        const data = await listAdminStations({
+          page: superAdminStationPage,
+          limit: SUPER_ADMIN_DIRECTORY_PAGE_LIMIT,
+          q: deferredSuperAdminStationSearch,
+          regionId: regionFilter === "all" ? "" : regionFilter,
+          cityId: cityFilter === "all" ? "" : cityFilter,
+          woredaId: woredaFilter === "all" ? "" : woredaFilter
+        });
+        if (!isActive) return;
+
+        const list = Array.isArray(data?.stations) ? data.stations : [];
+        setStations(list);
+        setSuperAdminStationDirectoryMeta({
+          total: Number(data?.total || 0),
+          page: Number(data?.page || 1),
+          limit: Number(data?.limit || SUPER_ADMIN_DIRECTORY_PAGE_LIMIT),
+          totalPages: Math.max(1, Number(data?.totalPages || 1)),
+          hasNextPage: Boolean(data?.hasNextPage),
+          hasPreviousPage: Boolean(data?.hasPreviousPage)
+        });
+
+        if (!list.length) {
+          setStationId("");
+          return;
+        }
+
+        const hasCurrent = list.some((item) => String(item.id || item._id || "") === String(stationId));
+        if (!stationId || !hasCurrent) {
+          setStationId(String(list[0].id || list[0]._id || ""));
+        }
+      } catch (error) {
+        if (!isActive) return;
+        setStations([]);
+        setStationId("");
+        setSuperAdminStationDirectoryMeta({
+          total: 0,
+          page: 1,
+          limit: SUPER_ADMIN_DIRECTORY_PAGE_LIMIT,
+          totalPages: 1,
+          hasNextPage: false,
+          hasPreviousPage: false
+        });
+        setSuperAdminStationDirectoryError(
+          error?.message || "Failed to load the Ethiopia station directory."
+        );
+      } finally {
+        if (isActive) {
+          setSuperAdminStationDirectoryLoading(false);
+        }
+      }
+    };
+
+    loadSuperAdminStations();
+    return () => {
+      isActive = false;
+    };
+  }, [
+    cityFilter,
+    deferredSuperAdminStationSearch,
+    isSuperAdmin,
+    regionFilter,
+    session?.tokens?.accessToken,
+    superAdminStationDirectoryRefreshKey,
+    superAdminStationPage,
+    woredaFilter
+  ]);
+
+  useEffect(() => {
+    if (!session?.tokens?.accessToken || isSuperAdmin) return;
 
     const loadStations = async () => {
       setIsLoading(true);
@@ -1816,7 +1908,7 @@ export default function Dashboard() {
     };
 
     loadStations();
-  }, [actorRole, session?.tokens?.accessToken]);
+  }, [actorRole, isSuperAdmin, session?.tokens?.accessToken]);
 
   useEffect(() => {
     if (!session?.tokens?.accessToken || !stationId) return;
@@ -2582,6 +2674,7 @@ export default function Dashboard() {
         organizationId: String(createStationForm.organizationId || "").trim() || null,
         regionId: String(createStationForm.regionId || "").trim() || null,
         cityId: String(createStationForm.cityId || "").trim() || null,
+        woredaId: String(createStationForm.woredaId || "").trim() || null,
         branchId: String(createStationForm.branchId || "").trim() || null,
         ...(isSuperAdmin
           ? {
@@ -2599,13 +2692,21 @@ export default function Dashboard() {
 
       const result = await createAdminStation(payload);
       const createdStation = result?.station || null;
-      const refreshed = await listOwnerStations();
-      const nextStations = refreshed?.stations || [];
-      setStations(nextStations);
+      let nextStationId = String(createdStation?.id || createdStation?._id || "");
 
-      const nextStationId =
-        String(createdStation?.id || createdStation?._id || "") ||
-        String(nextStations[0]?.id || nextStations[0]?._id || "");
+      if (isSuperAdmin) {
+        setSuperAdminStationSearch("");
+        setSuperAdminStationPage(1);
+        setRegionFilter(String(createdStation?.regionId || "").trim() || "all");
+        setCityFilter(String(createdStation?.cityId || "").trim() || "all");
+        setWoredaFilter(String(createdStation?.woredaId || "").trim() || "all");
+        setSuperAdminStationDirectoryRefreshKey((prev) => prev + 1);
+      } else {
+        const refreshed = await listOwnerStations();
+        const nextStations = refreshed?.stations || [];
+        setStations(nextStations);
+        nextStationId = nextStationId || String(nextStations[0]?.id || nextStations[0]?._id || "");
+      }
 
       if (nextStationId) {
         setStationId(nextStationId);
@@ -2656,6 +2757,18 @@ export default function Dashboard() {
         setStation(updatedStation);
         setStationForm(buildStationFormState(stationId, updatedStation));
         setStationFormDirty(false);
+        setStations((prev) =>
+          Array.isArray(prev)
+            ? prev.map((item) =>
+                String(item?.id || item?._id || "") === String(updatedStation.id || updatedStation._id || "")
+                  ? { ...item, ...updatedStation }
+                  : item
+              )
+            : prev
+        );
+      }
+      if (isSuperAdmin) {
+        setSuperAdminStationDirectoryRefreshKey((prev) => prev + 1);
       }
       setStationFormStatus(result?.message || "Station updated.");
     } catch (error) {
@@ -2847,6 +2960,15 @@ export default function Dashboard() {
   const consoleSubtitle = isSuperAdmin
     ? "Region -> City -> Station -> Task"
     : "FuelFinder Owner Console";
+  const superAdminDirectoryTotal = Number(superAdminStationDirectoryMeta.total || 0);
+  const superAdminDirectoryPage = Number(superAdminStationDirectoryMeta.page || 1);
+  const superAdminDirectoryTotalPages = Math.max(1, Number(superAdminStationDirectoryMeta.totalPages || 1));
+  const superAdminDirectoryRangeStart =
+    superAdminDirectoryTotal > 0
+      ? (superAdminDirectoryPage - 1) * Number(superAdminStationDirectoryMeta.limit || SUPER_ADMIN_DIRECTORY_PAGE_LIMIT) + 1
+      : 0;
+  const superAdminDirectoryRangeEnd =
+    superAdminDirectoryTotal > 0 ? superAdminDirectoryRangeStart + filteredStations.length - 1 : 0;
 
   return (
     <div className="app-shell">
@@ -2912,15 +3034,19 @@ export default function Dashboard() {
           <div className="super-admin-workspace card">
             <div className="super-admin-head">
               <div className="super-admin-copy">
-                <p className="section-title">Simple super admin flow</p>
-                <h3>Choose region, then city, then open the station task you need.</h3>
+                <p className="section-title">Production station directory</p>
+                <h3>Filter the saved Ethiopia station network, then open the station task you need.</h3>
                 <p>
-                  This keeps the Ethiopia station network easier to scan on web: filter by region,
-                  narrow to a city or woreda if needed, then jump straight to queue, fuel, payments,
-                  users, or settings.
+                  This view is backed by the saved admin station directory, not a nearby live-map search.
+                  Filter by region, city, woreda, or search text, then jump straight to queue, fuel,
+                  payments, users, or settings.
                 </p>
               </div>
-              <div className="pill">{filteredStations.length} stations ready</div>
+              <div className="pill">
+                {superAdminStationDirectoryLoading
+                  ? "Refreshing station directory..."
+                  : `${superAdminDirectoryTotal} stations in directory`}
+              </div>
             </div>
 
             {locationDirectoryMessage ? (
@@ -2931,15 +3057,22 @@ export default function Dashboard() {
               </div>
             ) : null}
 
+            {superAdminStationDirectoryError ? (
+              <div className="station-browser-empty">{superAdminStationDirectoryError}</div>
+            ) : null}
+
             <div className="super-admin-steps">
               <label className="super-admin-step">
                 <strong>1. Region</strong>
                 <select
                   value={regionFilter}
                   onChange={(event) => {
-                    setRegionFilter(event.target.value);
-                    setCityFilter("all");
-                    setWoredaFilter("all");
+                    startTransition(() => {
+                      setRegionFilter(event.target.value);
+                      setCityFilter("all");
+                      setWoredaFilter("all");
+                      setSuperAdminStationPage(1);
+                    });
                   }}
                 >
                   {regionOptions.map((option) => (
@@ -2955,8 +3088,11 @@ export default function Dashboard() {
                 <select
                   value={cityFilter}
                   onChange={(event) => {
-                    setCityFilter(event.target.value);
-                    setWoredaFilter("all");
+                    startTransition(() => {
+                      setCityFilter(event.target.value);
+                      setWoredaFilter("all");
+                      setSuperAdminStationPage(1);
+                    });
                   }}
                   disabled={cityOptions.length <= 1}
                 >
@@ -2972,7 +3108,12 @@ export default function Dashboard() {
                 <strong>3. Woreda</strong>
                 <select
                   value={woredaFilter}
-                  onChange={(event) => setWoredaFilter(event.target.value)}
+                  onChange={(event) => {
+                    startTransition(() => {
+                      setWoredaFilter(event.target.value);
+                      setSuperAdminStationPage(1);
+                    });
+                  }}
                   disabled={woredaOptions.length <= 1}
                 >
                   {woredaOptions.map((option) => (
@@ -2983,17 +3124,40 @@ export default function Dashboard() {
                 </select>
               </label>
 
+              <label className="super-admin-step">
+                <strong>4. Search</strong>
+                <input
+                  type="search"
+                  value={superAdminStationSearch}
+                  onChange={(event) => {
+                    setSuperAdminStationSearch(event.target.value);
+                    setSuperAdminStationPage(1);
+                  }}
+                  placeholder="Station name, address, contact, landmark"
+                />
+                <span className="section-title">Server-side search across saved stations.</span>
+              </label>
+
               <div className="super-admin-step">
-                <strong>4. Reset filters</strong>
+                <strong>5. Reset</strong>
                 <button
                   className="btn alt small"
                   type="button"
                   onClick={() => {
-                    setRegionFilter("all");
-                    setCityFilter("all");
-                    setWoredaFilter("all");
+                    startTransition(() => {
+                      setRegionFilter("all");
+                      setCityFilter("all");
+                      setWoredaFilter("all");
+                      setSuperAdminStationSearch("");
+                      setSuperAdminStationPage(1);
+                    });
                   }}
-                  disabled={regionFilter === "all" && cityFilter === "all" && woredaFilter === "all"}
+                  disabled={
+                    regionFilter === "all" &&
+                    cityFilter === "all" &&
+                    woredaFilter === "all" &&
+                    !String(superAdminStationSearch || "").trim()
+                  }
                 >
                   Show whole network
                 </button>
@@ -3033,199 +3197,85 @@ export default function Dashboard() {
               </div>
             ) : null}
 
-            {regionStationGroups.length ? (
-              <div className="region-station-groups">
-                {regionStationGroups.map((regionGroup) => (
-                  <div className="region-station-group" key={regionGroup.key}>
-                    <div className="region-station-head">
-                      <div>
-                        <p className="section-title">Region network</p>
-                        <h4>{regionGroup.regionLabel}</h4>
-                        <span>{regionGroup.cityCount} cities configured</span>
+            <div className="super-admin-results-bar">
+              <div className="super-admin-results-copy">
+                <p className="section-title">Station directory</p>
+                <h4>
+                  {superAdminDirectoryTotal
+                    ? `Showing ${superAdminDirectoryRangeStart}-${superAdminDirectoryRangeEnd} of ${superAdminDirectoryTotal} saved stations`
+                    : "No saved stations matched this view"}
+                </h4>
+                <span>
+                  Saved admin stations are filterable nationwide by region, city, and woreda when location links are available.
+                </span>
+              </div>
+              <div className="super-admin-pagination">
+                <span className="pill">
+                  Page {superAdminDirectoryPage} of {superAdminDirectoryTotalPages}
+                </span>
+                <button
+                  className="btn alt small"
+                  type="button"
+                  onClick={() => setSuperAdminStationPage((prev) => Math.max(1, prev - 1))}
+                  disabled={superAdminStationDirectoryLoading || !superAdminStationDirectoryMeta.hasPreviousPage}
+                >
+                  Previous
+                </button>
+                <button
+                  className="btn alt small"
+                  type="button"
+                  onClick={() =>
+                    setSuperAdminStationPage((prev) =>
+                      Math.min(superAdminDirectoryTotalPages, prev + 1)
+                    )
+                  }
+                  disabled={superAdminStationDirectoryLoading || !superAdminStationDirectoryMeta.hasNextPage}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+
+            {superAdminStationDirectoryLoading ? (
+              <div className="station-browser-empty">
+                Loading the Ethiopia station directory for this filter...
+              </div>
+            ) : filteredStations.length ? (
+              <div className="station-browser">
+                {filteredStations.map((item) => {
+                  const selected = String(item.id) === String(stationId);
+                  const needsLocationReview = !item.regionId || !item.cityId || !item.woredaId;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`station-browser-card${selected ? " selected" : ""}`}
+                      onClick={() => selectStation(String(item.id))}
+                    >
+                      <div className="station-browser-top">
+                        <div>
+                          <strong>{item.name || `Station ${item.id}`}</strong>
+                          <span>
+                            {(item.cityLabel || "Unspecified city") + " / " + (item.regionLabel || "Unspecified region")}
+                          </span>
+                        </div>
+                        <span className={`pill ${needsLocationReview || !item.isActive ? "warn" : ""}`}>
+                          {needsLocationReview ? "Needs review" : item.isActive ? "Open" : "Inactive"}
+                        </span>
                       </div>
-                      <span className="pill">{regionGroup.stationCount} stations</span>
-                    </div>
-
-                    {regionGroup.cityGroups.length ? (
-                      <div className="city-station-groups">
-                        {regionGroup.cityGroups.map((group) => (
-                          <div className="city-station-group" key={group.key}>
-                            {(() => {
-                              const isSelectedCityGroup =
-                                String(cityFilter || "").trim() === String(group.key || "").trim();
-                              const linkedStationIds = new Set(
-                                (group.stations || []).map((item) => String(item?.id || "").trim()).filter(Boolean)
-                              );
-                              const nearbySavedStations = isSelectedCityGroup
-                                ? liveCityStations
-                                    .map((item) => {
-                                      const stationRecord = stationGeoById.get(String(item?.stationId || "").trim());
-                                      return stationRecord || null;
-                                    })
-                                    .filter((item) => item && !linkedStationIds.has(String(item.id || "").trim()))
-                                : [];
-                              const combinedSavedStations = [...(group.stations || []), ...nearbySavedStations].sort((a, b) =>
-                                String(a?.name || "").localeCompare(String(b?.name || ""))
-                              );
-
-                              return (
-                                <>
-                                  {isSelectedCityGroup ? (
-                              <div className="city-live-panel">
-                                <div className="city-station-head">
-                                  <div>
-                                    <p className="section-title">Live map stations</p>
-                                    <h4>{group.cityLabel}</h4>
-                                    <span>
-                                      Nearby stations from the customer map flow
-                                      {selectedCityCenter?.sampleSize
-                                        ? `, centered from ${selectedCityCenter.sampleSize} known station${selectedCityCenter.sampleSize === 1 ? "" : "s"}`
-                                        : ""}
-                                    </span>
-                                  </div>
-                                  <span className="pill">{liveCityStations.length} live stations</span>
-                                </div>
-
-                                <div className="station-browser">
-                                  {liveCityStationsLoading ? (
-                                    <div className="station-browser-empty">Loading live map stations for {group.cityLabel}...</div>
-                                  ) : liveCityStations.length ? (
-                                    liveCityStations.map((item) => {
-                                      const linkedStationId = String(item.stationId || "").trim();
-                                      const canOpenLinkedStation = filteredStations.some(
-                                        (stationItem) => String(stationItem.id || "") === linkedStationId
-                                      );
-                                      const content = (
-                                        <>
-                                          <div className="station-browser-top">
-                                            <div>
-                                              <strong>{item.name || "Fuel Station"}</strong>
-                                              <span>
-                                                {group.cityLabel} / {group.regionLabel}
-                                              </span>
-                                            </div>
-                                            <span className={`pill ${item.isActive === false ? "warn" : ""}`}>
-                                              {linkedStationId ? "Linked" : "Live map only"}
-                                            </span>
-                                          </div>
-                                          <p>{buildHumanReadableLiveAddress(item, group.cityLabel, group.regionLabel)}</p>
-                                          <div className="station-browser-meta">
-                                            <span>Fuel: {formatFuelStatusLabel(item.fuel_status || item.fuelStatus)}</span>
-                                            <span>Queue: {Number(item.queue_length || 0)} drivers</span>
-                                            {Number.isFinite(Number(item.distanceMeters)) ? (
-                                              <span>{Math.round(Number(item.distanceMeters) / 1000)} km from city center</span>
-                                            ) : null}
-                                            {Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)) ? (
-                                              <span>
-                                                Coords: {Number(item.latitude).toFixed(5)}, {Number(item.longitude).toFixed(5)}
-                                              </span>
-                                            ) : null}
-                                          </div>
-                                        </>
-                                      );
-
-                                      if (linkedStationId && canOpenLinkedStation) {
-                                        return (
-                                          <button
-                                            key={`${item.id || item.stationId || item.name}-${linkedStationId}`}
-                                            type="button"
-                                            className="station-browser-card"
-                                            onClick={() => selectStation(linkedStationId)}
-                                          >
-                                            {content}
-                                          </button>
-                                        );
-                                      }
-
-                                      return (
-                                        <div
-                                          key={`${item.id || item.stationId || item.name}-${item.latitude || "live"}`}
-                                          className="station-browser-card"
-                                        >
-                                          {content}
-                                        </div>
-                                      );
-                                    })
-                                  ) : (
-                                    <div className="station-browser-empty">
-                                      {liveCityStationsError || `No live map stations were found near ${group.cityLabel} yet.`}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                                  ) : null}
-
-                                  <div className="city-station-head">
-                                    <div>
-                                      <p className="section-title">Saved admin stations</p>
-                                      <h4>{group.cityLabel}</h4>
-                                      <span>
-                                        {isSelectedCityGroup && nearbySavedStations.length
-                                          ? "Includes nearby saved records not linked to this city yet"
-                                          : group.regionLabel}
-                                      </span>
-                                    </div>
-                                    <span className="pill">{combinedSavedStations.length} stations</span>
-                                  </div>
-
-                                  <div className="station-browser">
-                                    {combinedSavedStations.length ? (
-                                      combinedSavedStations.map((item) => {
-                                        const selected = String(item.id) === String(stationId);
-                                        const isSuggestedOnly =
-                                          isSelectedCityGroup &&
-                                          !linkedStationIds.has(String(item.id || "").trim());
-                                        return (
-                                          <button
-                                            key={item.id}
-                                            type="button"
-                                            className={`station-browser-card${selected ? " selected" : ""}`}
-                                            onClick={() => selectStation(String(item.id))}
-                                          >
-                                            <div className="station-browser-top">
-                                              <div>
-                                                <strong>{item.name || `Station ${item.id}`}</strong>
-                                                <span>
-                                                  {isSuggestedOnly
-                                                    ? `${group.cityLabel} / Suggested saved record`
-                                                    : `${item.cityLabel} / ${item.woredaLabel || "Unspecified woreda"}`}
-                                                </span>
-                                              </div>
-                                              <span className={`pill ${item.isActive ? "" : "warn"}`}>
-                                                {isSuggestedOnly ? "Needs city link" : item.isActive ? "Open" : "Inactive"}
-                                              </span>
-                                            </div>
-                                            <p>{item.address || "Address not set yet."}</p>
-                                            <div className="station-browser-meta">
-                                              <span>Fuel: {formatFuelStatusLabel(item.fuelStatus)}</span>
-                                              <span>Updated: {formatDateTime(item.fuelInventory?.updatedAt || item.updatedAt)}</span>
-                                            </div>
-                                          </button>
-                                        );
-                                      })
-                                    ) : (
-                                      <div className="station-browser-empty">
-                                        No saved database stations are linked to {group.cityLabel} yet.
-                                      </div>
-                                    )}
-                                  </div>
-                                </>
-                              );
-                            })()}
-                          </div>
-                        ))}
+                      <p>{item.address || "Address not set yet."}</p>
+                      <div className="station-browser-meta">
+                        <span>Woreda: {item.woredaLabel || "Unspecified woreda"}</span>
+                        <span>Fuel: {formatFuelStatusLabel(item.fuelStatus)}</span>
+                        <span>Updated: {formatDateTime(item.fuelInventory?.updatedAt || item.updatedAt)}</span>
                       </div>
-                    ) : (
-                      <div className="station-browser-empty">
-                        No cities are linked to {regionGroup.regionLabel} yet.
-                      </div>
-                    )}
-                  </div>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
             ) : (
               <div className="station-browser-empty">
-                No stations match this region, city, or woreda. Reset the filters or choose a different area.
+                No stations match this region, city, woreda, or search. Reset filters or import more Ethiopia stations.
               </div>
             )}
           </div>
@@ -4831,7 +4881,8 @@ export default function Dashboard() {
                                 setCreateStationForm((prev) => ({
                                   ...prev,
                                   regionId: event.target.value,
-                                  cityId: ""
+                                  cityId: "",
+                                  woredaId: ""
                                 }))
                               }
                             >
@@ -4859,7 +4910,11 @@ export default function Dashboard() {
                             <select
                               value={createStationForm.cityId}
                               onChange={(event) =>
-                                setCreateStationForm((prev) => ({ ...prev, cityId: event.target.value }))
+                                setCreateStationForm((prev) => ({
+                                  ...prev,
+                                  cityId: event.target.value,
+                                  woredaId: ""
+                                }))
                               }
                               disabled={!createStationForm.regionId}
                             >
@@ -4880,6 +4935,36 @@ export default function Dashboard() {
                                 setCreateStationForm((prev) => ({ ...prev, cityId: event.target.value }))
                               }
                               placeholder="Optional city ObjectId"
+                            />
+                          )}
+                        </label>
+                        <label>
+                          Woreda
+                          {createStationWoredaOptions.length ? (
+                            <select
+                              value={createStationForm.woredaId}
+                              onChange={(event) =>
+                                setCreateStationForm((prev) => ({ ...prev, woredaId: event.target.value }))
+                              }
+                              disabled={!createStationForm.cityId}
+                            >
+                              <option value="">
+                                {createStationForm.cityId ? "Select woreda" : "Select city first"}
+                              </option>
+                              {createStationWoredaOptions.map((item) => (
+                                <option key={String(item.id || item._id || "")} value={String(item.id || item._id || "")}>
+                                  {item.name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type="text"
+                              value={createStationForm.woredaId}
+                              onChange={(event) =>
+                                setCreateStationForm((prev) => ({ ...prev, woredaId: event.target.value }))
+                              }
+                              placeholder="Optional woreda ObjectId"
                             />
                           )}
                         </label>
