@@ -1832,6 +1832,7 @@ function ProfileScreen({ navigation }) {
           })}
           onPress={() => navigation.navigate("TransactionHistory")}
         />
+        {false && (
           transactionHistory.map((item, index) => {
             const queueTone = getTransactionTone(item?.status);
             const paymentTone = getTransactionTone(item?.paymentStatus);
@@ -2370,6 +2371,24 @@ function HomeStackNavigator() {
   );
 }
 
+function ProfileStackNavigator() {
+  const { t } = useLanguage();
+  return (
+    <ProfileStack.Navigator>
+      <ProfileStack.Screen
+        name="ProfileMain"
+        component={ProfileScreen}
+        options={{ headerShown: false }}
+      />
+      <ProfileStack.Screen
+        name="TransactionHistory"
+        component={TransactionHistoryScreen}
+        options={{ title: t("transactionHistoryTitle", { defaultValue: "Transaction History" }) }}
+      />
+    </ProfileStack.Navigator>
+  );
+}
+
 function AppTabs() {
   const { t } = useLanguage();
   const insets = useSafeAreaInsets();
@@ -2445,7 +2464,7 @@ function AppTabs() {
         }}
         component={AlertsScreen}
       />
-      <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: t("profile") }} />
+      <Tab.Screen name="Profile" component={ProfileStackNavigator} options={{ title: t("profile") }} />
     </Tab.Navigator>
   );
 }
