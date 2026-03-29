@@ -38,6 +38,7 @@ import {
 
 const sections = [
   { id: "overview", label: "Command Center" },
+  { id: "all_stations", label: "All Stations" },
   { id: "queue", label: "Queue" },
   { id: "inventory", label: "Fuel & Stock" },
   { id: "cashflow", label: "Cashflow" },
@@ -820,6 +821,9 @@ export default function Dashboard() {
   const [liveCityStations, setLiveCityStations] = useState([]);
   const [liveCityStationsLoading, setLiveCityStationsLoading] = useState(false);
   const [liveCityStationsError, setLiveCityStationsError] = useState("");
+  const [allStationsList, setAllStationsList] = useState([]);
+  const [allStationsListLoading, setAllStationsListLoading] = useState(false);
+  const [allStationsListError, setAllStationsListError] = useState("");
 
   const resetConsoleState = (nextAuthError = "") => {
     setSession(null);
@@ -846,6 +850,9 @@ export default function Dashboard() {
     setSuperAdminStationDirectoryLoading(false);
     setSuperAdminStationDirectoryError("");
     setSuperAdminStationDirectoryRefreshKey(0);
+    setAllStationsList([]);
+    setAllStationsListLoading(false);
+    setAllStationsListError("");
 
     setAdminUsers([]);
     setAdminUsersError("");
@@ -1591,7 +1598,8 @@ export default function Dashboard() {
   ]);
 
   const visibleSections = useMemo(() => {
-    if (isSuperAdmin || isStationExec) return sections;
+    if (isSuperAdmin) return sections;
+    if (isStationExec) return sections.filter((section) => section.id !== "all_stations");
     return sections.filter((section) => ["overview", "queue", "inventory"].includes(section.id));
   }, [isSuperAdmin, isStationExec]);
 
@@ -1839,6 +1847,35 @@ export default function Dashboard() {
     return list;
   }, [adminUsers, limitToCurrentStation, roleFilter, stationId, userSearch]);
 
+  const allStationsSorted = useMemo(() => {
+    const collator = new Intl.Collator(undefined, {
+      numeric: true,
+      sensitivity: "base"
+    });
+
+    const getStationSortParts = (item) => [
+      String(item?.region?.name || "").trim(),
+      String(item?.city?.name || item?.subcity || "").trim(),
+      String(item?.woredaDirectory?.name || item?.woreda || "").trim(),
+      String(item?.name || "").trim(),
+      String(item?.address || "").trim()
+    ];
+
+    return (Array.isArray(allStationsList) ? allStationsList : [])
+      .slice()
+      .sort((left, right) => {
+        const leftParts = getStationSortParts(left);
+        const rightParts = getStationSortParts(right);
+
+        for (let index = 0; index < leftParts.length; index += 1) {
+          const comparison = collator.compare(leftParts[index], rightParts[index]);
+          if (comparison !== 0) return comparison;
+        }
+
+        return collator.compare(String(left?.id || ""), String(right?.id || ""));
+      });
+  }, [allStationsList]);
+
   const openSection = (nextSection) => {
     startTransition(() => {
       setActive(nextSection);
@@ -1928,6 +1965,37 @@ export default function Dashboard() {
     superAdminStationPage,
     woredaFilter
   ]);
+
+  useEffect(() => {
+    if (!session?.tokens?.accessToken || !isSuperAdmin || active !== "all_stations") return;
+
+    let isActive = true;
+
+    const loadAllStations = async () => {
+      try {
+        setAllStationsListLoading(true);
+        setAllStationsListError("");
+
+        const data = await listAdminStations();
+        if (!isActive) return;
+
+        setAllStationsList(Array.isArray(data?.stations) ? data.stations : []);
+      } catch (error) {
+        if (!isActive) return;
+        setAllStationsList([]);
+        setAllStationsListError(error?.message || "Failed to load the full Ethiopia station list.");
+      } finally {
+        if (isActive) {
+          setAllStationsListLoading(false);
+        }
+      }
+    };
+
+    loadAllStations();
+    return () => {
+      isActive = false;
+    };
+  }, [active, isSuperAdmin, session?.tokens?.accessToken]);
 
   useEffect(() => {
     if (!session?.tokens?.accessToken || isSuperAdmin) return;
@@ -3057,30 +3125,39 @@ export default function Dashboard() {
             <h2>{sectionTitle}</h2>
             <p className="section-title">{consoleSubtitle}</p>
           </div>
-          <div className="station-chip">
-            <strong>Station:</strong>
-            {canSwitchStation ? (
-              filteredStations.length ? (
-                <select value={stationId} onChange={(event) => setStationId(event.target.value)}>
-                  {filteredStations.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {(item.name || `Station ${item.id}`) +
-                        (item.cityLabel ? ` - ${item.cityLabel}` : "")}
-                    </option>
-                  ))}
-                </select>
+          {active === "all_stations" && isSuperAdmin ? (
+            <div className="station-chip">
+              <strong>Directory:</strong>
+              <span style={{ fontWeight: 700 }}>
+                {allStationsListLoading ? "Loading all stations..." : `${allStationsSorted.length} stations`}
+              </span>
+            </div>
+          ) : (
+            <div className="station-chip">
+              <strong>Station:</strong>
+              {canSwitchStation ? (
+                filteredStations.length ? (
+                  <select value={stationId} onChange={(event) => setStationId(event.target.value)}>
+                    {filteredStations.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {(item.name || `Station ${item.id}`) +
+                          (item.cityLabel ? ` - ${item.cityLabel}` : "")}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <select value="" disabled>
+                    <option value="">No stations for this filter</option>
+                  </select>
+                )
               ) : (
-                <select value="" disabled>
-                  <option value="">No stations for this filter</option>
-                </select>
-              )
-            ) : (
-              <span style={{ fontWeight: 700 }}>{resolvedStationName}</span>
-            )}
-            <span className={`pill ${station?.isActive ? "" : "warn"}`}>
-              {station?.isActive ? "Open" : "Inactive"}
-            </span>
-          </div>
+                <span style={{ fontWeight: 700 }}>{resolvedStationName}</span>
+              )}
+              <span className={`pill ${station?.isActive ? "" : "warn"}`}>
+                {station?.isActive ? "Open" : "Inactive"}
+              </span>
+            </div>
+          )}
         </div>
 
         {isSuperAdmin && (
@@ -3615,6 +3692,71 @@ export default function Dashboard() {
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        )}
+
+        {active === "all_stations" && isSuperAdmin && (
+          <div className="grid">
+            <div className="card full">
+              <div className="super-admin-head">
+                <div className="super-admin-copy">
+                  <p className="section-title">Ethiopia station directory</p>
+                  <h3>All saved stations</h3>
+                  <p>
+                    This root admin page shows the full saved station list across Ethiopia with no
+                    filters, no actions, and no extra controls.
+                  </p>
+                </div>
+                <div className="pill">
+                  {allStationsListLoading ? "Loading station list..." : `${allStationsSorted.length} stations`}
+                </div>
+              </div>
+
+              {allStationsListError ? (
+                <div className="station-browser-empty">{allStationsListError}</div>
+              ) : null}
+
+              {allStationsListLoading ? (
+                <div className="station-browser-empty">Loading the Ethiopia station list...</div>
+              ) : null}
+
+              {!allStationsListLoading && !allStationsListError && !allStationsSorted.length ? (
+                <div className="station-browser-empty">No saved stations were found yet.</div>
+              ) : null}
+
+              {!allStationsListLoading && !allStationsListError && allStationsSorted.length ? (
+                <ol className="all-station-list">
+                  {allStationsSorted.map((item, index) => {
+                    const regionLabel = String(item?.region?.name || "").trim() || "Unspecified region";
+                    const cityLabel =
+                      String(item?.city?.name || item?.subcity || "").trim() || "Unspecified city";
+                    const woredaLabel =
+                      String(item?.woredaDirectory?.name || item?.woreda || "").trim() ||
+                      "Unspecified woreda";
+
+                    return (
+                      <li className="all-station-item" key={String(item?.id || `${item?.name || "station"}-${index}`)}>
+                        <div className="all-station-order">{index + 1}</div>
+                        <div className="all-station-copy">
+                          <div className="all-station-head">
+                            <strong>{item?.name || "Unnamed station"}</strong>
+                            <span className={`pill ${item?.isActive ? "" : "warn"}`}>
+                              {item?.isActive ? "Open" : "Inactive"}
+                            </span>
+                          </div>
+                          <p>{item?.address || "Address not listed."}</p>
+                          <div className="all-station-meta">
+                            <span>{regionLabel}</span>
+                            <span>{cityLabel}</span>
+                            <span>{woredaLabel}</span>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              ) : null}
             </div>
           </div>
         )}
