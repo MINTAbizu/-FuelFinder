@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Region = require("../models/Region");
 const City = require("../models/City");
+const Station = require("../models/Station");
 const Woreda = require("../models/Woreda");
 const slugify = require("../utils/slugify");
 const {
@@ -42,10 +43,12 @@ function buildRegionResponse(region) {
   };
 }
 
-function buildCityResponse(city) {
+function buildCityResponse(city, stats = null) {
   const populatedRegion = city.regionId && typeof city.regionId === "object" && city.regionId.name
     ? buildRegionResponse(city.regionId)
     : null;
+  const latitude = Number(stats?.latitude);
+  const longitude = Number(stats?.longitude);
 
   return {
     id: String(city._id),
@@ -55,6 +58,9 @@ function buildCityResponse(city) {
     isActive: Boolean(city.isActive),
     regionId: populatedRegion ? populatedRegion.id : extractId(city.regionId),
     region: populatedRegion,
+    stationCount: Number(stats?.stationCount || 0),
+    latitude: Number.isFinite(latitude) ? latitude : null,
+    longitude: Number.isFinite(longitude) ? longitude : null,
     createdAt: city.createdAt,
     updatedAt: city.updatedAt
   };
@@ -203,9 +209,30 @@ exports.listCities = async (req, res) => {
       .sort({ name: 1 })
       .lean();
 
+    const cityIds = cities.map((city) => city._id);
+    const stats = cityIds.length
+      ? await Station.aggregate([
+          {
+            $match: {
+              cityId: { $in: cityIds },
+              isActive: true
+            }
+          },
+          {
+            $group: {
+              _id: "$cityId",
+              stationCount: { $sum: 1 },
+              longitude: { $avg: { $arrayElemAt: ["$location.coordinates", 0] } },
+              latitude: { $avg: { $arrayElemAt: ["$location.coordinates", 1] } }
+            }
+          }
+        ])
+      : [];
+    const statsByCityId = new Map(stats.map((item) => [String(item._id), item]));
+
     return res.json({
       total: cities.length,
-      cities: cities.map((city) => buildCityResponse(city))
+      cities: cities.map((city) => buildCityResponse(city, statsByCityId.get(String(city._id))))
     });
   } catch (_error) {
     return res.status(500).json({ message: "Failed to load cities." });

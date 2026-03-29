@@ -12,6 +12,7 @@ import {
   getOwnerStation,
   getStationFuelStockSummary,
   listAdminStations,
+  listNearbyFuelStations,
   getStationQueue,
   listAdminCities,
   listAdminRegions,
@@ -1121,6 +1122,15 @@ export default function Dashboard() {
 
   const selectedCityCenter = useMemo(() => {
     if (!selectedCityRecord) return null;
+    const recordLatitude = Number(selectedCityRecord.latitude);
+    const recordLongitude = Number(selectedCityRecord.longitude);
+    if (Number.isFinite(recordLatitude) && Number.isFinite(recordLongitude)) {
+      return {
+        latitude: recordLatitude,
+        longitude: recordLongitude,
+        sampleSize: Number(selectedCityRecord.stationCount || 0)
+      };
+    }
     const cityId = String(selectedCityRecord.id || selectedCityRecord._id || "").trim();
     return cityCenterById.get(cityId) || null;
   }, [cityCenterById, selectedCityRecord]);
@@ -1699,10 +1709,53 @@ export default function Dashboard() {
   }, [woredaFilter, woredaOptions]);
 
   useEffect(() => {
-    setLiveCityStations([]);
-    setLiveCityStationsLoading(false);
-    setLiveCityStationsError("");
-  }, [cityFilter, isSuperAdmin]);
+    if (!isSuperAdmin || cityFilter === "all") {
+      setLiveCityStations([]);
+      setLiveCityStationsLoading(false);
+      setLiveCityStationsError("");
+      return;
+    }
+
+    if (!selectedCityCenter) {
+      setLiveCityStations([]);
+      setLiveCityStationsLoading(false);
+      setLiveCityStationsError(
+        selectedCityRecord
+          ? `No city-center estimate is available for ${selectedCityRecord.name} yet. Link at least one station to this city first.`
+          : ""
+      );
+      return;
+    }
+
+    let isActive = true;
+
+    const loadLiveCityStations = async () => {
+      try {
+        setLiveCityStationsLoading(true);
+        setLiveCityStationsError("");
+        const data = await listNearbyFuelStations({
+          lat: selectedCityCenter.latitude,
+          lon: selectedCityCenter.longitude,
+          radius: 12000
+        });
+        if (!isActive) return;
+        setLiveCityStations(Array.isArray(data?.stations) ? data.stations : []);
+      } catch (error) {
+        if (!isActive) return;
+        setLiveCityStations([]);
+        setLiveCityStationsError(error?.message || "Failed to load live map stations for this city.");
+      } finally {
+        if (isActive) {
+          setLiveCityStationsLoading(false);
+        }
+      }
+    };
+
+    loadLiveCityStations();
+    return () => {
+      isActive = false;
+    };
+  }, [cityFilter, isSuperAdmin, selectedCityCenter, selectedCityRecord]);
 
   useEffect(() => {
     if (!filteredStations.length) {
@@ -3193,6 +3246,105 @@ export default function Dashboard() {
                       {action.label}
                     </button>
                   ))}
+                </div>
+              </div>
+            ) : null}
+
+            {cityFilter !== "all" ? (
+              <div className="city-live-panel">
+                <div className="city-station-head">
+                  <div>
+                    <p className="section-title">Live map stations</p>
+                    <h4>{selectedCityRecord?.name || "Selected city"}</h4>
+                    <span>
+                      Nearby stations from the customer map flow
+                      {selectedCityCenter?.sampleSize
+                        ? `, centered from ${selectedCityCenter.sampleSize} known station${selectedCityCenter.sampleSize === 1 ? "" : "s"}`
+                        : ""}
+                    </span>
+                  </div>
+                  <span className="pill">{liveCityStations.length} live stations</span>
+                </div>
+
+                <div className="station-browser">
+                  {liveCityStationsLoading ? (
+                    <div className="station-browser-empty">
+                      Loading live map stations for {selectedCityRecord?.name || "this city"}...
+                    </div>
+                  ) : liveCityStations.length ? (
+                    liveCityStations.map((item) => {
+                      const linkedStationId = String(item.stationId || "").trim();
+                      const canOpenLinkedStation = filteredStations.some(
+                        (stationItem) => String(stationItem.id || "") === linkedStationId
+                      );
+                      const content = (
+                        <>
+                          <div className="station-browser-top">
+                            <div>
+                              <strong>{item.name || "Fuel Station"}</strong>
+                              <span>
+                                {(selectedCityRecord?.name || "Selected city") +
+                                  " / " +
+                                  (selectedCityRecord?.region?.name || selectedStationGeo?.regionLabel || item.region?.name || "Selected region")}
+                              </span>
+                            </div>
+                            <span className={`pill ${item.isActive === false ? "warn" : ""}`}>
+                              {linkedStationId
+                                ? canOpenLinkedStation
+                                  ? "Linked"
+                                  : "Linked in directory"
+                                : "Live map only"}
+                            </span>
+                          </div>
+                          <p>
+                            {buildHumanReadableLiveAddress(
+                              item,
+                              selectedCityRecord?.name || "Selected city",
+                              selectedCityRecord?.region?.name || selectedStationGeo?.regionLabel || item.region?.name || "Selected region"
+                            )}
+                          </p>
+                          <div className="station-browser-meta">
+                            <span>Fuel: {formatFuelStatusLabel(item.fuel_status || item.fuelStatus)}</span>
+                            <span>Queue: {Number(item.queue_length || 0)} drivers</span>
+                            {Number.isFinite(Number(item.distanceMeters)) ? (
+                              <span>{Math.round(Number(item.distanceMeters) / 1000)} km from city center</span>
+                            ) : null}
+                            {Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)) ? (
+                              <span>
+                                Coords: {Number(item.latitude).toFixed(5)}, {Number(item.longitude).toFixed(5)}
+                              </span>
+                            ) : null}
+                          </div>
+                        </>
+                      );
+
+                      if (linkedStationId && canOpenLinkedStation) {
+                        return (
+                          <button
+                            key={`${item.id || item.stationId || item.name}-${linkedStationId}`}
+                            type="button"
+                            className="station-browser-card"
+                            onClick={() => selectStation(linkedStationId)}
+                          >
+                            {content}
+                          </button>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={`${item.id || item.stationId || item.name}-${item.latitude || "live"}`}
+                          className="station-browser-card"
+                        >
+                          {content}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="station-browser-empty">
+                      {liveCityStationsError || `No live map stations were found near ${selectedCityRecord?.name || "this city"} yet.`}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : null}
