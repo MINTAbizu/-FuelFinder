@@ -24,6 +24,7 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import FuelAlertMonitor from "./src/component/alerts/FuelAlertMonitor";
+import PushNotificationMonitor from "./src/component/alerts/PushNotificationMonitor";
 import QueueTurnAlertMonitor from "./src/component/alerts/QueueTurnAlertMonitor";
 import HomeScreen from "./src/component/screens/home/HomeScreen";
 import StationDetails from "./src/component/screens/home/StationDetails";
@@ -32,6 +33,7 @@ import LoginScreen from "./src/component/screens/auth/LoginScreen";
 import RegisterScreen from "./src/component/screens/auth/RegisterScreen";
 import PhoneVerifyScreen from "./src/component/screens/auth/PhoneVerifyScreen";
 import AlertsScreen from "./src/component/screens/alerts/AlertsScreen";
+import TransactionHistoryScreen from "./src/component/screens/profile/TransactionHistoryScreen";
 import {
   changeMyPassword,
   registerBiometricLogin,
@@ -55,10 +57,12 @@ import {
   updateBiometricLoginMeta,
 } from "./src/component/services/biometricService";
 import {
+  disableDevicePushTokenRegistrationAsync,
   ensureFuelAlertNotificationPermissionsAsync,
   FUEL_ALERT_PREF_KEYS,
   loadUnreadFuelAlertCount,
   resetFuelAlertState,
+  syncDevicePushTokenRegistrationAsync,
   subscribeToFuelAlertHistory,
 } from "./src/component/services/fuelAlertService";
 import * as Location from "expo-location";
@@ -67,11 +71,11 @@ import { AuthProvider, useAuth } from "./src/component/context/AuthContext";
 import { OfflineProvider, useOffline } from "./src/component/context/OfflineContext";
 import { LanguageProvider, useLanguage } from "./src/component/context/LanguageContext";
 import { clearOfflineStorage } from "./src/component/services/offlineService";
-import { getMyTransactionHistory } from "./src/component/services/queueService";
 
 const queryClient = new QueryClient();
 const RootStack = createNativeStackNavigator();
 const HomeStack = createNativeStackNavigator();
+const ProfileStack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 const BIOMETRIC_PREF_KEY = "ff_pref_biometric_unlock";
 
@@ -342,10 +346,6 @@ function ProfileScreen({ navigation }) {
   const [twoFactorResending, setTwoFactorResending] = React.useState(false);
   const [vehicleEditorVisible, setVehicleEditorVisible] = React.useState(false);
   const [vehicleDraft, setVehicleDraft] = React.useState(() => createEmptyVehicleDraft());
-  const [transactionHistory, setTransactionHistory] = React.useState([]);
-  const [transactionHistoryTotal, setTransactionHistoryTotal] = React.useState(0);
-  const [transactionHistoryLoading, setTransactionHistoryLoading] = React.useState(true);
-  const [transactionHistoryRefreshing, setTransactionHistoryRefreshing] = React.useState(false);
 
   React.useEffect(() => {
     let mounted = true;
@@ -412,43 +412,11 @@ function ProfileScreen({ navigation }) {
     }
   }, [t]);
 
-  const loadTransactionHistory = React.useCallback(
-    async (refreshing = false) => {
-      if (refreshing) {
-        setTransactionHistoryRefreshing(true);
-      } else {
-        setTransactionHistoryLoading(true);
-      }
-
-      try {
-        const data = await getMyTransactionHistory(8);
-        setTransactionHistory(Array.isArray(data?.items) ? data.items : []);
-        setTransactionHistoryTotal(Number(data?.total || 0));
-      } catch (_error) {
-        Alert.alert(t("somethingWentWrong"));
-      } finally {
-        if (refreshing) {
-          setTransactionHistoryRefreshing(false);
-        } else {
-          setTransactionHistoryLoading(false);
-        }
-      }
-    },
-    [t]
-  );
-
   useFocusEffect(
     React.useCallback(() => {
       refreshAccountCollections();
       return undefined;
     }, [refreshAccountCollections])
-  );
-
-  useFocusEffect(
-    React.useCallback(() => {
-      loadTransactionHistory(transactionHistory.length > 0);
-      return undefined;
-    }, [loadTransactionHistory, transactionHistory.length])
   );
 
   React.useEffect(() => {
@@ -559,6 +527,7 @@ function ProfileScreen({ navigation }) {
 
       setPrefs((current) => ({ ...current, pushNotifs: true }));
       await persistBool(PREF_KEYS.pushNotifs, true);
+      await syncDevicePushTokenRegistrationAsync({ allowPermissionPrompt: false });
       return true;
     } catch (_error) {
       Alert.alert(t("somethingWentWrong"));
@@ -606,6 +575,7 @@ function ProfileScreen({ navigation }) {
       }));
       await persistBool(PREF_KEYS.pushNotifs, false);
       await persistBool(PREF_KEYS.nearbyFuelAlerts, false);
+      await disableDevicePushTokenRegistrationAsync();
       return;
     }
 
@@ -1854,59 +1824,14 @@ function ProfileScreen({ navigation }) {
         {t("transactionHistoryTitle", { defaultValue: "Transaction History" })}
       </Text>
       <View style={styles.sectionCard}>
-        <View style={styles.transactionSectionHeader}>
-          <View style={styles.transactionSectionHeaderText}>
-            <Text style={styles.transactionSectionHeading}>
-              {t("transactionHistoryHeading", { defaultValue: "Recent reservations and payments" })}
-            </Text>
-            <Text style={styles.transactionSectionSubtitle}>
-              {t("transactionHistorySubtitle", {
-                defaultValue: "See your latest fuel liters, total amount, station, and payment status in one place.",
-              })}
-            </Text>
-          </View>
-          <View style={styles.transactionSectionActions}>
-            <Text style={styles.transactionCount}>
-              {transactionHistoryTotal} {t("transactionHistoryCount", { defaultValue: "records" })}
-            </Text>
-            <Pressable
-              style={[styles.inlineLinkButton, transactionHistoryRefreshing && styles.modalButtonDisabled]}
-              onPress={() => loadTransactionHistory(true)}
-              disabled={transactionHistoryRefreshing}
-            >
-              {transactionHistoryRefreshing ? (
-                <ActivityIndicator size="small" color="#1D4ED8" />
-              ) : (
-                <Text style={styles.inlineLinkButtonText}>
-                  {t("refreshActionLabel", { defaultValue: "Refresh" })}
-                </Text>
-              )}
-            </Pressable>
-          </View>
-        </View>
-
-        {transactionHistoryLoading ? (
-          <View style={styles.transactionStateWrap}>
-            <ActivityIndicator size="small" color="#0F766E" />
-            <Text style={styles.inlineLoadingText}>
-              {t("transactionHistoryLoading", { defaultValue: "Loading transaction history..." })}
-            </Text>
-          </View>
-        ) : !transactionHistory.length ? (
-          <View style={styles.transactionEmptyWrap}>
-            <View style={styles.emptyStateCard}>
-              <Ionicons name="receipt-outline" size={24} color="#0F766E" />
-              <Text style={styles.emptyStateTitle}>
-                {t("transactionHistoryEmptyTitle", { defaultValue: "No transactions yet" })}
-              </Text>
-              <Text style={styles.emptyStateSubtitle}>
-                {t("transactionHistoryEmptyBody", {
-                  defaultValue: "When you reserve fuel or complete a payment, it will appear here in your profile.",
-                })}
-              </Text>
-            </View>
-          </View>
-        ) : (
+        <SettingRow
+          icon="receipt-outline"
+          title={t("transactionHistoryTitle", { defaultValue: "Transaction History" })}
+          subtitle={t("transactionHistorySubtitle", {
+            defaultValue: "Open your full transaction history and filter it with Ethiopian calendar dates.",
+          })}
+          onPress={() => navigation.navigate("TransactionHistory")}
+        />
           transactionHistory.map((item, index) => {
             const queueTone = getTransactionTone(item?.status);
             const paymentTone = getTransactionTone(item?.paymentStatus);
@@ -2654,6 +2579,7 @@ function AppNavigator() {
         <OfflineStatusBanner />
         {isAuthenticated ? <AppTabs /> : <AuthStack />}
         <FuelAlertMonitor enabled={isAuthenticated && !requiresBiometricUnlock} />
+        <PushNotificationMonitor enabled={isAuthenticated && !requiresBiometricUnlock} />
         <QueueTurnAlertMonitor enabled={isAuthenticated && !requiresBiometricUnlock} />
         {isAuthenticated && requiresBiometricUnlock ? (
           <View style={styles.biometricOverlay}>

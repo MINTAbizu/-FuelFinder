@@ -1113,7 +1113,7 @@ exports.getMyTransactionHistory = async (req, res) => {
     }
 
     const parsedLimit = Number(req.query.limit || 10);
-    const limit = Math.min(50, Math.max(1, Number.isFinite(parsedLimit) ? parsedLimit : 10));
+    const limit = Math.min(50, Math.max(1, Math.trunc(Number.isFinite(parsedLimit) ? parsedLimit : 10)));
 
     let tickets = await QueueTicket.find({ userId })
       .select(
