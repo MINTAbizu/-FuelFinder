@@ -1,0 +1,99 @@
+{
+  "source": "OpenStreetMap",
+  "country": "Ethiopia",
+  "stationType": "electric",
+  "exportedAt": "2026-04-02T15:04:46.150Z",
+  "reverseGeocoded": false,
+  "total": 4,
+  "stations": [
+    {
+      "name": "Charging Station node-13058129622",
+      "address": "Approx location (9.01613, 38.77255)",
+      "latitude": 9.0161335,
+      "longitude": 38.7725536,
+      "stationType": "electric",
+      "regionName": "",
+      "regionCategory": "regional_state",
+      "cityName": "",
+      "woredaName": "",
+      "woredaCategory": "",
+      "subcity": "",
+      "landmark": "",
+      "locationCategories": [
+        "ev-charging"
+      ],
+      "contact": "",
+      "fuelStatus": "partial",
+      "isActive": true,
+      "externalSource": "osm",
+      "externalSourceId": "node-13058129622"
+    },
+    {
+      "name": "Charging Station node-4671615789",
+      "address": "Approx location (9.06712, 38.72485)",
+      "latitude": 9.0671154,
+      "longitude": 38.7248533,
+      "stationType": "electric",
+      "regionName": "",
+      "regionCategory": "regional_state",
+      "cityName": "",
+      "woredaName": "",
+      "woredaCategory": "",
+      "subcity": "",
+      "landmark": "",
+      "locationCategories": [
+        "ev-charging"
+      ],
+      "contact": "",
+      "fuelStatus": "partial",
+      "isActive": true,
+      "externalSource": "osm",
+      "externalSourceId": "node-4671615789"
+    },
+    {
+      "name": "Charging Station node-4988021721",
+      "address": "Approx location (13.49609, 39.48139)",
+      "latitude": 13.4960905,
+      "longitude": 39.4813862,
+      "stationType": "electric",
+      "regionName": "",
+      "regionCategory": "regional_state",
+      "cityName": "",
+      "woredaName": "",
+      "woredaCategory": "",
+      "subcity": "",
+      "landmark": "",
+      "locationCategories": [
+        "ev-charging"
+      ],
+      "contact": "",
+      "fuelStatus": "partial",
+      "isActive": true,
+      "externalSource": "osm",
+      "externalSourceId": "node-4988021721"
+    },
+    {
+      "name": "中地海外供水项目入口",
+      "address": "Approx location (10.04354, 42.36289)",
+      "latitude": 10.0435449,
+      "longitude": 42.3628898,
+      "stationType": "electric",
+      "regionName": "",
+      "regionCategory": "regional_state",
+      "cityName": "",
+      "woredaName": "",
+      "woredaCategory": "",
+      "subcity": "",
+      "landmark": "中地海外供水项目入口",
+      "locationCategories": [
+        "operator-",
+        "ev-charging"
+      ],
+      "contact": "",
+      "fuelStatus": "partial",
+      "isActive": true,
+      "externalSource": "osm",
+      "externalSourceId": "node-4716915295"
+    }
+  ]
+}

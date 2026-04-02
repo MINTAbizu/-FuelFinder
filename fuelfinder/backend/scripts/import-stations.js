@@ -15,6 +15,7 @@ const {
   normalizeLocationCategories,
   resolveStationLocation
 } = require("../src/utils/locationDirectory");
+const { normalizeStationType } = require("../src/utils/stationType");
 
 function parseArgs(argv) {
   const args = {};
@@ -223,6 +224,7 @@ async function importStationRecord(record) {
     name,
     address,
     contact: asLocationText(record.contact),
+    stationType: normalizeStationType(record.stationType) || "fuel",
     organizationId: asOptionalObjectId(record.organizationId, "organizationId"),
     regionId: resolvedLocation.regionId,
     cityId: resolvedLocation.cityId,

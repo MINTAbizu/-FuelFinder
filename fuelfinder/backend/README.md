@@ -123,6 +123,15 @@ Import Ethiopia fuel stations directly from OpenStreetMap:
 2. Import it into MongoDB:
    `npm run stations:import -- --file=./exports/ethiopia-osm-stations.json`
 
+Import Ethiopia electric charging stations directly from OpenStreetMap:
+1. Export a nationwide OSM electric station file:
+   `npm run stations:export-osm -- --stationType=electric --out=./exports/ethiopia-osm-electric-stations.json`
+2. Import it into MongoDB:
+   `npm run stations:import -- --file=./exports/ethiopia-osm-electric-stations.json`
+
+Export both fuel and electric stations in one file:
+`npm run stations:export-osm -- --stationType=all --out=./exports/ethiopia-osm-all-stations.json`
+
 Important for city browsing:
 - The plain OSM export only guarantees coordinates and basic station metadata.
 - To browse "all stations in a city", station records must have `regionId` and `cityId`.
@@ -148,7 +157,7 @@ Fastest safe fallback when geocoding is unavailable:
    `npm run stations:backfill-location-text -- --limit=500 --apply`
 
 Notes for OSM import:
-- The exporter uses Overpass to fetch `amenity=fuel` features in Ethiopia.
+- The exporter uses Overpass to fetch `amenity=fuel` by default, and can fetch `amenity=charging_station` with `--stationType=electric`.
 - Reverse enrichment is opt-in and requires `--nominatimUrl`. This is intended for your own Nominatim instance or another approved geocoder.
 - OSM is community-maintained, so it may still miss some stations or use inconsistent city/woreda names.
 - OpenStreetMap data has attribution and license requirements. See: https://www.openstreetmap.org/copyright
@@ -156,6 +165,7 @@ Notes for OSM import:
 
 Supported station import fields:
 - `name`, `address`, `latitude`, `longitude`
+- `stationType` (`fuel` or `electric`)
 - `regionId` or `regionName`
 - `cityId` or `cityName`
 - `woredaId` or `woredaName`

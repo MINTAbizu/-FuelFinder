@@ -33,6 +33,29 @@ function asText(value) {
   return String(value || "").trim();
 }
 
+function normalizeStationType(value) {
+  const stationType = asText(value).toLowerCase();
+  if (stationType === "fuel" || stationType === "electric" || stationType === "all") {
+    return stationType;
+  }
+  return "";
+}
+
+function getAmenityForStationType(stationType) {
+  if (stationType === "electric") return "charging_station";
+  return "fuel";
+}
+
+function getDefaultOutputPath(stationType) {
+  if (stationType === "electric") {
+    return "./exports/ethiopia-osm-electric-stations.json";
+  }
+  if (stationType === "all") {
+    return "./exports/ethiopia-osm-all-stations.json";
+  }
+  return DEFAULT_OUTPUT_PATH;
+}
+
 function slugify(value) {
   return asText(value)
     .toLowerCase()
@@ -131,27 +154,55 @@ function normalizeTags(tags = {}) {
     tags["payment:cash"] === "yes" ? "cash" : ""
   ].filter(Boolean);
 
+  const electricCategories = [
+    tags["socket:type2"] === "yes" ? "socket-type2" : "",
+    tags["socket:type2_combo"] === "yes" ? "socket-ccs2" : "",
+    tags["socket:ccs"] === "yes" ? "socket-ccs" : "",
+    tags["socket:chademo"] === "yes" ? "socket-chademo" : "",
+    tags["socket:tesla_supercharger"] === "yes" ? "socket-tesla-supercharger" : "",
+    tags["socket:tesla_destination"] === "yes" ? "socket-tesla-destination" : "",
+    tags["socket:schuko"] === "yes" ? "socket-schuko" : "",
+    tags["authentication:none"] === "yes" ? "plug-and-charge" : "",
+    tags.fee === "no" ? "free-charging" : "",
+    tags.fee === "yes" ? "paid-charging" : "",
+    tags.access === "private" ? "private-access" : "",
+    tags.access === "customers" ? "customer-only" : ""
+  ].filter(Boolean);
+
   return {
     regionName,
     cityName,
     districtName,
     subcity,
     contact: phone,
-    locationCategories
+    locationCategories: Array.from(new Set([...locationCategories, ...electricCategories]))
   };
 }
 
-async function fetchOverpassStations() {
-  const query = `
+function buildOverpassQuery(stationType) {
+  const normalizedStationType = normalizeStationType(stationType) || "fuel";
+  const amenityBlocks =
+    normalizedStationType === "all"
+      ? ["fuel", "charging_station"]
+      : [getAmenityForStationType(normalizedStationType)];
+  const lines = amenityBlocks.flatMap((amenity) => [
+    `  node["amenity"="${amenity}"](area.searchArea);`,
+    `  way["amenity"="${amenity}"](area.searchArea);`,
+    `  relation["amenity"="${amenity}"](area.searchArea);`,
+  ]);
+
+  return `
 [out:json][timeout:180];
 area["ISO3166-1:alpha2"="ET"][admin_level=2]->.searchArea;
 (
-  node["amenity"="fuel"](area.searchArea);
-  way["amenity"="fuel"](area.searchArea);
-  relation["amenity"="fuel"](area.searchArea);
+${lines.join("\n")}
 );
 out center tags;
 `;
+}
+
+async function fetchOverpassStations(stationType = "fuel") {
+  const query = buildOverpassQuery(stationType);
 
   let lastError = null;
   for (const endpoint of OVERPASS_ENDPOINTS) {
@@ -174,7 +225,7 @@ out center tags;
     }
   }
 
-  throw lastError || new Error("Failed to fetch OSM fuel stations.");
+  throw lastError || new Error("Failed to fetch OSM stations.");
 }
 
 function formatFromAddressObject(addr) {
@@ -234,12 +285,21 @@ function buildStationRecord(element) {
   const regionName = normalized.regionName;
   const cityName = normalized.cityName;
   const woredaName = normalized.districtName;
+  const stationType = asText(tags.amenity).toLowerCase() === "charging_station" ? "electric" : "fuel";
+  const defaultNamePrefix = stationType === "electric" ? "Charging Station" : "Fuel Station";
+  const locationCategories = Array.from(
+    new Set([
+      ...(normalized.locationCategories || []),
+      stationType === "electric" ? "ev-charging" : "fuel-station",
+    ])
+  );
 
   return {
-    name: asText(tags.name || tags.brand || tags.operator) || `Fuel Station ${sourceId}`,
+    name: asText(tags.name || tags.brand || tags.operator) || `${defaultNamePrefix} ${sourceId}`,
     address,
     latitude,
     longitude,
+    stationType,
     regionName,
     regionCategory: inferRegionCategory(regionName),
     cityName,
@@ -247,7 +307,7 @@ function buildStationRecord(element) {
     woredaCategory: inferWoredaCategory(woredaName),
     subcity: normalized.subcity,
     landmark: asText(tags.operator || tags.brand),
-    locationCategories: normalized.locationCategories,
+    locationCategories,
     contact: normalized.contact,
     fuelStatus: "partial",
     isActive: true,
@@ -344,7 +404,8 @@ async function main() {
     throw new Error("Global fetch is not available in this Node runtime. Use Node 18+.");
   }
 
-  const outputFile = getArg("out", DEFAULT_OUTPUT_PATH);
+  const stationType = normalizeStationType(getArg("stationType", "fuel")) || "fuel";
+  const outputFile = getArg("out", getDefaultOutputPath(stationType));
   const doReverse = hasFlag("reverse");
   const userAgent = getArg("userAgent", DEFAULT_USER_AGENT);
   const email = getArg("email", DEFAULT_CONTACT_EMAIL);
@@ -357,8 +418,8 @@ async function main() {
     );
   }
 
-  console.log("Fetching Ethiopia fuel stations from OpenStreetMap (Overpass)...");
-  const elements = await fetchOverpassStations();
+  console.log(`Fetching Ethiopia ${stationType} stations from OpenStreetMap (Overpass)...`);
+  const elements = await fetchOverpassStations(stationType);
   const baseRecords = elements.map(buildStationRecord).filter(Boolean);
   console.log(`Raw OSM features fetched: ${baseRecords.length}`);
 
@@ -377,6 +438,7 @@ async function main() {
   const payload = {
     source: "OpenStreetMap",
     country: "Ethiopia",
+    stationType,
     exportedAt: new Date().toISOString(),
     reverseGeocoded: doReverse,
     total: stations.length,
