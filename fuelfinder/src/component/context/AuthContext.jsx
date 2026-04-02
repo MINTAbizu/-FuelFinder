@@ -381,17 +381,23 @@ export function AuthProvider({ children }) {
   }, [getSessionVersion, replaceUser]);
 
   const signOut = useCallback(async () => {
-    try {
-      await disableDevicePushTokenRegistrationAsync();
-    } catch (_err) {
-      // Best-effort cleanup only.
-    }
-    try {
-      await logoutUser();
-    } catch (_err) {
-      // Ignore network/logout failures and clear local session anyway.
-    }
+    const logoutAccessToken = String(accessTokenRef.current || "").trim();
     await clearSession();
+    void (async () => {
+      try {
+        await disableDevicePushTokenRegistrationAsync({ accessToken: logoutAccessToken });
+      } catch (_err) {
+        // Best-effort cleanup only.
+      }
+
+      if (!logoutAccessToken) return;
+
+      try {
+        await logoutUser({ accessToken: logoutAccessToken });
+      } catch (_err) {
+        // Ignore backend logout failures after the local session is gone.
+      }
+    })();
   }, [clearSession]);
 
   const signInWithGoogle = useCallback(

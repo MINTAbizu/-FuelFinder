@@ -308,11 +308,11 @@ export async function clearStoredRegisteredDevicePushTokenAsync() {
   await AsyncStorage.removeItem(REGISTERED_PUSH_TOKEN_KEY);
 }
 
-export async function disableDevicePushTokenRegistrationAsync() {
+export async function disableDevicePushTokenRegistrationAsync(options = {}) {
   const storedToken = await loadRegisteredDevicePushTokenAsync();
   if (storedToken) {
     try {
-      await unregisterDevicePushToken({ token: storedToken });
+      await unregisterDevicePushToken({ token: storedToken }, options);
     } catch (_error) {
       // Clear local state even if the server cannot be reached right now.
     }

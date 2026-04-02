@@ -6,6 +6,16 @@ import {
   requestWithOfflineCache,
 } from "./offlineService";
 
+function buildAuthOverrideConfig(options = {}) {
+  const accessToken = String(options?.accessToken || "").trim();
+  if (!accessToken) return undefined;
+  return {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  };
+}
+
 export async function registerUser(payload) {
   const { data } = await api.post("/auth/register", payload);
   return data;
@@ -60,8 +70,12 @@ export async function registerDevicePushToken(payload) {
   return data;
 }
 
-export async function unregisterDevicePushToken(payload) {
-  const { data } = await api.post("/auth/push-token/remove", payload);
+export async function unregisterDevicePushToken(payload, options = {}) {
+  const { data } = await api.post(
+    "/auth/push-token/remove",
+    payload,
+    buildAuthOverrideConfig(options)
+  );
   return data;
 }
 
@@ -80,8 +94,8 @@ export async function unregisterBiometricLogin(payload) {
   return data;
 }
 
-export async function logoutUser() {
-  const { data } = await api.post("/auth/logout");
+export async function logoutUser(options = {}) {
+  const { data } = await api.post("/auth/logout", {}, buildAuthOverrideConfig(options));
   return data;
 }
 
