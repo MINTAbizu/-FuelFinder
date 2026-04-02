@@ -12,6 +12,11 @@ const Woreda = require("../models/Woreda");
 const { buildFuelPricesResponse } = require("../utils/stationFuelPrices");
 const { normalizePaymentDetails } = require("../utils/stationPaymentDetails");
 const {
+  applyStationTypeFilter,
+  getStationTypeForResponse,
+  normalizeStationType
+} = require("../utils/stationType");
+const {
   asLocationText,
   ensureRegionByName,
   ensureCityByName,
@@ -19,7 +24,7 @@ const {
 } = require("../utils/locationDirectory");
 
 const STATION_SYNC_SELECT =
-  "_id name address contact externalSource externalSourceId fuelStatus fuelInventory fuelPrices paymentDetails isActive location regionId cityId woredaId subcity woreda landmark locationCategories";
+  "_id name address contact stationType externalSource externalSourceId fuelStatus fuelInventory fuelPrices paymentDetails isActive location regionId cityId woredaId subcity woreda landmark locationCategories";
 const NEARBY_RESPONSE_CACHE_TTL_MS = 1000 * 45;
 const MAX_NEARBY_RESPONSE_CACHE_ENTRIES = 120;
 const DEFAULT_NEARBY_RADIUS_METERS = 12000;
@@ -58,8 +63,13 @@ function normalizeNearbyRadius(value) {
   return Math.min(Math.round(parsed), MAX_NEARBY_RADIUS_METERS);
 }
 
-function buildNearbyResponseCacheKey(lat, lon, radius) {
-  return [Number(lat).toFixed(3), Number(lon).toFixed(3), Math.round(Number(radius) || 0)].join(":");
+function buildNearbyResponseCacheKey(lat, lon, radius, stationType = "") {
+  return [
+    Number(lat).toFixed(3),
+    Number(lon).toFixed(3),
+    Math.round(Number(radius) || 0),
+    normalizeStationType(stationType) || "all"
+  ].join(":");
 }
 
 function getCachedNearbyResponse(cacheKey) {
@@ -146,17 +156,24 @@ function normalizeSupportedFuels(value) {
   const gasoline = source.gasoline === true;
   const diesel = source.diesel === true;
   const other = source.other === true;
-  const unknown = source.unknown === true || !(gasoline || diesel || other);
+  const electric = source.electric === true;
+  const unknown = source.unknown === true || !(gasoline || diesel || other || electric);
 
   return {
     gasoline,
     diesel,
     other,
+    electric,
     unknown
   };
 }
 
 function deriveSupportedFuels(doc, fallback = {}) {
+  const stationType = getStationTypeForResponse(doc?.stationType || fallback?.stationType);
+  if (stationType === "electric") {
+    return normalizeSupportedFuels({ electric: true, unknown: false });
+  }
+
   const gasoline = Number(doc?.fuelInventory?.gasolineLiters || 0) > 0;
   const diesel = Number(doc?.fuelInventory?.dieselLiters || 0) > 0;
   const other = Number(doc?.fuelInventory?.otherLiters || 0) > 0;
@@ -526,6 +543,7 @@ function buildClientStationPayload(doc, fallback = {}, directory = {}) {
     id: publicId,
     stationId,
     name: String(doc?.name || fallback?.name || "Fuel Station"),
+    stationType: getStationTypeForResponse(doc?.stationType || fallback?.stationType),
     address: displayAddress,
     rawAddress: String(doc?.address || fallback?.address || "Address not listed"),
     contact: String(doc?.contact || fallback?.contact || ""),
@@ -584,6 +602,7 @@ function buildStationInsertPayload(station, sourceId, lat, lon) {
     woreda: String(station?.woreda || "").trim(),
     landmark: String(station?.landmark || "").trim(),
     locationCategories: nextLocationCategories,
+    stationType: "fuel",
     externalSource: "osm",
     externalSourceId: sourceId,
     fuelStatus: "partial",
@@ -615,6 +634,9 @@ function buildStationSyncPatch(doc, station, sourceId, lat, lon) {
   if (!String(doc?.externalSource || "").trim() || !String(doc?.externalSourceId || "").trim()) {
     patch.externalSource = "osm";
     patch.externalSourceId = sourceId;
+  }
+  if (!normalizeStationType(doc?.stationType)) {
+    patch.stationType = "fuel";
   }
 
   if (!isPlaceholderAddress(incomingAddress)) {
@@ -783,8 +805,10 @@ async function attachBackendStationIds(stations) {
   });
 }
 
-async function queryNearbyStationsFromDatabase(lat, lon, radius, limit = MAX_NEARBY_RESULTS) {
+async function queryNearbyStationsFromDatabase(lat, lon, radius, limit = MAX_NEARBY_RESULTS, stationType = "") {
   const now = new Date();
+  const geoQuery = { isActive: true };
+  applyStationTypeFilter(geoQuery, stationType);
 
   const stations = await Station.aggregate([
     {
@@ -796,7 +820,7 @@ async function queryNearbyStationsFromDatabase(lat, lon, radius, limit = MAX_NEA
         distanceField: "distanceMeters",
         maxDistance: radius,
         spherical: true,
-        query: { isActive: true }
+        query: geoQuery
       }
     },
     {
@@ -925,19 +949,34 @@ async function queryDirectoryStations(matchQuery, limit = DEFAULT_DIRECTORY_STAT
   );
 }
 
-async function bootstrapNearbyStationsFromExternal(lat, lon, radius) {
+async function bootstrapNearbyStationsFromExternal(lat, lon, radius, stationType = "") {
+  if (normalizeStationType(stationType) === "electric") {
+    return [];
+  }
   const stations = await fetchNearbyFuelStations(lat, lon, radius);
   return attachBackendStationIds(stations);
 }
 
-async function loadNearbyStations(lat, lon, radius) {
-  const localStations = await queryNearbyStationsFromDatabase(lat, lon, radius);
+async function loadNearbyStations(lat, lon, radius, stationType = "") {
+  const localStations = await queryNearbyStationsFromDatabase(
+    lat,
+    lon,
+    radius,
+    MAX_NEARBY_RESULTS,
+    stationType
+  );
   if (localStations.length) {
     return localStations;
   }
 
-  const bootstrappedStations = await bootstrapNearbyStationsFromExternal(lat, lon, radius);
-  const hydratedStations = await queryNearbyStationsFromDatabase(lat, lon, radius);
+  const bootstrappedStations = await bootstrapNearbyStationsFromExternal(lat, lon, radius, stationType);
+  const hydratedStations = await queryNearbyStationsFromDatabase(
+    lat,
+    lon,
+    radius,
+    MAX_NEARBY_RESULTS,
+    stationType
+  );
   return hydratedStations.length ? hydratedStations : bootstrappedStations;
 }
 
@@ -946,17 +985,22 @@ exports.getNearbyFuelStations = async (req, res) => {
     const lat = parseNumber(req.query.lat);
     const lon = parseNumber(req.query.lon);
     const radius = normalizeNearbyRadius(req.query.radius);
+    const stationTypeParam = req.query.stationType;
+    const stationType = normalizeStationType(stationTypeParam);
     if (lat === null || lon === null) {
       return res.status(400).json({ message: "lat and lon are required numeric query params." });
     }
+    if (stationTypeParam !== undefined && stationTypeParam !== null && !stationType) {
+      return res.status(400).json({ message: "stationType must be one of: fuel, electric." });
+    }
 
-    const cacheKey = buildNearbyResponseCacheKey(lat, lon, radius);
+    const cacheKey = buildNearbyResponseCacheKey(lat, lon, radius, stationType);
     const cachedStations = getCachedNearbyResponse(cacheKey);
     if (cachedStations) {
       return res.json({ stations: cachedStations });
     }
 
-    const stations = await loadNearbyStations(lat, lon, radius);
+    const stations = await loadNearbyStations(lat, lon, radius, stationType);
     setCachedNearbyResponse(cacheKey, stations);
     return res.json({ stations });
   } catch (error) {
@@ -969,9 +1013,14 @@ exports.listDirectoryCities = async (req, res) => {
     const q = String(req.query.q || "").trim();
     const regionId = String(req.query.regionId || "").trim();
     const limit = normalizeDirectoryLimit(req.query.limit, DEFAULT_DIRECTORY_LIMIT);
+    const stationTypeParam = req.query.stationType;
+    const stationType = normalizeStationType(stationTypeParam);
 
     if (regionId && !mongoose.isValidObjectId(regionId)) {
       return res.status(400).json({ message: "regionId must be a valid ObjectId." });
+    }
+    if (stationTypeParam !== undefined && stationTypeParam !== null && !stationType) {
+      return res.status(400).json({ message: "stationType must be one of: fuel, electric." });
     }
 
     const cityQuery = { isActive: true };
@@ -1001,7 +1050,11 @@ exports.listDirectoryCities = async (req, res) => {
       Station.aggregate([
         {
           $match: {
-            isActive: true,
+            ...(() => {
+              const match = { isActive: true };
+              applyStationTypeFilter(match, stationType);
+              return match;
+            })(),
             cityId: { $in: cityIds }
           }
         },
@@ -1052,12 +1105,17 @@ exports.listDirectoryStations = async (req, res) => {
     const regionId = String(req.query.regionId || "").trim();
     const cityId = String(req.query.cityId || "").trim();
     const limit = normalizeDirectoryLimit(req.query.limit, DEFAULT_DIRECTORY_STATION_LIMIT);
+    const stationTypeParam = req.query.stationType;
+    const stationType = normalizeStationType(stationTypeParam);
 
     if (regionId && !mongoose.isValidObjectId(regionId)) {
       return res.status(400).json({ message: "regionId must be a valid ObjectId." });
     }
     if (cityId && !mongoose.isValidObjectId(cityId)) {
       return res.status(400).json({ message: "cityId must be a valid ObjectId." });
+    }
+    if (stationTypeParam !== undefined && stationTypeParam !== null && !stationType) {
+      return res.status(400).json({ message: "stationType must be one of: fuel, electric." });
     }
 
     const matchQuery = { isActive: true };
@@ -1077,6 +1135,7 @@ exports.listDirectoryStations = async (req, res) => {
         { landmark: regex }
       ];
     }
+    applyStationTypeFilter(matchQuery, stationType);
 
     const stations = await queryDirectoryStations(matchQuery, limit);
     return res.json({

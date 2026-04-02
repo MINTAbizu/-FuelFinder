@@ -42,6 +42,11 @@ const userSchema = new mongoose.Schema(
       enum: ["customer", "staff", "station_manager", "city_manager", "org_admin", "super_admin"],
       default: "customer"
     },
+    preferredStationType: {
+      type: String,
+      enum: ["fuel", "electric"],
+      default: undefined
+    },
     organizationId: { type: mongoose.Schema.Types.ObjectId, default: null },
     cityIds: [{ type: mongoose.Schema.Types.ObjectId }],
     stationIds: [{ type: mongoose.Schema.Types.ObjectId }],

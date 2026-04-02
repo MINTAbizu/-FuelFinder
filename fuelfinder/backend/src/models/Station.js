@@ -5,6 +5,11 @@ const stationSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true },
     address: { type: String, required: true, trim: true },
     contact: { type: String, trim: true },
+    stationType: {
+      type: String,
+      enum: ["fuel", "electric"],
+      default: "fuel"
+    },
     externalSource: { type: String, trim: true },
     externalSourceId: { type: String, trim: true },
     organizationId: { type: mongoose.Schema.Types.ObjectId, default: null },
@@ -64,6 +69,7 @@ stationSchema.index({ location: "2dsphere" });
 stationSchema.index({ regionId: 1 });
 stationSchema.index({ cityId: 1 });
 stationSchema.index({ woredaId: 1 });
+stationSchema.index({ stationType: 1 });
 stationSchema.index({ locationCategories: 1 });
 stationSchema.index({ externalSource: 1, externalSourceId: 1 }, { unique: true, sparse: true });
 

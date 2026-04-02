@@ -13,6 +13,11 @@ const {
   normalizeLocationCategories,
   resolveStationLocation
 } = require("../utils/locationDirectory");
+const {
+  applyStationTypeFilter,
+  getStationTypeForResponse,
+  normalizeStationType
+} = require("../utils/stationType");
 
 const STATION_POPULATE = [
   { path: "regionId", select: "name slug code category countryCode isActive" },
@@ -144,6 +149,7 @@ function buildStationResponse(station) {
     name: station.name || "",
     address: station.address || "",
     contact: station.contact || "",
+    stationType: getStationTypeForResponse(station.stationType),
     fuelStatus: resolveStationFuelStatus(station),
     fuelInventory: {
       gasolineLiters: Number(fuelInventory.gasolineLiters || 0),
@@ -251,6 +257,11 @@ exports.listStations = async (req, res) => {
     if (locationCategory) {
       query.locationCategories = locationCategory;
     }
+    const stationTypeParam = req.query.stationType;
+    const stationType = normalizeStationType(stationTypeParam);
+    if (stationTypeParam !== undefined && stationTypeParam !== null && !stationType) {
+      return res.status(400).json({ message: "stationType must be one of: fuel, electric." });
+    }
     if (q) {
       const regex = new RegExp(escapeRegex(q), "i");
       query.$or = [
@@ -270,6 +281,7 @@ exports.listStations = async (req, res) => {
       }
       query.organizationId = actorOrgId;
     }
+    applyStationTypeFilter(query, stationType);
 
     const total = await Station.countDocuments(query);
     const totalPages = usePagination ? Math.max(1, Math.ceil(total / requestedLimit)) : (total > 0 ? 1 : 0);
@@ -303,6 +315,7 @@ exports.createStation = async (req, res) => {
     const name = asText(req.body.name);
     const address = asText(req.body.address);
     const contact = asText(req.body.contact);
+    const stationType = normalizeStationType(req.body.stationType) || "fuel";
     const fuelStatus = asText(req.body.fuelStatus) || "partial";
     const latitude = asNumber(req.body.latitude, "latitude");
     const longitude = asNumber(req.body.longitude, "longitude");
@@ -351,6 +364,7 @@ exports.createStation = async (req, res) => {
       name,
       address,
       contact,
+      stationType,
       ...(fuelPrices ? { fuelPrices: normalizeFuelPrices(fuelPrices) } : {}),
       ...(paymentDetails ? { paymentDetails: normalizePaymentDetails(paymentDetails) } : {}),
       chapaSubaccountId: asText(req.body.chapaSubaccountId),
@@ -425,6 +439,13 @@ exports.updateStation = async (req, res) => {
     }
     if (req.body.contact !== undefined) {
       station.contact = asText(req.body.contact);
+    }
+    if (req.body.stationType !== undefined) {
+      const stationType = normalizeStationType(req.body.stationType);
+      if (!stationType) {
+        return res.status(400).json({ message: "stationType must be one of: fuel, electric." });
+      }
+      station.stationType = stationType;
     }
     if (req.body.subcity !== undefined) {
       station.subcity = asText(req.body.subcity);

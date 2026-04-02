@@ -10,6 +10,14 @@ function normalizePhone(value) {
   return normalize(value).replace(/[^\d+]/g, "");
 }
 
+function normalizeStationType(value) {
+  const stationType = normalize(value).toLowerCase();
+  if (stationType === "fuel" || stationType === "electric") {
+    return stationType;
+  }
+  return "";
+}
+
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
@@ -158,6 +166,8 @@ exports.validateUpdateProfile = (req, res, next) => {
   const name = normalize(req.body.name);
   const phone = normalizePhone(req.body.phone);
   const email = normalizeEmail(req.body.email);
+  const preferredStationTypeRaw = req.body.preferredStationType;
+  const preferredStationType = normalizeStationType(preferredStationTypeRaw);
 
   if (!name || !email) {
     return sendValidationError(res, "name and email are required.");
@@ -174,10 +184,14 @@ exports.validateUpdateProfile = (req, res, next) => {
   if (!isValidEmail(email)) {
     return sendValidationError(res, "Invalid email format.");
   }
+  if (preferredStationTypeRaw !== undefined && preferredStationTypeRaw !== null && !preferredStationType) {
+    return sendValidationError(res, "preferredStationType must be one of: fuel, electric.");
+  }
 
   req.body.name = name;
   req.body.phone = phone;
   req.body.email = email;
+  req.body.preferredStationType = preferredStationType || undefined;
   return next();
 };
 

@@ -17,6 +17,7 @@ const {
   signRefreshToken,
   verifyRefreshToken
 } = require("../utils/tokens");
+const { normalizeStationType } = require("../utils/stationType");
 
 const PASSWORD_SALT_ROUNDS = Math.max(8, Number(process.env.PASSWORD_SALT_ROUNDS || 10));
 const PHONE_OTP_MAX_ATTEMPTS = Number(process.env.PHONE_OTP_MAX_ATTEMPTS || 5);
@@ -26,7 +27,7 @@ const OTP_SMS_RESPONSE_WAIT_MS = Math.max(
   Number(process.env.OTP_SMS_RESPONSE_WAIT_MS || 1500)
 );
 const PUBLIC_USER_SELECT =
-  "_id name email phone phoneVerified twoFactorEnabled authProvider isBlocked role organizationId cityIds stationIds branchIds createdAt";
+  "_id name email phone phoneVerified twoFactorEnabled authProvider isBlocked role preferredStationType organizationId cityIds stationIds branchIds createdAt";
 const AUTH_FLOW_USER_SELECT = `${PUBLIC_USER_SELECT} passwordHash refreshTokenHash googleSub biometricDevices phoneVerificationHash phoneVerificationExpiresAt phoneVerificationAttempts phoneVerificationLastSentAt twoFactorOtpHash twoFactorOtpExpiresAt twoFactorOtpAttempts twoFactorOtpLastSentAt`;
 const REFRESH_USER_SELECT = `${PUBLIC_USER_SELECT} refreshTokenHash`;
 const BIOMETRIC_USER_SELECT = `${PUBLIC_USER_SELECT} biometricDevices`;
@@ -70,6 +71,7 @@ function buildUserResponse(user) {
     authProvider: user.authProvider || "local",
     isBlocked: Boolean(user.isBlocked),
     role: user.role || "customer",
+    preferredStationType: normalizeStationType(user.preferredStationType) || "",
     organizationId: user.organizationId || null,
     cityIds: user.cityIds || [],
     stationIds: user.stationIds || [],
@@ -558,6 +560,8 @@ exports.updateProfile = async (req, res) => {
     const name = String(req.body.name || "").trim();
     const email = normalizeEmail(req.body.email);
     const phone = normalizePhone(req.body.phone);
+    const preferredStationTypeInput = req.body.preferredStationType;
+    const preferredStationType = normalizeStationType(preferredStationTypeInput);
 
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found." });
@@ -590,6 +594,12 @@ exports.updateProfile = async (req, res) => {
       user.phoneVerificationAttempts = 0;
       user.phoneVerificationLastSentAt = null;
       clearTwoFactorChallenge(user);
+    }
+    if (preferredStationTypeInput !== undefined) {
+      if (!preferredStationType) {
+        return res.status(400).json({ message: "preferredStationType must be one of: fuel, electric." });
+      }
+      user.preferredStationType = preferredStationType;
     }
 
     await user.save();

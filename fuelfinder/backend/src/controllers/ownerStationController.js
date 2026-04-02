@@ -11,6 +11,10 @@ const {
 } = require("../utils/stationFuelPrices");
 const { normalizeLocationCategories } = require("../utils/locationDirectory");
 const {
+  getStationTypeForResponse,
+  normalizeStationType
+} = require("../utils/stationType");
+const {
   getAssignedStationIds,
   isAssignedStationOnlyRole
 } = require("../utils/stationScope");
@@ -54,6 +58,7 @@ function buildStationResponse(station) {
     name: station.name || "",
     address: station.address || "",
     contact: station.contact || "",
+    stationType: getStationTypeForResponse(station.stationType),
     fuelStatus: resolveStationFuelStatus(station),
     fuelInventory: {
       gasolineLiters: Number(fuelInventory.gasolineLiters || 0),
@@ -182,6 +187,13 @@ exports.updateMyStation = async (req, res) => {
     }
     if (req.body.contact !== undefined) {
       station.contact = String(req.body.contact || "").trim();
+    }
+    if (req.body.stationType !== undefined) {
+      const stationType = normalizeStationType(req.body.stationType);
+      if (!stationType) {
+        return res.status(400).json({ message: "stationType must be one of: fuel, electric." });
+      }
+      station.stationType = stationType;
     }
     if (req.body.subcity !== undefined) {
       station.subcity = String(req.body.subcity || "").trim();
