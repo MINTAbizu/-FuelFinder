@@ -262,7 +262,15 @@ async function fetchDirectoryStations(params = {}) {
   return Array.isArray(data?.stations) ? data.stations : [];
 }
 
-function statusLabel(t, status) {
+function statusLabel(t, status, homeConfig = null) {
+  const customLabels = homeConfig?.statusLabels || null;
+  if (customLabels) {
+    if (status === "available") return customLabels.available || t("homeScreen.status.available");
+    if (status === "limited") return customLabels.limited || t("homeScreen.status.limited");
+    if (status === "empty") return customLabels.empty || t("homeScreen.status.empty");
+    return customLabels.all || t("homeScreen.status.all");
+  }
+
   if (status === "available") return t("homeScreen.status.available");
   if (status === "limited") return t("homeScreen.status.limited");
   if (status === "empty") return t("homeScreen.status.empty");
@@ -287,6 +295,58 @@ function formatDistance(t, distanceKm) {
   if (distanceKm == null) return "N/A";
   if (distanceKm < 1) return `${Math.round(distanceKm * 1000)} ${t("homeScreen.units.meters")}`;
   return `${distanceKm.toFixed(1)} ${t("homeScreen.units.km")}`;
+}
+
+function buildCoordinateCentroid(stations = []) {
+  const validCoordinates = (stations || [])
+    .map((station) => ({
+      latitude: Number(station?.latitude),
+      longitude: Number(station?.longitude),
+    }))
+    .filter(
+      (point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude)
+    );
+
+  if (!validCoordinates.length) return null;
+
+  const totals = validCoordinates.reduce(
+    (accumulator, point) => ({
+      latitude: accumulator.latitude + point.latitude,
+      longitude: accumulator.longitude + point.longitude,
+    }),
+    { latitude: 0, longitude: 0 }
+  );
+
+  return {
+    latitude: totals.latitude / validCoordinates.length,
+    longitude: totals.longitude / validCoordinates.length,
+  };
+}
+
+function buildStationReason(t, station, queueLength, isElectricHome) {
+  if (isElectricHome) {
+    if (station?.fuel_status === "available" && queueLength <= 2) {
+      return "Fast charger likely open now";
+    }
+    if (station?.fuel_status === "limited") {
+      return "Some charging bays are busy, but the station is still serving EVs";
+    }
+    if (queueLength >= 6) {
+      return "Popular charging hub with heavier demand right now";
+    }
+    return "Balanced EV stop for distance, demand, and charger readiness";
+  }
+
+  if (station?.fuel_status === "available" && queueLength <= 6) {
+    return t("homeScreen.fastLineReason");
+  }
+  if (station?.fuel_status === "limited") {
+    return t("homeScreen.limitedReason");
+  }
+  if (queueLength >= 15) {
+    return t("homeScreen.highDemandReason");
+  }
+  return t("homeScreen.balancedOption");
 }
 
 function markerColor(status) {
@@ -412,11 +472,134 @@ function applyManagerFuelSnapshot(station, snapshot) {
   };
 }
 
-export default function HomeScreen({ navigation, route }) {
+export default function HomeScreen({ navigation, route, homeConfig = null }) {
   const { t } = useLanguage();
   const preferredStationType = useMemo(
-    () => normalizeStationType(route?.params?.stationType) || "fuel",
-    [route?.params?.stationType]
+    () => normalizeStationType(homeConfig?.stationType || route?.params?.stationType) || "fuel",
+    [homeConfig?.stationType, route?.params?.stationType]
+  );
+  const isElectricHome = preferredStationType === "electric";
+  const nearbyRadiusMeters = homeConfig?.nearbyRadiusMeters || (isElectricHome ? 250000 : 12000);
+  const defaultBrowseMode = homeConfig?.defaultBrowseMode || (isElectricHome ? "nationwide" : "nearby");
+  const showTypeFilter = homeConfig?.showTypeFilter ?? !isElectricHome;
+  const browseModeOptions = useMemo(
+    () =>
+      homeConfig?.browseModeOptions ||
+      (isElectricHome
+        ? [
+            {
+              id: "nationwide",
+              label: "All chargers",
+            },
+            {
+              id: "nearby",
+              label: "Nearby chargers",
+            },
+          ]
+        : [
+            {
+              id: "nearby",
+              label: t("browseNearbyLabel", { defaultValue: "Nearby" }),
+            },
+            {
+              id: "city",
+              label: t("browseCityLabel", { defaultValue: "Browse by city" }),
+            },
+          ]),
+    [homeConfig?.browseModeOptions, isElectricHome, t]
+  );
+  const supportsCityBrowse = browseModeOptions.some((option) => option.id === "city");
+  const screenCopy = useMemo(
+    () => ({
+      title: homeConfig?.title || (isElectricHome ? "FuelFinder EV" : "FuelFinder"),
+      subtitle:
+        homeConfig?.subtitle ||
+        (isElectricHome
+          ? "Track charging stations, compare charger readiness, and route to the best EV stop."
+          : t("homeScreen.subtitle")),
+      discoverySectionTitle:
+        homeConfig?.discoverySectionTitle ||
+        (isElectricHome
+          ? "How to explore charging stations"
+          : t("stationDiscoveryMode", { defaultValue: "How to explore stations" })),
+      citySearchPlaceholder:
+        homeConfig?.citySearchPlaceholder ||
+        t("citySearchPlaceholder", { defaultValue: "Search city" }),
+      cityStationsLabel:
+        homeConfig?.cityStationsLabel ||
+        t("cityStationsCount", { defaultValue: "stations" }),
+      searchPlaceholderNearby:
+        homeConfig?.searchPlaceholderNearby || t("homeScreen.search"),
+      searchPlaceholderCity:
+        homeConfig?.searchPlaceholderCity ||
+        t("stationSearchInCity", { defaultValue: "Search station in selected city" }),
+      searchPlaceholderNationwide:
+        homeConfig?.searchPlaceholderNationwide ||
+        (isElectricHome ? "Search charging station" : t("homeScreen.search")),
+      statusSectionTitle:
+        homeConfig?.statusSectionTitle ||
+        (isElectricHome ? "Charging status" : t("homeScreen.filter")),
+      typeSectionTitle:
+        homeConfig?.typeSectionTitle ||
+        (isElectricHome ? "Connector type" : t("homeScreen.fuel.label")),
+      sortSectionTitle:
+        homeConfig?.sortSectionTitle ||
+        (isElectricHome ? "Sort charging stations" : t("homeScreen.sort.sortBy")),
+      countLabel:
+        homeConfig?.countLabel ||
+        (isElectricHome ? "chargers found" : t("homeScreen.found")),
+      emptyTitle:
+        homeConfig?.emptyTitle ||
+        (isElectricHome ? "No charging stations found" : t("homeScreen.noMatch")),
+      emptySub:
+        homeConfig?.emptySub ||
+        (isElectricHome
+          ? "Reload the charger network or switch to nearby chargers to try again."
+          : t("homeScreen.noMatchSub")),
+      queueMetricLabel:
+        homeConfig?.queueMetricLabel ||
+        (isElectricHome ? "Demand" : t("homeScreen.queue")),
+      queueUnitLabel:
+        homeConfig?.queueUnitLabel || t("homeScreen.units.cars"),
+      waitMetricLabel:
+        homeConfig?.waitMetricLabel ||
+        (isElectricHome ? "Charge wait" : t("homeScreen.wait")),
+      addressLabel:
+        homeConfig?.addressLabel || (isElectricHome ? "Charging site" : "Address"),
+      topPickLabel:
+        homeConfig?.topPickLabel ||
+        (isElectricHome ? "Recommended charger" : t("homeScreen.bestOption")),
+      routeShowLabel:
+        homeConfig?.routeShowLabel || t("homeScreen.route.show"),
+      routeShownLabel:
+        homeConfig?.routeShownLabel || t("homeScreen.route.shown"),
+      centerNearbyLabel:
+        homeConfig?.centerNearbyLabel || t("homeScreen.centerOnMe"),
+      centerCityLabel:
+        homeConfig?.centerCityLabel ||
+        t("centerSelectedCity", { defaultValue: "Center selected city" }),
+      centerNationwideLabel:
+        homeConfig?.centerNationwideLabel || "Center charger network",
+      reloadNearbyLabel:
+        homeConfig?.reloadNearbyLabel ||
+        (isElectricHome ? "Reload nearby chargers" : t("homeScreen.findNearby")),
+      reloadCityLabel:
+        homeConfig?.reloadCityLabel ||
+        t("reloadSelectedCity", { defaultValue: "Load city stations" }),
+      reloadNationwideLabel:
+        homeConfig?.reloadNationwideLabel || "Reload charger network",
+      noNationwideStationsMessage:
+        homeConfig?.noNationwideStationsMessage || "No electric charging stations are stored yet.",
+      heroEyebrow: homeConfig?.heroEyebrow || "Electric network",
+      heroTitle: homeConfig?.heroTitle || "Plan your next charge stop",
+      heroBody:
+        homeConfig?.heroBody ||
+        "Start with the full charger network, then switch to nearby chargers when you want the closest EV stop.",
+      heroHighlights:
+        homeConfig?.heroHighlights || ["Nationwide EV view", "Wider search radius", "Route-ready map"],
+      statusLabels: homeConfig?.statusLabels || null,
+    }),
+    [homeConfig, isElectricHome, t]
   );
   const fuelFilterOptions = useMemo(
     () => (preferredStationType === "electric" ? ["any", "electric"] : FUEL_FILTERS),
@@ -435,7 +618,7 @@ export default function HomeScreen({ navigation, route }) {
     latitude: DEFAULT_REGION.latitude,
     longitude: DEFAULT_REGION.longitude,
   });
-  const [browseMode, setBrowseMode] = useState("nearby");
+  const [browseMode, setBrowseMode] = useState(defaultBrowseMode);
   const [cityQuery, setCityQuery] = useState("");
   const [cityOptions, setCityOptions] = useState([]);
   const [cityOptionsLoading, setCityOptionsLoading] = useState(false);
@@ -475,6 +658,10 @@ export default function HomeScreen({ navigation, route }) {
 
   const loadBrowseCities = useCallback(
     async (query = "") => {
+      if (!supportsCityBrowse) {
+        setCityOptions([]);
+        return;
+      }
       setCityOptionsLoading(true);
       try {
         const nextCities = await fetchBrowseCities({
@@ -489,7 +676,7 @@ export default function HomeScreen({ navigation, route }) {
         setCityOptionsLoading(false);
       }
     },
-    [preferredStationType]
+    [preferredStationType, supportsCityBrowse]
   );
 
   const loadCityStations = useCallback(
@@ -518,11 +705,29 @@ export default function HomeScreen({ navigation, route }) {
             latitude: centroid.latitude,
             longitude: centroid.longitude
           });
+          mapRef.current?.animateToRegion?.(
+            {
+              latitude: centroid.latitude,
+              longitude: centroid.longitude,
+              latitudeDelta: 0.08,
+              longitudeDelta: 0.08,
+            },
+            500
+          );
         } else if (Number.isFinite(cityLatitude) && Number.isFinite(cityLongitude)) {
           setMapCenter({
             latitude: cityLatitude,
             longitude: cityLongitude
           });
+          mapRef.current?.animateToRegion?.(
+            {
+              latitude: cityLatitude,
+              longitude: cityLongitude,
+              latitudeDelta: 0.08,
+              longitudeDelta: 0.08,
+            },
+            500
+          );
         }
 
         if (!nextStations.length) {
@@ -544,6 +749,58 @@ export default function HomeScreen({ navigation, route }) {
       }
     },
     [preferredStationType, t]
+  );
+
+  const loadNationwideStations = useCallback(
+    async ({ forceRefresh = false } = {}) => {
+      setLoadingStations(true);
+      setStationsError("");
+      try {
+        const nextStations = await fetchDirectoryStations({
+          limit: 220,
+          stationType: preferredStationType,
+        });
+        setStations(nextStations);
+
+        const centroid = buildCoordinateCentroid(nextStations);
+        if (centroid) {
+          setMapCenter({
+            latitude: centroid.latitude,
+            longitude: centroid.longitude,
+          });
+          mapRef.current?.animateToRegion?.(
+            {
+              latitude: centroid.latitude,
+              longitude: centroid.longitude,
+              latitudeDelta: 7,
+              longitudeDelta: 7,
+            },
+            forceRefresh ? 350 : 500
+          );
+        }
+
+        if (!nextStations.length) {
+          setStationsError(screenCopy.noNationwideStationsMessage);
+        }
+      } catch (error) {
+        setStationsError(
+          isElectricHome
+            ? "Failed to load the electric charging network."
+            : t("cityStationsLoadFail", {
+                defaultValue: "Failed to load stations for the selected city.",
+              })
+        );
+        console.error(
+          "[Stations:loadNationwideStations]",
+          error?.response?.status,
+          error?.response?.data,
+          error?.message
+        );
+      } finally {
+        setLoadingStations(false);
+      }
+    },
+    [isElectricHome, preferredStationType, screenCopy.noNationwideStationsMessage, t]
   );
 
   const handleSelectCity = useCallback(
@@ -597,7 +854,10 @@ export default function HomeScreen({ navigation, route }) {
   useEffect(() => {
     loadedRef.current = false;
     setFuelFilter("any");
-  }, [preferredStationType]);
+    setBrowseMode(defaultBrowseMode);
+    setSelectedCity(null);
+    setStations([]);
+  }, [defaultBrowseMode, preferredStationType]);
 
   useEffect(() => {
     let mounted = true;
@@ -606,7 +866,7 @@ export default function HomeScreen({ navigation, route }) {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== "granted") {
           if (mounted) setHasLocationPermission(false);
-          if (mounted) setBrowseMode("city");
+          if (mounted) setBrowseMode(supportsCityBrowse ? "city" : defaultBrowseMode);
           if (mounted) setLocationError(t("homeScreen.location.denied"));
           return;
         }
@@ -661,7 +921,7 @@ export default function HomeScreen({ navigation, route }) {
       watcherRef.current?.remove?.();
       watcherRef.current = null;
     };
-  }, [t]);
+  }, [defaultBrowseMode, supportsCityBrowse, t]);
 
   const loadNearbyStations = useCallback(async ({ forceRefresh = false } = {}) => {
     const basePoint = location;
@@ -681,12 +941,12 @@ export default function HomeScreen({ navigation, route }) {
     setLoadingStations(true);
     setStationsError("");
     try {
-      const next = await fetchNearbyFuelStations(basePoint, 12000, {
+      const next = await fetchNearbyFuelStations(basePoint, nearbyRadiusMeters, {
         forceRefresh,
         stationType: preferredStationType,
       });
       setStations(next);
-      void saveCachedNearbyStations(basePoint, next, 12000, preferredStationType);
+      void saveCachedNearbyStations(basePoint, next, nearbyRadiusMeters, preferredStationType);
     } catch (error) {
       const cached = await readCachedNearbyStations(preferredStationType);
       if (cached?.stations?.length) {
@@ -704,12 +964,18 @@ export default function HomeScreen({ navigation, route }) {
     } finally {
       setLoadingStations(false);
     }
-  }, [location, preferredStationType, t]);
+  }, [location, nearbyRadiusMeters, preferredStationType, t]);
 
   const handleBrowseModeChange = useCallback(
     async (nextMode) => {
       setBrowseMode(nextMode);
       setStationsError("");
+      loadedRef.current = true;
+
+      if (nextMode === "nationwide") {
+        await loadNationwideStations({ forceRefresh: true });
+        return;
+      }
 
       if (nextMode === "nearby") {
         if (location) {
@@ -730,8 +996,14 @@ export default function HomeScreen({ navigation, route }) {
         await handleSelectCity(fallbackCity);
       }
     },
-    [cityOptions, handleSelectCity, loadCityStations, loadNearbyStations, location, selectedCity]
+    [cityOptions, handleSelectCity, loadCityStations, loadNationwideStations, loadNearbyStations, location, selectedCity]
   );
+
+  useEffect(() => {
+    if (browseMode !== "nationwide" || loadedRef.current) return;
+    loadedRef.current = true;
+    void loadNationwideStations();
+  }, [browseMode, loadNationwideStations]);
 
   useEffect(() => {
     if (browseMode !== "nearby" || !location || loadedRef.current) return;
@@ -747,7 +1019,9 @@ export default function HomeScreen({ navigation, route }) {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      if (browseMode === "city") {
+      if (browseMode === "nationwide") {
+        await loadNationwideStations({ forceRefresh: true });
+      } else if (browseMode === "city") {
         if (selectedCity?.id) {
           await loadCityStations(selectedCity);
         }
@@ -757,7 +1031,7 @@ export default function HomeScreen({ navigation, route }) {
     } finally {
       setRefreshing(false);
     }
-  }, [browseMode, loadCityStations, loadNearbyStations, selectedCity]);
+  }, [browseMode, loadCityStations, loadNationwideStations, loadNearbyStations, selectedCity]);
 
   useEffect(() => {
     let active = true;
@@ -796,7 +1070,10 @@ export default function HomeScreen({ navigation, route }) {
 
   const onCenterMap = useCallback(() => {
     if (!mapRef.current) return;
-    const centerSource = browseMode === "city" ? mapCenter : location;
+    const centerSource =
+      browseMode === "city" || browseMode === "nationwide"
+        ? mapCenter
+        : location;
     if (!centerSource) return;
     mapRef.current.animateToRegion(
       {
@@ -810,7 +1087,9 @@ export default function HomeScreen({ navigation, route }) {
     setCenterNotice(
       browseMode === "city"
         ? t("cityMapCentered", { defaultValue: "Map centered to the selected city" })
-        : t("homeScreen.mapCentered")
+        : browseMode === "nationwide"
+          ? "Map centered to the charger network"
+          : t("homeScreen.mapCentered")
     );
     setTimeout(() => setCenterNotice(""), 1200);
   }, [browseMode, location, mapCenter, t]);
@@ -976,21 +1255,16 @@ export default function HomeScreen({ navigation, route }) {
         longitude: Number(station?.longitude),
       });
       const queueLength = Number(station?.queue_length || 0);
-      const waitMins = Math.max(2, queueLength * 3);
+      const waitMins = isElectricHome
+        ? Math.max(10, queueLength * 15)
+        : Math.max(2, queueLength * 3);
       const statusPenalty =
         station?.fuel_status === "available" ? 0 : station?.fuel_status === "limited" ? 12 : 30;
       const distancePenalty = distanceKm != null ? distanceKm * 3 : 8;
       const queuePenalty = queueLength * 1.8;
       const smartScore = Math.max(1, Math.round(100 - (statusPenalty + distancePenalty + queuePenalty)));
 
-      let reason = t("homeScreen.balancedOption");
-      if (station?.fuel_status === "available" && queueLength <= 6) {
-        reason = t("homeScreen.fastLineReason");
-      } else if (station?.fuel_status === "limited") {
-        reason = t("homeScreen.limitedReason");
-      } else if (queueLength >= 15) {
-        reason = t("homeScreen.highDemandReason");
-      }
+      const reason = buildStationReason(t, station, queueLength, isElectricHome);
 
       const enrichedStation = {
         ...station,
@@ -1032,6 +1306,7 @@ export default function HomeScreen({ navigation, route }) {
     stations,
     statusFilter,
     preferredStationType,
+    isElectricHome,
     t
   ]);
 
@@ -1175,29 +1450,48 @@ export default function HomeScreen({ navigation, route }) {
         onScrollToIndexFailed={() => listRef.current?.scrollToOffset?.({ offset: 0, animated: true })}
         ListHeaderComponent={
           <View>
-            <Text style={styles.title}>FuelFinder</Text>
-            <Text style={styles.subtitle}>{t("homeScreen.subtitle")}</Text>
+            <Text style={[styles.title, isElectricHome && styles.titleElectric]}>{screenCopy.title}</Text>
+            <Text style={styles.subtitle}>{screenCopy.subtitle}</Text>
+
+            {isElectricHome ? (
+              <View style={styles.electricHeroCard}>
+                <View style={styles.electricHeroBadge}>
+                  <Ionicons name="flash-outline" size={14} color="#0C4A6E" />
+                  <Text style={styles.electricHeroBadgeText}>{screenCopy.heroEyebrow}</Text>
+                </View>
+                <Text style={styles.electricHeroTitle}>{screenCopy.heroTitle}</Text>
+                <Text style={styles.electricHeroBody}>{screenCopy.heroBody}</Text>
+                <View style={styles.electricHeroHighlights}>
+                  {(screenCopy.heroHighlights || []).map((item) => (
+                    <View key={item} style={styles.electricHeroPill}>
+                      <Text style={styles.electricHeroPillText}>{item}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
 
             <Text style={styles.section}>
-              {t("stationDiscoveryMode", { defaultValue: "How to explore stations" })}
+              {screenCopy.discoverySectionTitle}
             </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-              {[
-                {
-                  id: "nearby",
-                  label: t("browseNearbyLabel", { defaultValue: "Nearby" })
-                },
-                {
-                  id: "city",
-                  label: t("browseCityLabel", { defaultValue: "Browse by city" })
-                }
-              ].map((option) => (
+              {browseModeOptions.map((option) => (
                 <TouchableOpacity
                   key={option.id}
-                  style={[styles.chip, browseMode === option.id && styles.chipActive]}
+                  style={[
+                    styles.chip,
+                    browseMode === option.id && styles.chipActive,
+                    isElectricHome && browseMode === option.id && styles.chipActiveElectric,
+                  ]}
                   onPress={() => handleBrowseModeChange(option.id)}
                 >
-                  <Text style={[styles.chipText, browseMode === option.id && styles.chipTextActive]}>
+                  <Text
+                    style={[
+                      styles.chipText,
+                      browseMode === option.id && styles.chipTextActive,
+                      isElectricHome && browseMode === option.id && styles.chipTextActiveElectric,
+                    ]}
+                  >
                     {option.label}
                   </Text>
                 </TouchableOpacity>
@@ -1209,7 +1503,7 @@ export default function HomeScreen({ navigation, route }) {
                 <TextInput
                   value={cityQuery}
                   onChangeText={setCityQuery}
-                  placeholder={t("citySearchPlaceholder", { defaultValue: "Search city" })}
+                  placeholder={screenCopy.citySearchPlaceholder}
                   style={styles.search}
                 />
                 {selectedCity ? (
@@ -1218,7 +1512,7 @@ export default function HomeScreen({ navigation, route }) {
                     {selectedCity?.region?.name ? `, ${selectedCity.region.name}` : ""}
                     {" • "}
                     {Number(selectedCity.stationCount || 0)}{" "}
-                    {t("cityStationsCount", { defaultValue: "stations" })}
+                    {screenCopy.cityStationsLabel}
                   </Text>
                 ) : null}
                 {cityOptionsLoading && !cityOptions.length ? (
@@ -1234,10 +1528,20 @@ export default function HomeScreen({ navigation, route }) {
                       return (
                         <TouchableOpacity
                           key={String(city?.id || city?.name || "")}
-                          style={[styles.chip, isActive && styles.chipActive]}
+                          style={[
+                            styles.chip,
+                            isActive && styles.chipActive,
+                            isElectricHome && isActive && styles.chipActiveElectric,
+                          ]}
                           onPress={() => handleSelectCity(city)}
                         >
-                          <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
+                          <Text
+                            style={[
+                              styles.chipText,
+                              isActive && styles.chipTextActive,
+                              isElectricHome && isActive && styles.chipTextActiveElectric,
+                            ]}
+                          >
                             {city.name}
                             {regionLabel ? ` • ${regionLabel}` : ""}
                           </Text>
@@ -1278,7 +1582,7 @@ export default function HomeScreen({ navigation, route }) {
                     key={getStationRenderKey(s)}
                     coordinate={{ latitude: Number(s.latitude), longitude: Number(s.longitude) }}
                     title={s.name}
-                    description={`${t("homeScreen.queue")}: ${s.queue_length} ${t("homeScreen.units.cars")}`}
+                    description={`${screenCopy.queueMetricLabel}: ${getStationQueueLength(s)} ${screenCopy.queueUnitLabel}`}
                     pinColor={markerColor(s.fuel_status)}
                     tracksViewChanges={false}
                   />
@@ -1290,7 +1594,7 @@ export default function HomeScreen({ navigation, route }) {
                       longitude: Number(routeDestinationStation.longitude),
                     }}
                     title={routeDestinationStation.name}
-                    description={`${t("homeScreen.queue")}: ${getStationQueueLength(routeDestinationStation)} ${t("homeScreen.units.cars")}`}
+                    description={`${screenCopy.queueMetricLabel}: ${getStationQueueLength(routeDestinationStation)} ${screenCopy.queueUnitLabel}`}
                     pinColor="#2563EB"
                     tracksViewChanges={false}
                   />
@@ -1299,12 +1603,17 @@ export default function HomeScreen({ navigation, route }) {
             </View>
 
             <View style={styles.row}>
-              {browseMode === "city" || location ? (
-                <Pressable style={[styles.button, styles.primary]} onPress={onCenterMap}>
+              {browseMode === "nationwide" || browseMode === "city" || location ? (
+                <Pressable
+                  style={[styles.button, styles.primary, isElectricHome && styles.primaryElectric]}
+                  onPress={onCenterMap}
+                >
                   <Text style={styles.buttonText}>
-                    {browseMode === "city"
-                      ? t("centerSelectedCity", { defaultValue: "Center selected city" })
-                      : t("homeScreen.centerOnMe")}
+                    {browseMode === "nationwide"
+                      ? screenCopy.centerNationwideLabel
+                      : browseMode === "city"
+                        ? screenCopy.centerCityLabel
+                        : screenCopy.centerNearbyLabel}
                   </Text>
                 </Pressable>
               ) : (
@@ -1312,22 +1621,30 @@ export default function HomeScreen({ navigation, route }) {
                   <Text style={styles.buttonText}>{t("homeScreen.centerUnavailable")}</Text>
                 </View>
               )}
-              {browseMode === "city" ? (
+              {browseMode === "nationwide" ? (
                 <Pressable
-                  style={[styles.button, styles.secondary]}
+                  style={[styles.button, styles.secondary, isElectricHome && styles.secondaryElectric]}
+                  onPress={() => loadNationwideStations({ forceRefresh: true })}
+                >
+                  <Text style={styles.buttonText}>{screenCopy.reloadNationwideLabel}</Text>
+                </Pressable>
+              ) : browseMode === "city" ? (
+                <Pressable
+                  style={[styles.button, styles.secondary, isElectricHome && styles.secondaryElectric]}
                   onPress={() => (selectedCity?.id ? loadCityStations(selectedCity) : undefined)}
                 >
-                  <Text style={styles.buttonText}>
-                    {t("reloadSelectedCity", { defaultValue: "Load city stations" })}
-                  </Text>
+                  <Text style={styles.buttonText}>{screenCopy.reloadCityLabel}</Text>
                 </Pressable>
               ) : location ? (
-                <Pressable style={[styles.button, styles.secondary]} onPress={() => loadNearbyStations({ forceRefresh: true })}>
-                  <Text style={styles.buttonText}>{t("homeScreen.findNearby")}</Text>
+                <Pressable
+                  style={[styles.button, styles.secondary, isElectricHome && styles.secondaryElectric]}
+                  onPress={() => loadNearbyStations({ forceRefresh: true })}
+                >
+                  <Text style={styles.buttonText}>{screenCopy.reloadNearbyLabel}</Text>
                 </Pressable>
               ) : (
                 <View style={[styles.button, styles.disabled]}>
-                  <Text style={styles.buttonText}>{t("homeScreen.findNearby")}</Text>
+                  <Text style={styles.buttonText}>{screenCopy.reloadNearbyLabel}</Text>
                 </View>
               )}
             </View>
@@ -1347,8 +1664,10 @@ export default function HomeScreen({ navigation, route }) {
               onChangeText={setSearchText}
               placeholder={
                 browseMode === "city"
-                  ? t("stationSearchInCity", { defaultValue: "Search station in selected city" })
-                  : t("homeScreen.search")
+                  ? screenCopy.searchPlaceholderCity
+                  : browseMode === "nationwide"
+                    ? screenCopy.searchPlaceholderNationwide
+                    : screenCopy.searchPlaceholderNearby
               }
               style={styles.search}
             />
@@ -1377,48 +1696,86 @@ export default function HomeScreen({ navigation, route }) {
               />
             ) : null}
 
-            <Text style={styles.section}>{t("homeScreen.filter")}</Text>
+            <Text style={styles.section}>{screenCopy.statusSectionTitle}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
               {STATUS_FILTERS.map((value) => (
                 <TouchableOpacity
                   key={value}
-                  style={[styles.chip, statusFilter === value && styles.chipActive]}
+                  style={[
+                    styles.chip,
+                    statusFilter === value && styles.chipActive,
+                    isElectricHome && statusFilter === value && styles.chipActiveElectric,
+                  ]}
                   onPress={() => setStatusFilter(value)}
                 >
-                  <Text style={[styles.chipText, statusFilter === value && styles.chipTextActive]}>{statusLabel(t, value)}</Text>
+                  <Text
+                    style={[
+                      styles.chipText,
+                      statusFilter === value && styles.chipTextActive,
+                      isElectricHome && statusFilter === value && styles.chipTextActiveElectric,
+                    ]}
+                  >
+                    {statusLabel(t, value, screenCopy)}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
 
-            <Text style={styles.section}>
-              {preferredStationType === "electric"
-                ? "Charge type"
-                : t("homeScreen.fuel.label")}
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-              {fuelFilterOptions.map((value) => (
-                <TouchableOpacity
-                  key={value}
-                  style={[styles.chip, fuelFilter === value && styles.chipActive]}
-                  onPress={() => setFuelFilter(value)}
-                >
-                  <Text style={[styles.chipText, fuelFilter === value && styles.chipTextActive]}>{fuelLabel(t, value)}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            {showTypeFilter ? (
+              <>
+                <Text style={styles.section}>{screenCopy.typeSectionTitle}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+                  {fuelFilterOptions.map((value) => (
+                    <TouchableOpacity
+                      key={value}
+                      style={[
+                        styles.chip,
+                        fuelFilter === value && styles.chipActive,
+                        isElectricHome && fuelFilter === value && styles.chipActiveElectric,
+                      ]}
+                      onPress={() => setFuelFilter(value)}
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          fuelFilter === value && styles.chipTextActive,
+                          isElectricHome && fuelFilter === value && styles.chipTextActiveElectric,
+                        ]}
+                      >
+                        {fuelLabel(t, value)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            ) : null}
 
-            <Text style={styles.section}>{t("homeScreen.sort.sortBy")}</Text>
+            <Text style={styles.section}>{screenCopy.sortSectionTitle}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
               {SORT_OPTIONS.map((value) => (
-                <TouchableOpacity key={value} style={[styles.chip, sortBy === value && styles.chipActive]} onPress={() => setSortBy(value)}>
-                  <Text style={[styles.chipText, sortBy === value && styles.chipTextActive]}>
+                <TouchableOpacity
+                  key={value}
+                  style={[
+                    styles.chip,
+                    sortBy === value && styles.chipActive,
+                    isElectricHome && sortBy === value && styles.chipActiveElectric,
+                  ]}
+                  onPress={() => setSortBy(value)}
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      sortBy === value && styles.chipTextActive,
+                      isElectricHome && sortBy === value && styles.chipTextActiveElectric,
+                    ]}
+                  >
                     {t("homeScreen.sort.label")}: {sortLabel(t, value)}
                   </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
 
-            <Text style={styles.count}>{filteredStations.length} {t("homeScreen.found")}</Text>
+            <Text style={styles.count}>{filteredStations.length} {screenCopy.countLabel}</Text>
           </View>
         }
         ListEmptyComponent={
@@ -1438,8 +1795,8 @@ export default function HomeScreen({ navigation, route }) {
               </>
             ) : (
               <>
-                <Text style={styles.emptyTitle}>{t("homeScreen.noMatch")}</Text>
-                <Text style={styles.emptySub}>{t("homeScreen.noMatchSub")}</Text>
+                <Text style={styles.emptyTitle}>{screenCopy.emptyTitle}</Text>
+                <Text style={styles.emptySub}>{screenCopy.emptySub}</Text>
               </>
             )}
           </View>
@@ -1461,7 +1818,7 @@ export default function HomeScreen({ navigation, route }) {
             <View style={styles.cardContent}>
               {item.isTopPick ? (
                 <View style={styles.topPickBadge}>
-                  <Text style={styles.topPickText}>{t("homeScreen.bestOption")}</Text>
+                  <Text style={styles.topPickText}>{screenCopy.topPickLabel}</Text>
                 </View>
               ) : null}
               <View style={styles.headerRow}>
@@ -1491,18 +1848,18 @@ export default function HomeScreen({ navigation, route }) {
                   </Pressable>
                   <Pressable style={[styles.statusPill, { borderColor: markerColor(item.fuel_status) }]}>
                     <Text style={[styles.statusText, { color: markerColor(item.fuel_status) }]}>
-                      {statusLabel(t, item.fuel_status)}
+                      {statusLabel(t, item.fuel_status, screenCopy)}
                     </Text>
                   </Pressable>
                 </View>
               </View>
               <View style={styles.factsWrap}>
                 <View style={styles.factPill}>
-                  <Text style={styles.factLabel}>{t("homeScreen.queue")}</Text>
-                  <Text style={styles.factValue}>{item.queue_length} {t("homeScreen.units.cars")}</Text>
+                  <Text style={styles.factLabel}>{screenCopy.queueMetricLabel}</Text>
+                  <Text style={styles.factValue}>{item.queue_length} {screenCopy.queueUnitLabel}</Text>
                 </View>
                 <View style={styles.factPill}>
-                  <Text style={styles.factLabel}>{t("homeScreen.wait")}</Text>
+                  <Text style={styles.factLabel}>{screenCopy.waitMetricLabel}</Text>
                   <Text style={styles.factValue}>{item.waitMins} {t("homeScreen.route.min")}</Text>
                 </View>
                 <View style={styles.factPill}>
@@ -1514,18 +1871,21 @@ export default function HomeScreen({ navigation, route }) {
                 <Text style={styles.insightReason}>{item.reason}</Text>
               </View>
               <View style={styles.addressChip}>
-                <Text style={styles.addressLabel}>Address</Text>
+                <Text style={styles.addressLabel}>{screenCopy.addressLabel}</Text>
                 <Text style={styles.metaAddress}>{item.address || t("homeScreen.addressMissing")}</Text>
               </View>
               <View style={styles.smartScoreBottom}>
                 <Text style={styles.smartScoreBottomLabel}>{t("homeScreen.smartScore")}</Text>
                 <Text style={styles.smartScoreBottomValue}>{item.smartScore}/100</Text>
               </View>
-              <Pressable style={styles.routeBtn} onPress={() => drawRouteToStation(item)}>
+              <Pressable
+                style={[styles.routeBtn, isElectricHome && styles.routeBtnElectric]}
+                onPress={() => drawRouteToStation(item)}
+              >
                 <Text style={styles.routeBtnText}>
                   {activeRouteStationId === getStationIdentity(item)
-                    ? t("homeScreen.route.shown")
-                    : t("homeScreen.route.show")}
+                    ? screenCopy.routeShownLabel
+                    : screenCopy.routeShowLabel}
                 </Text>
               </Pressable>
             </View>
@@ -1540,6 +1900,7 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#F4F7FB" },
   content: { padding: 12, paddingBottom: 24 },
   title: { fontSize: 26, fontWeight: "900", color: "#0F172A" },
+  titleElectric: { color: "#0C4A6E" },
   subtitle: { marginTop: 4, marginBottom: 10, color: "#64748B", fontWeight: "600" },
   mapCard: { borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: "#E2E8F0" },
   map: { height: 220, width: "100%" },
@@ -1547,6 +1908,8 @@ const styles = StyleSheet.create({
   button: { flex: 1, paddingVertical: 11, borderRadius: 10, alignItems: "center" },
   primary: { backgroundColor: "#0F766E" },
   secondary: { backgroundColor: "#2563EB" },
+  primaryElectric: { backgroundColor: "#0C4A6E" },
+  secondaryElectric: { backgroundColor: "#0EA5E9" },
   disabled: { backgroundColor: "#9CA3AF" },
   buttonText: { color: "#fff", fontWeight: "800", fontSize: 12 },
   routeText: { marginTop: 8, color: "#1D4ED8", fontWeight: "700", fontSize: 12 },
@@ -1605,9 +1968,71 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   chipActive: { borderColor: "#1D4ED8", backgroundColor: "#DBEAFE" },
+  chipActiveElectric: { borderColor: "#0EA5E9", backgroundColor: "#E0F2FE" },
   chipText: { color: "#334155", fontWeight: "700", fontSize: 12 },
   chipTextActive: { color: "#1D4ED8" },
+  chipTextActiveElectric: { color: "#0369A1" },
   count: { marginTop: 4, marginBottom: 8, color: "#475569", fontWeight: "700" },
+  electricHeroCard: {
+    marginTop: 12,
+    marginBottom: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#BAE6FD",
+    backgroundColor: "#F0F9FF",
+    padding: 16,
+  },
+  electricHeroBadge: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#E0F2FE",
+    borderWidth: 1,
+    borderColor: "#7DD3FC",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginBottom: 10,
+  },
+  electricHeroBadgeText: {
+    color: "#0C4A6E",
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  electricHeroTitle: {
+    color: "#082F49",
+    fontSize: 20,
+    fontWeight: "900",
+    marginBottom: 6,
+  },
+  electricHeroBody: {
+    color: "#0F172A",
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: "600",
+  },
+  electricHeroHighlights: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12,
+  },
+  electricHeroPill: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  electricHeroPillText: {
+    color: "#075985",
+    fontSize: 11,
+    fontWeight: "800",
+  },
   card: {
     flexDirection: "row",
     backgroundColor: "#fff",
@@ -1736,6 +2161,7 @@ const styles = StyleSheet.create({
   smartScoreBottomLabel: { color: "#334155", fontSize: 10, fontWeight: "700" },
   smartScoreBottomValue: { color: "#1D4ED8", fontSize: 12, fontWeight: "900" },
   routeBtn: { marginTop: 8, alignSelf: "flex-start", backgroundColor: "#0F766E", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  routeBtnElectric: { backgroundColor: "#0C4A6E" },
   routeBtnText: { color: "#fff", fontSize: 12, fontWeight: "800" },
   empty: { alignItems: "center", paddingTop: 30 },
   emptyTitle: { color: "#0F172A", fontWeight: "800", marginBottom: 4 },
