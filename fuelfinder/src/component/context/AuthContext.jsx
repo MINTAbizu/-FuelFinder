@@ -63,6 +63,13 @@ export function AuthProvider({ children }) {
   const refreshTokenRef = useRef("");
   const userRef = useRef(null);
   const refreshPromiseRef = useRef(null);
+  const sessionVersionRef = useRef(0);
+
+  const getSessionVersion = useCallback(() => sessionVersionRef.current, []);
+
+  const hasSessionVersion = useCallback((expectedVersion) => {
+    return expectedVersion === sessionVersionRef.current;
+  }, []);
 
   const applySession = useCallback((nextUser, nextAccessToken = "", nextRefreshToken = "") => {
     userRef.current = nextUser || null;
@@ -82,18 +89,22 @@ export function AuthProvider({ children }) {
   }, []);
 
   const persistSession = useCallback(
-    async (nextUser, nextAccessToken, nextRefreshToken) => {
+    async (nextUser, nextAccessToken, nextRefreshToken, expectedVersion = sessionVersionRef.current) => {
+      if (!hasSessionVersion(expectedVersion)) return false;
       applySession(nextUser, nextAccessToken, nextRefreshToken);
       try {
         await persistSessionStorage(nextUser, nextAccessToken, nextRefreshToken);
       } catch (_error) {
         // Keep the in-memory session usable even if local persistence fails.
       }
+      return true;
     },
-    [applySession, persistSessionStorage]
+    [applySession, hasSessionVersion, persistSessionStorage]
   );
 
   const clearSession = useCallback(async () => {
+    sessionVersionRef.current += 1;
+    refreshPromiseRef.current = null;
     applySession(null, "", "");
     try {
       await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
@@ -107,7 +118,8 @@ export function AuthProvider({ children }) {
     }
   }, [applySession]);
 
-  const replaceUser = useCallback(async (nextUser) => {
+  const replaceUser = useCallback(async (nextUser, expectedVersion = sessionVersionRef.current) => {
+    if (!hasSessionVersion(expectedVersion)) return false;
     userRef.current = nextUser || null;
     setUser(nextUser || null);
     try {
@@ -115,16 +127,21 @@ export function AuthProvider({ children }) {
     } catch (_error) {
       // Ignore local persistence failures and keep the current session active.
     }
-  }, []);
+    return true;
+  }, [hasSessionVersion]);
 
   const refreshSession = useCallback(async () => {
     const currentRefreshToken = refreshTokenRef.current;
     if (!currentRefreshToken) throw new Error("Missing refresh token");
     if (refreshPromiseRef.current) return refreshPromiseRef.current;
 
+    const expectedVersion = getSessionVersion();
     setIsRefreshing(true);
     refreshPromiseRef.current = (async () => {
       const data = await refreshUserToken(currentRefreshToken);
+      if (!hasSessionVersion(expectedVersion)) {
+        throw new Error("Session changed");
+      }
       const nextAccessToken = data?.tokens?.accessToken;
       const nextRefreshToken = data?.tokens?.refreshToken;
       const nextUser = data?.user || userRef.current;
@@ -133,7 +150,7 @@ export function AuthProvider({ children }) {
         throw new Error("Invalid refresh response");
       }
 
-      await persistSession(nextUser, nextAccessToken, nextRefreshToken);
+      await persistSession(nextUser, nextAccessToken, nextRefreshToken, expectedVersion);
       return nextAccessToken;
     })();
 
@@ -143,7 +160,7 @@ export function AuthProvider({ children }) {
       refreshPromiseRef.current = null;
       setIsRefreshing(false);
     }
-  }, [persistSession]);
+  }, [getSessionVersion, hasSessionVersion, persistSession]);
 
   useEffect(() => {
     const reqId = api.interceptors.request.use((config) => {
@@ -197,6 +214,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let active = true;
+    const expectedVersion = getSessionVersion();
 
     const restoreSession = async () => {
       let storedAccessToken = "";
@@ -215,6 +233,7 @@ export function AuthProvider({ children }) {
           return;
         }
 
+        if (!active || !hasSessionVersion(expectedVersion)) return;
         applySession(storedUser, storedAccessToken, storedRefreshToken);
 
         if (storedUser && active) {
@@ -224,10 +243,11 @@ export function AuthProvider({ children }) {
         try {
           const profile = await getMyProfile();
           if (!active) return;
+          if (!hasSessionVersion(expectedVersion)) return;
           if (!profile?.user) {
             throw new Error("Profile restore failed");
           }
-          await replaceUser(profile.user);
+          await replaceUser(profile.user, expectedVersion);
           setIsLoading(false);
         } catch (profileError) {
           if (isNetworkError(profileError) && storedUser) {
@@ -246,15 +266,18 @@ export function AuthProvider({ children }) {
             }
 
             if (nextUser) {
-              await persistSession(nextUser, nextAccessToken, nextRefreshToken);
+              if (!active || !hasSessionVersion(expectedVersion)) return;
+              await persistSession(nextUser, nextAccessToken, nextRefreshToken, expectedVersion);
             } else {
+              if (!active || !hasSessionVersion(expectedVersion)) return;
               applySession(storedUser, nextAccessToken, nextRefreshToken);
               const profile = await getMyProfile();
               if (!active) return;
+              if (!hasSessionVersion(expectedVersion)) return;
               if (!profile?.user) {
                 throw new Error("Profile restore failed");
               }
-              await persistSession(profile.user, nextAccessToken, nextRefreshToken);
+              await persistSession(profile.user, nextAccessToken, nextRefreshToken, expectedVersion);
             }
 
             if (active) setIsLoading(false);
@@ -284,39 +307,42 @@ export function AuthProvider({ children }) {
     return () => {
       active = false;
     };
-  }, [applySession, clearSession, persistSession, replaceUser]);
+  }, [applySession, clearSession, getSessionVersion, hasSessionVersion, persistSession, replaceUser]);
 
   const signUp = useCallback(
     async ({ name, email, phone, password }) => {
+      const expectedVersion = getSessionVersion();
       const data = await registerUser({ name, email, phone, password });
       if (data?.verificationRequired || data?.twoFactorRequired) {
         return data;
       }
-      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken);
+      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken, expectedVersion);
       return data;
     },
-    [persistSession]
+    [getSessionVersion, persistSession]
   );
 
   const signIn = useCallback(
     async ({ email, password }) => {
+      const expectedVersion = getSessionVersion();
       const data = await loginUser({ email, password });
       if (data?.verificationRequired || data?.twoFactorRequired) {
         return data;
       }
-      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken);
+      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken, expectedVersion);
       return data;
     },
-    [persistSession]
+    [getSessionVersion, persistSession]
   );
 
   const confirmPhoneOtp = useCallback(
     async ({ verificationToken, otpCode }) => {
+      const expectedVersion = getSessionVersion();
       const data = await verifyPhoneOtp({ verificationToken, otpCode });
-      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken);
+      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken, expectedVersion);
       return data;
     },
-    [persistSession]
+    [getSessionVersion, persistSession]
   );
 
   const resendPhoneVerification = useCallback(async ({ verificationToken }) => {
@@ -325,15 +351,16 @@ export function AuthProvider({ children }) {
 
   const confirmTwoFactorOtp = useCallback(
     async ({ verificationToken, otpCode }) => {
+      const expectedVersion = getSessionVersion();
       const data = await verifyTwoFactorOtp({ verificationToken, otpCode });
       if (data?.tokens?.accessToken && data?.tokens?.refreshToken && data?.user) {
-        void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken);
+        void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken, expectedVersion);
       } else if (data?.user) {
-        void replaceUser(data.user);
+        void replaceUser(data.user, expectedVersion);
       }
       return data;
     },
-    [persistSession, replaceUser]
+    [getSessionVersion, persistSession, replaceUser]
   );
 
   const resendTwoFactorCode = useCallback(async ({ verificationToken }) => {
@@ -345,12 +372,13 @@ export function AuthProvider({ children }) {
   }, []);
 
   const turnOffTwoFactor = useCallback(async () => {
+    const expectedVersion = getSessionVersion();
     const data = await disableTwoFactorAuth();
     if (data?.user) {
-      void replaceUser(data.user);
+      void replaceUser(data.user, expectedVersion);
     }
     return data;
-  }, [replaceUser]);
+  }, [getSessionVersion, replaceUser]);
 
   const signOut = useCallback(async () => {
     try {
@@ -368,23 +396,25 @@ export function AuthProvider({ children }) {
 
   const signInWithGoogle = useCallback(
     async ({ idToken }) => {
+      const expectedVersion = getSessionVersion();
       const data = await loginWithGoogle(idToken);
       if (data?.verificationRequired || data?.twoFactorRequired) {
         return data;
       }
-      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken);
+      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken, expectedVersion);
       return data;
     },
-    [persistSession]
+    [getSessionVersion, persistSession]
   );
 
   const signInWithBiometric = useCallback(
     async ({ deviceId, biometricSecret }) => {
+      const expectedVersion = getSessionVersion();
       const data = await biometricLogin({ deviceId, biometricSecret });
-      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken);
+      void persistSession(data.user, data.tokens.accessToken, data.tokens.refreshToken, expectedVersion);
       return data;
     },
-    [persistSession]
+    [getSessionVersion, persistSession]
   );
 
   const value = useMemo(

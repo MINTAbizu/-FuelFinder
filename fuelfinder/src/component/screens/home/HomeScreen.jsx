@@ -45,12 +45,29 @@ const managerFuelSnapshotCache = new Map();
 
 // Translations are handled by i18next (`src/i18n/locales/*.json`).
 
-function buildNearbyStationsCacheKey(basePoint, radiusMeters = 12000) {
+function normalizeStationType(value) {
+  const stationType = String(value || "").trim().toLowerCase();
+  if (stationType === "fuel" || stationType === "electric") {
+    return stationType;
+  }
+  return "";
+}
+
+function getStationTypeForClient(station) {
+  return normalizeStationType(station?.stationType) || "fuel";
+}
+
+function buildNearbyStationsCacheKey(basePoint, radiusMeters = 12000, stationType = "") {
   const lat = Number(basePoint?.latitude);
   const lon = Number(basePoint?.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return "";
 
-  return [lat.toFixed(3), lon.toFixed(3), Math.round(Number(radiusMeters) || 0)].join(":");
+  return [
+    lat.toFixed(3),
+    lon.toFixed(3),
+    Math.round(Number(radiusMeters) || 0),
+    normalizeStationType(stationType) || "fuel",
+  ].join(":");
 }
 
 function hasWeakStationAddress(station) {
@@ -87,7 +104,7 @@ function setNearbyStationsInMemory(cacheKey, stations) {
   });
 }
 
-async function readCachedNearbyStations() {
+async function readCachedNearbyStations(stationType = "") {
   try {
     const raw = await AsyncStorage.getItem(HOME_STATIONS_CACHE_KEY);
     if (!raw) return null;
@@ -98,6 +115,9 @@ async function readCachedNearbyStations() {
     }
 
     if (!Array.isArray(parsed.stations)) {
+      return null;
+    }
+    if ((normalizeStationType(parsed.stationType) || "fuel") !== (normalizeStationType(stationType) || "fuel")) {
       return null;
     }
     if (hasWeakStationAddresses(parsed.stations)) {
@@ -114,8 +134,8 @@ async function readCachedNearbyStations() {
   }
 }
 
-async function saveCachedNearbyStations(basePoint, stations, radiusMeters = 12000) {
-  const cacheKey = buildNearbyStationsCacheKey(basePoint, radiusMeters);
+async function saveCachedNearbyStations(basePoint, stations, radiusMeters = 12000, stationType = "") {
+  const cacheKey = buildNearbyStationsCacheKey(basePoint, radiusMeters, stationType);
   if (!cacheKey || !Array.isArray(stations)) return;
 
   setNearbyStationsInMemory(cacheKey, stations);
@@ -131,6 +151,7 @@ async function saveCachedNearbyStations(basePoint, stations, radiusMeters = 1200
           longitude: Number(basePoint?.longitude || 0),
         },
         radiusMeters,
+        stationType: normalizeStationType(stationType) || "fuel",
         stations,
       })
     );
@@ -152,12 +173,16 @@ const toDistanceKm = (from, to) => {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
-async function fetchNearbyFuelStations(basePoint, radiusMeters = 12000, { forceRefresh = false } = {}) {
+async function fetchNearbyFuelStations(
+  basePoint,
+  radiusMeters = 12000,
+  { forceRefresh = false, stationType = "fuel" } = {}
+) {
   const lat = Number(basePoint?.latitude);
   const lon = Number(basePoint?.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
 
-  const cacheKey = buildNearbyStationsCacheKey(basePoint, radiusMeters);
+  const cacheKey = buildNearbyStationsCacheKey(basePoint, radiusMeters, stationType);
   if (!forceRefresh) {
     const cachedStations = getNearbyStationsFromMemory(cacheKey);
     if (cachedStations) {
@@ -170,7 +195,14 @@ async function fetchNearbyFuelStations(basePoint, radiusMeters = 12000, { forceR
   }
 
   const requestPromise = api
-    .get("/map/nearby-fuel", { params: { lat, lon, radius: radiusMeters } })
+    .get("/map/nearby-fuel", {
+      params: {
+        lat,
+        lon,
+        radius: radiusMeters,
+        stationType: normalizeStationType(stationType) || "fuel",
+      }
+    })
     .then(({ data }) => {
       const nextStations = Array.isArray(data?.stations) ? data.stations : [];
       setNearbyStationsInMemory(cacheKey, nextStations);
@@ -210,7 +242,8 @@ async function fetchBrowseCities(params = {}) {
   const { data } = await api.get("/map/cities", {
     params: {
       q: String(params?.q || "").trim() || undefined,
-      limit: params?.limit || 20
+      limit: params?.limit || 20,
+      stationType: normalizeStationType(params?.stationType) || "fuel",
     }
   });
   return Array.isArray(data?.cities) ? data.cities : [];
@@ -222,7 +255,8 @@ async function fetchDirectoryStations(params = {}) {
       cityId: String(params?.cityId || "").trim() || undefined,
       regionId: String(params?.regionId || "").trim() || undefined,
       q: String(params?.q || "").trim() || undefined,
-      limit: params?.limit || 120
+      limit: params?.limit || 120,
+      stationType: normalizeStationType(params?.stationType) || "fuel",
     }
   });
   return Array.isArray(data?.stations) ? data.stations : [];
@@ -244,6 +278,7 @@ function sortLabel(t, value) {
 function fuelLabel(t, value) {
   if (value === "gasoline") return t("homeScreen.fuel.gasoline");
   if (value === "diesel") return t("homeScreen.fuel.diesel");
+  if (value === "electric") return t("fuelElectric", { defaultValue: "Electric" });
   if (value === "other") return t("homeScreen.fuel.other");
   return t("homeScreen.fuel.any");
 }
@@ -379,6 +414,14 @@ function applyManagerFuelSnapshot(station, snapshot) {
 
 export default function HomeScreen({ navigation, route }) {
   const { t } = useLanguage();
+  const preferredStationType = useMemo(
+    () => normalizeStationType(route?.params?.stationType) || "fuel",
+    [route?.params?.stationType]
+  );
+  const fuelFilterOptions = useMemo(
+    () => (preferredStationType === "electric" ? ["any", "electric"] : FUEL_FILTERS),
+    [preferredStationType]
+  );
 
   const mapRef = useRef(null);
   const listRef = useRef(null);
@@ -436,7 +479,8 @@ export default function HomeScreen({ navigation, route }) {
       try {
         const nextCities = await fetchBrowseCities({
           q: query,
-          limit: query ? 30 : 18
+          limit: query ? 30 : 18,
+          stationType: preferredStationType,
         });
         setCityOptions(nextCities);
       } catch (error) {
@@ -445,7 +489,7 @@ export default function HomeScreen({ navigation, route }) {
         setCityOptionsLoading(false);
       }
     },
-    []
+    [preferredStationType]
   );
 
   const loadCityStations = useCallback(
@@ -461,7 +505,8 @@ export default function HomeScreen({ navigation, route }) {
       try {
         const nextStations = await fetchDirectoryStations({
           cityId,
-          limit: 220
+          limit: 220,
+          stationType: preferredStationType,
         });
         setStations(nextStations);
 
@@ -498,7 +543,7 @@ export default function HomeScreen({ navigation, route }) {
         setLoadingStations(false);
       }
     },
-    [t]
+    [preferredStationType, t]
   );
 
   const handleSelectCity = useCallback(
@@ -526,7 +571,7 @@ export default function HomeScreen({ navigation, route }) {
     let active = true;
 
     (async () => {
-      const cached = await readCachedNearbyStations();
+      const cached = await readCachedNearbyStations(preferredStationType);
       if (!active || !cached?.stations?.length) return;
 
       setStations((current) => (current.length ? current : cached.stations));
@@ -543,11 +588,16 @@ export default function HomeScreen({ navigation, route }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [preferredStationType]);
 
   useEffect(() => {
     void loadBrowseCities(deferredCityQuery);
   }, [deferredCityQuery, loadBrowseCities]);
+
+  useEffect(() => {
+    loadedRef.current = false;
+    setFuelFilter("any");
+  }, [preferredStationType]);
 
   useEffect(() => {
     let mounted = true;
@@ -616,7 +666,7 @@ export default function HomeScreen({ navigation, route }) {
   const loadNearbyStations = useCallback(async ({ forceRefresh = false } = {}) => {
     const basePoint = location;
     if (!basePoint) {
-      const cached = await readCachedNearbyStations();
+      const cached = await readCachedNearbyStations(preferredStationType);
       if (cached?.stations?.length) {
         setStations(cached.stations);
         setStationsError("");
@@ -631,11 +681,14 @@ export default function HomeScreen({ navigation, route }) {
     setLoadingStations(true);
     setStationsError("");
     try {
-      const next = await fetchNearbyFuelStations(basePoint, 12000, { forceRefresh });
+      const next = await fetchNearbyFuelStations(basePoint, 12000, {
+        forceRefresh,
+        stationType: preferredStationType,
+      });
       setStations(next);
-      void saveCachedNearbyStations(basePoint, next, 12000);
+      void saveCachedNearbyStations(basePoint, next, 12000, preferredStationType);
     } catch (error) {
-      const cached = await readCachedNearbyStations();
+      const cached = await readCachedNearbyStations(preferredStationType);
       if (cached?.stations?.length) {
         setStations(cached.stations);
         setStationsError("");
@@ -651,7 +704,7 @@ export default function HomeScreen({ navigation, route }) {
     } finally {
       setLoadingStations(false);
     }
-  }, [location, t]);
+  }, [location, preferredStationType, t]);
 
   const handleBrowseModeChange = useCallback(
     async (nextMode) => {
@@ -909,6 +962,7 @@ export default function HomeScreen({ navigation, route }) {
         continue;
       }
       if (statusFilter !== "all" && station?.fuel_status !== statusFilter) continue;
+      if (getStationTypeForClient(station) !== preferredStationType) continue;
       if (
         fuelFilter !== "any" &&
         station?.supportedFuels?.[fuelFilter] !== true &&
@@ -977,6 +1031,7 @@ export default function HomeScreen({ navigation, route }) {
     sortBy,
     stations,
     statusFilter,
+    preferredStationType,
     t
   ]);
 
@@ -1335,9 +1390,13 @@ export default function HomeScreen({ navigation, route }) {
               ))}
             </ScrollView>
 
-            <Text style={styles.section}>{t("homeScreen.fuel.label")}</Text>
+            <Text style={styles.section}>
+              {preferredStationType === "electric"
+                ? "Charge type"
+                : t("homeScreen.fuel.label")}
+            </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-              {FUEL_FILTERS.map((value) => (
+              {fuelFilterOptions.map((value) => (
                 <TouchableOpacity
                   key={value}
                   style={[styles.chip, fuelFilter === value && styles.chipActive]}
@@ -1394,7 +1453,9 @@ export default function HomeScreen({ navigation, route }) {
               <Image source={{ uri: item.image }} style={styles.stationImage} />
             ) : (
               <View style={styles.stationImagePlaceholder}>
-                <Text style={styles.stationImagePlaceholderText}>F</Text>
+                <Text style={styles.stationImagePlaceholderText}>
+                  {getStationTypeForClient(item) === "electric" ? "E" : "F"}
+                </Text>
               </View>
             )}
             <View style={styles.cardContent}>

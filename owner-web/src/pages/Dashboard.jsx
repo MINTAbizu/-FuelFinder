@@ -172,6 +172,7 @@ function buildStationFormState(stationId, station) {
     name: String(station?.name || ""),
     address: String(station?.address || ""),
     contact: String(station?.contact || ""),
+    stationType: String(station?.stationType || "fuel"),
     gasolinePrice: formatFuelPriceInputValue(
       fuelPrices.gasoline ?? station?.gasolinePrice ?? station?.gasoline_price
     ),
@@ -198,6 +199,7 @@ function buildCreateStationFormState(defaultOrganizationId = "") {
     contact: "",
     latitude: "",
     longitude: "",
+    stationType: "fuel",
     fuelStatus: "partial",
     gasolinePrice: "",
     dieselPrice: "",
@@ -2898,6 +2900,7 @@ export default function Dashboard() {
         name: String(createStationForm.name || "").trim(),
         address: String(createStationForm.address || "").trim(),
         contact: String(createStationForm.contact || "").trim(),
+        stationType: String(createStationForm.stationType || "fuel").trim().toLowerCase(),
         latitude: Number(createStationForm.latitude),
         longitude: Number(createStationForm.longitude),
         fuelStatus: String(createStationForm.fuelStatus || "partial").trim().toLowerCase(),
@@ -2967,6 +2970,7 @@ export default function Dashboard() {
         name: String(stationForm.name || "").trim(),
         address: String(stationForm.address || "").trim(),
         contact: String(stationForm.contact || "").trim(),
+        stationType: String(stationForm.stationType || "fuel").trim().toLowerCase(),
         fuelPrices: buildFuelPricesPayload(stationForm),
         ...(canEditChapaSubaccount
           ? {
@@ -5267,6 +5271,18 @@ export default function Dashboard() {
                           />
                         </label>
                         <label>
+                          Station type
+                          <select
+                            value={createStationForm.stationType}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({ ...prev, stationType: event.target.value }))
+                            }
+                          >
+                            <option value="fuel">Fuel station</option>
+                            <option value="electric">Electric station</option>
+                          </select>
+                        </label>
+                        <label>
                           Fuel status
                           <select
                             value={createStationForm.fuelStatus}
@@ -5625,6 +5641,21 @@ export default function Dashboard() {
                               }}
                               placeholder="+2519... (optional)"
                             />
+                          </label>
+                          <label>
+                            Station type
+                            <select
+                              value={stationForm.stationType}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) =>
+                                  prev ? { ...prev, stationType: event.target.value } : prev
+                                );
+                              }}
+                            >
+                              <option value="fuel">Fuel station</option>
+                              <option value="electric">Electric station</option>
+                            </select>
                           </label>
                           <label>
                             Gasoline price (ETB/L)

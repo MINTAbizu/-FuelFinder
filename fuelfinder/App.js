@@ -27,11 +27,13 @@ import FuelAlertMonitor from "./src/component/alerts/FuelAlertMonitor";
 import PushNotificationMonitor from "./src/component/alerts/PushNotificationMonitor";
 import QueueTurnAlertMonitor from "./src/component/alerts/QueueTurnAlertMonitor";
 import HomeScreen from "./src/component/screens/home/HomeScreen";
+import ElectricHomeScreen from "./src/component/screens/home/ElectricHomeScreen";
 import StationDetails from "./src/component/screens/home/StationDetails";
 import MapScreen from "./src/component/screens/map/MapScreen";
 import LoginScreen from "./src/component/screens/auth/LoginScreen";
 import RegisterScreen from "./src/component/screens/auth/RegisterScreen";
 import PhoneVerifyScreen from "./src/component/screens/auth/PhoneVerifyScreen";
+import StationDiscoveryChoiceScreen from "./src/component/screens/auth/StationDiscoveryChoiceScreen";
 import AlertsScreen from "./src/component/screens/alerts/AlertsScreen";
 import TransactionHistoryScreen from "./src/component/screens/profile/TransactionHistoryScreen";
 import {
@@ -2355,11 +2357,16 @@ function ProfileScreen({ navigation }) {
 
 function HomeStackNavigator() {
   const { t } = useLanguage();
+  const { user } = useAuth();
+  const HomeComponent =
+    String(user?.preferredStationType || "").trim().toLowerCase() === "electric"
+      ? ElectricHomeScreen
+      : HomeScreen;
   return (
     <HomeStack.Navigator>
       <HomeStack.Screen
         name="HomeMain"
-        component={HomeScreen}
+        component={HomeComponent}
         options={{ headerShown: false }}
       />
       <HomeStack.Screen
@@ -2479,12 +2486,24 @@ function AuthStack() {
   );
 }
 
+function StationDiscoveryStack() {
+  return (
+    <RootStack.Navigator screenOptions={{ headerShown: false }}>
+      <RootStack.Screen name="StationDiscoveryChoice" component={StationDiscoveryChoiceScreen} />
+    </RootStack.Navigator>
+  );
+}
+
 function AppNavigator() {
-  const { isLoading, isAuthenticated, signOut } = useAuth();
+  const { isLoading, isAuthenticated, signOut, user } = useAuth();
   const { t } = useLanguage();
   const [requiresBiometricUnlock, setRequiresBiometricUnlock] = React.useState(false);
   const [isUnlocking, setIsUnlocking] = React.useState(false);
   const appStateRef = React.useRef(AppState.currentState);
+  const requiresStationChoice =
+    isAuthenticated &&
+    String(user?.role || "") === "customer" &&
+    !String(user?.preferredStationType || "").trim();
 
   const runBiometricUnlock = React.useCallback(async () => {
     if (!isAuthenticated) {
@@ -2596,7 +2615,11 @@ function AppNavigator() {
     <NavigationContainer>
       <View style={styles.navigatorRoot}>
         <OfflineStatusBanner />
-        {isAuthenticated ? <AppTabs /> : <AuthStack />}
+        {isAuthenticated
+          ? requiresStationChoice
+            ? <StationDiscoveryStack />
+            : <AppTabs />
+          : <AuthStack />}
         <FuelAlertMonitor enabled={isAuthenticated && !requiresBiometricUnlock} />
         <PushNotificationMonitor enabled={isAuthenticated && !requiresBiometricUnlock} />
         <QueueTurnAlertMonitor enabled={isAuthenticated && !requiresBiometricUnlock} />
