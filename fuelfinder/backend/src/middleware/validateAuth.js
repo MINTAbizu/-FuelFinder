@@ -162,6 +162,38 @@ exports.validatePhoneResend = (req, res, next) => {
   return next();
 };
 
+exports.validatePasswordResetStart = (req, res, next) => {
+  const email = normalizeEmail(req.body.email);
+  if (!email) {
+    return sendValidationError(res, "email is required.");
+  }
+  if (!isValidEmail(email)) {
+    return sendValidationError(res, "Invalid email format.");
+  }
+
+  req.body.email = email;
+  return next();
+};
+
+exports.validatePasswordResetComplete = (req, res, next) => {
+  const resetToken = normalize(req.body.resetToken);
+  const newPassword = String(req.body.newPassword || "");
+
+  if (!resetToken || !newPassword) {
+    return sendValidationError(res, "resetToken and newPassword are required.");
+  }
+  if (!isStrongPassword(newPassword)) {
+    return sendValidationError(
+      res,
+      "Password must be 8+ chars and include upper, lower, number, and special character."
+    );
+  }
+
+  req.body.resetToken = resetToken;
+  req.body.newPassword = newPassword;
+  return next();
+};
+
 exports.validateUpdateProfile = (req, res, next) => {
   const name = normalize(req.body.name);
   const phone = normalizePhone(req.body.phone);

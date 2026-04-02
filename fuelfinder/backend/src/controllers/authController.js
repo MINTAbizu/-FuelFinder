@@ -28,7 +28,7 @@ const OTP_SMS_RESPONSE_WAIT_MS = Math.max(
 );
 const PUBLIC_USER_SELECT =
   "_id name email phone phoneVerified twoFactorEnabled authProvider isBlocked role preferredStationType organizationId cityIds stationIds branchIds createdAt";
-const AUTH_FLOW_USER_SELECT = `${PUBLIC_USER_SELECT} passwordHash refreshTokenHash googleSub biometricDevices phoneVerificationHash phoneVerificationExpiresAt phoneVerificationAttempts phoneVerificationLastSentAt twoFactorOtpHash twoFactorOtpExpiresAt twoFactorOtpAttempts twoFactorOtpLastSentAt`;
+const AUTH_FLOW_USER_SELECT = `${PUBLIC_USER_SELECT} passwordHash refreshTokenHash googleSub biometricDevices phoneVerificationHash phoneVerificationExpiresAt phoneVerificationAttempts phoneVerificationLastSentAt twoFactorOtpHash twoFactorOtpExpiresAt twoFactorOtpAttempts twoFactorOtpLastSentAt passwordResetHash passwordResetExpiresAt passwordResetAttempts passwordResetLastSentAt`;
 const REFRESH_USER_SELECT = `${PUBLIC_USER_SELECT} refreshTokenHash`;
 const BIOMETRIC_USER_SELECT = `${PUBLIC_USER_SELECT} biometricDevices`;
 const BCRYPT_HASH_PREFIX = /^\$2[abxy]\$\d{2}\$/;
@@ -88,6 +88,11 @@ function buildPhoneVerificationMessage(code) {
 function buildTwoFactorMessage(code) {
   const minutes = Math.max(1, Math.ceil(OTP_TTL_SECONDS / 60));
   return `Your FuelFinder security code is ${code}. It expires in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+}
+
+function buildPasswordResetMessage(code) {
+  const minutes = Math.max(1, Math.ceil(OTP_TTL_SECONDS / 60));
+  return `Your FuelFinder password reset code is ${code}. It expires in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
 }
 
 function hashStoredToken(value) {
@@ -163,11 +168,33 @@ function getTwoFactorOtpCooldownRemainingSeconds(user) {
   return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
 }
 
+function getPasswordResetCooldownRemainingSeconds(user) {
+  const lastSentAt = user.passwordResetLastSentAt;
+  if (!lastSentAt) return 0;
+  const elapsedMs = Date.now() - new Date(lastSentAt).getTime();
+  const remainingMs = PHONE_OTP_RESEND_COOLDOWN_SECONDS * 1000 - elapsedMs;
+  return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
+}
+
 function clearTwoFactorChallenge(user) {
   user.twoFactorOtpHash = "";
   user.twoFactorOtpExpiresAt = null;
   user.twoFactorOtpAttempts = 0;
   user.twoFactorOtpLastSentAt = null;
+}
+
+function clearPasswordResetChallenge(user) {
+  user.passwordResetHash = "";
+  user.passwordResetExpiresAt = null;
+  user.passwordResetAttempts = 0;
+  user.passwordResetLastSentAt = null;
+}
+
+function maskPhoneForDisplay(phone) {
+  const value = String(phone || "").trim();
+  if (!value) return "";
+  const lastDigits = value.slice(-4);
+  return `***${lastDigits ? ` ${lastDigits}` : ""}`.trim();
 }
 
 function upsertBiometricDevice(user, device) {
@@ -284,6 +311,62 @@ async function issueTwoFactorChallenge(user, { purpose = "two_factor_login", enf
       sub: String(user._id),
       phone: String(user.phone || ""),
       purpose,
+    }),
+    expiresAt: otpExpiresAt,
+    resendCooldownSeconds: PHONE_OTP_RESEND_COOLDOWN_SECONDS,
+  };
+}
+
+async function issuePasswordResetChallenge(user, { enforceCooldown = false } = {}) {
+  const now = new Date();
+  const cooldownRemaining = getPasswordResetCooldownRemainingSeconds(user);
+  const hasActiveOtp =
+    user.passwordResetExpiresAt &&
+    new Date(user.passwordResetExpiresAt) > now &&
+    String(user.passwordResetHash || "");
+
+  if (!user.phone || !user.phoneVerified) {
+    const error = new Error("A verified phone number is required for password reset.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (enforceCooldown && cooldownRemaining > 0) {
+    const error = new Error("Please wait before requesting another reset code.");
+    error.status = 429;
+    error.retryAfterSeconds = cooldownRemaining;
+    throw error;
+  }
+
+  if (!enforceCooldown && cooldownRemaining > 0 && hasActiveOtp) {
+    return {
+      verificationToken: signPhoneOtpToken({
+        sub: String(user._id),
+        phone: String(user.phone || ""),
+        purpose: "password_reset",
+      }),
+      expiresAt: user.passwordResetExpiresAt,
+      resendCooldownSeconds: cooldownRemaining,
+      reused: true,
+    };
+  }
+
+  const otpCode = generateOtpCode();
+  const otpHash = hashOtpCode(otpCode);
+  const otpExpiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
+
+  user.passwordResetHash = otpHash;
+  user.passwordResetExpiresAt = otpExpiresAt;
+  user.passwordResetAttempts = 0;
+  user.passwordResetLastSentAt = now;
+  setDevOtp(`${user._id}:password_reset`, otpCode, otpExpiresAt);
+  await saveOtpChallengeAndDispatchSms(user, buildPasswordResetMessage(otpCode));
+
+  return {
+    verificationToken: signPhoneOtpToken({
+      sub: String(user._id),
+      phone: String(user.phone || ""),
+      purpose: "password_reset",
     }),
     expiresAt: otpExpiresAt,
     resendCooldownSeconds: PHONE_OTP_RESEND_COOLDOWN_SECONDS,
@@ -731,6 +814,212 @@ exports.changePassword = async (req, res) => {
   }
 };
 
+exports.startPasswordReset = async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body.email);
+    const user = await User.findOne({ email }).select(AUTH_FLOW_USER_SELECT);
+
+    if (!user) {
+      return res.status(404).json({ message: "No account found for that email address." });
+    }
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+
+    const challenge = await issuePasswordResetChallenge(user, { enforceCooldown: false });
+    return res.json({
+      passwordResetRequired: true,
+      verificationToken: challenge.verificationToken,
+      expiresAt: challenge.expiresAt,
+      resendCooldownSeconds: challenge.resendCooldownSeconds,
+      maskedPhone: maskPhoneForDisplay(user.phone),
+      email: user.email,
+      message: "Password reset code sent."
+    });
+  } catch (error) {
+    if (error?.status === 400) {
+      return res.status(400).json({
+        message: String(error.message || "A verified phone number is required for password reset.")
+      });
+    }
+    if (error?.status === 429) {
+      return res.status(429).json({
+        message: String(error.message || "Please wait before requesting another reset code."),
+        retryAfterSeconds: Number(error.retryAfterSeconds || 0)
+      });
+    }
+    return res.status(500).json({ message: "Failed to start password reset." });
+  }
+};
+
+exports.verifyPasswordResetOtp = async (req, res) => {
+  try {
+    const verificationToken = String(req.body.verificationToken || "").trim();
+    const otpCode = String(req.body.otpCode || "").trim();
+    let payload;
+
+    try {
+      payload = verifyPhoneOtpToken(verificationToken);
+    } catch (_err) {
+      return res.status(401).json({ message: "Invalid or expired verification token." });
+    }
+
+    if (String(payload?.purpose || "") !== "password_reset") {
+      return res.status(401).json({ message: "Invalid verification purpose." });
+    }
+
+    const userId = String(payload?.sub || "");
+    if (!userId) {
+      return res.status(401).json({ message: "Invalid verification token payload." });
+    }
+
+    const user = await User.findById(userId).select(AUTH_FLOW_USER_SELECT);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+    if (String(user.phone || "") !== String(payload.phone || "")) {
+      return res.status(401).json({ message: "Verification token does not match phone." });
+    }
+    if (!user.passwordResetExpiresAt || user.passwordResetExpiresAt <= new Date()) {
+      return res.status(410).json({ message: "Reset code expired. Request a new one." });
+    }
+    if (user.passwordResetAttempts >= PHONE_OTP_MAX_ATTEMPTS) {
+      return res.status(429).json({ message: "Maximum OTP attempts reached. Request a new code." });
+    }
+
+    const isValid = verifyOtpHash(user.passwordResetHash, otpCode);
+    if (!isValid) {
+      user.passwordResetAttempts = Number(user.passwordResetAttempts || 0) + 1;
+      await user.save();
+      return res.status(401).json({ message: "Invalid verification code." });
+    }
+
+    clearPasswordResetChallenge(user);
+    await user.save();
+
+    return res.json({
+      passwordResetVerified: true,
+      resetToken: signPhoneOtpToken({
+        sub: String(user._id),
+        phone: String(user.phone || ""),
+        purpose: "password_reset_complete",
+      }),
+      maskedPhone: maskPhoneForDisplay(user.phone),
+      email: user.email,
+      message: "Verification successful."
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to verify reset code." });
+  }
+};
+
+exports.resendPasswordResetOtp = async (req, res) => {
+  try {
+    const verificationToken = String(req.body.verificationToken || "").trim();
+    let payload;
+
+    try {
+      payload = verifyPhoneOtpToken(verificationToken);
+    } catch (_err) {
+      return res.status(401).json({ message: "Invalid or expired verification token." });
+    }
+
+    if (String(payload?.purpose || "") !== "password_reset") {
+      return res.status(401).json({ message: "Invalid verification purpose." });
+    }
+
+    const userId = String(payload?.sub || "");
+    if (!userId) {
+      return res.status(401).json({ message: "Invalid verification token payload." });
+    }
+
+    const user = await User.findById(userId).select(AUTH_FLOW_USER_SELECT);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+    if (String(user.phone || "") !== String(payload.phone || "")) {
+      return res.status(401).json({ message: "Verification token does not match phone." });
+    }
+
+    const challenge = await issuePasswordResetChallenge(user, { enforceCooldown: true });
+    return res.json({
+      verificationToken: challenge.verificationToken,
+      expiresAt: challenge.expiresAt,
+      resendCooldownSeconds: challenge.resendCooldownSeconds,
+      maskedPhone: maskPhoneForDisplay(user.phone),
+      email: user.email,
+      message: "Password reset code sent."
+    });
+  } catch (error) {
+    if (error?.status === 400) {
+      return res.status(400).json({
+        message: String(error.message || "A verified phone number is required for password reset.")
+      });
+    }
+    if (error?.status === 429) {
+      return res.status(429).json({
+        message: String(error.message || "Please wait before requesting another reset code."),
+        retryAfterSeconds: Number(error.retryAfterSeconds || 0)
+      });
+    }
+    return res.status(500).json({ message: "Failed to resend reset code." });
+  }
+};
+
+exports.completePasswordReset = async (req, res) => {
+  try {
+    const resetToken = String(req.body.resetToken || "").trim();
+    const newPassword = String(req.body.newPassword || "");
+    let payload;
+
+    try {
+      payload = verifyPhoneOtpToken(resetToken);
+    } catch (_err) {
+      return res.status(401).json({ message: "Invalid or expired reset token." });
+    }
+
+    if (String(payload?.purpose || "") !== "password_reset_complete") {
+      return res.status(401).json({ message: "Invalid reset token purpose." });
+    }
+
+    const userId = String(payload?.sub || "");
+    if (!userId) {
+      return res.status(401).json({ message: "Invalid reset token payload." });
+    }
+
+    const user = await User.findById(userId).select(AUTH_FLOW_USER_SELECT);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+    if (String(user.phone || "") !== String(payload.phone || "")) {
+      return res.status(401).json({ message: "Reset token does not match phone." });
+    }
+
+    const isSamePassword = await bcrypt.compare(newPassword, user.passwordHash);
+    if (isSamePassword) {
+      return res.status(400).json({ message: "Choose a new password that is different from your current one." });
+    }
+
+    user.passwordHash = await bcrypt.hash(newPassword, PASSWORD_SALT_ROUNDS);
+    user.refreshTokenHash = "";
+    clearPasswordResetChallenge(user);
+    await user.save();
+
+    return res.json({ message: "Password reset successfully." });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to reset password." });
+  }
+};
+
 exports.registerBiometricDevice = async (req, res) => {
   try {
     const deviceId = String(req.body.deviceId || "").trim();
@@ -1116,7 +1405,9 @@ exports.devGetPhoneOtp = async (req, res) => {
 
     const purpose = String(payload?.purpose || "");
     const storeKey =
-      purpose === "two_factor_setup" || purpose === "two_factor_login"
+      purpose === "two_factor_setup" ||
+      purpose === "two_factor_login" ||
+      purpose === "password_reset"
         ? `${userId}:${purpose}`
         : userId;
 

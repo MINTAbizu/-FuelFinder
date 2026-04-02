@@ -14,6 +14,10 @@ const userSchema = new mongoose.Schema(
     twoFactorOtpExpiresAt: { type: Date, default: null, index: true },
     twoFactorOtpAttempts: { type: Number, default: 0 },
     twoFactorOtpLastSentAt: { type: Date, default: null },
+    passwordResetHash: { type: String, default: "" },
+    passwordResetExpiresAt: { type: Date, default: null, index: true },
+    passwordResetAttempts: { type: Number, default: 0 },
+    passwordResetLastSentAt: { type: Date, default: null },
     biometricDevices: [
       {
         deviceId: { type: String, required: true, trim: true },

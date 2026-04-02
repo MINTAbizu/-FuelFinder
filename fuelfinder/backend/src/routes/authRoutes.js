@@ -12,6 +12,8 @@ const {
   validateChangePassword,
   validatePhoneVerification,
   validatePhoneResend,
+  validatePasswordResetComplete,
+  validatePasswordResetStart,
   validateGoogleAuth,
   validateUpdateProfile
 } = require("../middleware/validateAuth");
@@ -28,6 +30,10 @@ router.post(
 router.post("/login", authLimiter, validateLogin, authController.login);
 router.post("/refresh", authLimiter, validateRefresh, authController.refresh);
 router.post("/google", authLimiter, validateGoogleAuth, authController.googleAuth);
+router.post("/password-reset/start", authLimiter, validatePasswordResetStart, authController.startPasswordReset);
+router.post("/password-reset/verify", authLimiter, validatePhoneVerification, authController.verifyPasswordResetOtp);
+router.post("/password-reset/resend", authLimiter, validatePhoneResend, authController.resendPasswordResetOtp);
+router.post("/password-reset/complete", authLimiter, validatePasswordResetComplete, authController.completePasswordReset);
 router.post("/biometric/login", authLimiter, validateBiometricLogin, authController.biometricLogin);
 router.post("/logout", auth, authController.logout);
 router.get("/me", auth, authController.me);

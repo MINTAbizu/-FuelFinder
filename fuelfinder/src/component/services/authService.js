@@ -26,6 +26,26 @@ export async function loginUser(payload) {
   return data;
 }
 
+export async function startPasswordReset(payload) {
+  const { data } = await api.post("/auth/password-reset/start", payload);
+  return data;
+}
+
+export async function verifyPasswordResetOtp(payload) {
+  const { data } = await api.post("/auth/password-reset/verify", payload);
+  return data;
+}
+
+export async function resendPasswordResetOtp(payload) {
+  const { data } = await api.post("/auth/password-reset/resend", payload);
+  return data;
+}
+
+export async function completePasswordReset(payload) {
+  const { data } = await api.post("/auth/password-reset/complete", payload);
+  return data;
+}
+
 export async function refreshUserToken(refreshToken) {
   const { data } = await api.post("/auth/refresh", { refreshToken });
   return data;

@@ -35,7 +35,7 @@ import { firebaseAuth } from "../../services/firebase";
 import i18n from "../../../i18n/i18n";
 WebBrowser.maybeCompleteAuthSession();
 
-export default function LoginScreen({ navigation }) {
+export default function LoginScreen({ navigation, route }) {
 
 const { signIn, signInWithGoogle, signInWithBiometric } = useAuth();
 const { language, changeLanguage, supportedLanguages, t } = useLanguage();
@@ -52,6 +52,12 @@ const [biometricMeta,setBiometricMeta]=useState(null);
 
 const [languageMenuOpen,setLanguageMenuOpen]=useState(false);
 const [languageQuery,setLanguageQuery]=useState("");
+
+useEffect(()=>{
+if(route?.params?.email){
+setEmail(String(route.params.email || ""));
+}
+},[route?.params?.email]);
 
 useFocusEffect(
 useMemo(()=>()=>{
@@ -480,6 +486,15 @@ color="#777"
 
 </View>
 
+<Pressable
+style={styles.forgotBtn}
+onPress={()=>navigation.navigate("ForgotPassword",{ email })}
+>
+<Text style={styles.forgotText}>
+Forgot Password?
+</Text>
+</Pressable>
+
 {error ? <Text style={styles.error}>{error}</Text> : null}
 
 {biometricMeta ? (
@@ -652,6 +667,17 @@ marginBottom:15
 },
 
 passwordInput:{flex:1},
+
+forgotBtn:{
+alignSelf:"flex-end",
+marginTop:-4,
+marginBottom:15
+},
+
+forgotText:{
+color:"#0F766E",
+fontWeight:"700"
+},
 
 biometricBtn:{
 borderWidth:1,

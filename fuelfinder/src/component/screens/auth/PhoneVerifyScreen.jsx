@@ -19,7 +19,9 @@ import { API_BASE_URL } from "../../services/api";
 export default function PhoneVerifyScreen({ navigation, route }) {
   const {
     confirmPhoneOtp,
+    confirmPasswordResetOtp,
     resendPhoneVerification,
+    resendPasswordResetCode,
     confirmTwoFactorOtp,
     resendTwoFactorCode,
   } = useAuth();
@@ -31,6 +33,8 @@ export default function PhoneVerifyScreen({ navigation, route }) {
   const phone = route?.params?.phone || "";
   const email = route?.params?.email || "";
   const flowType = route?.params?.flowType || "phone_verification";
+  const isTwoFactorFlow = flowType === "two_factor";
+  const isPasswordResetFlow = flowType === "password_reset";
 
   const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
@@ -65,8 +69,22 @@ export default function PhoneVerifyScreen({ navigation, route }) {
 
     setLoading(true);
     try {
-      if (flowType === "two_factor") {
+      if (isTwoFactorFlow) {
         await confirmTwoFactorOtp({ verificationToken, otpCode: otp.trim() });
+      } else if (isPasswordResetFlow) {
+        const data = await confirmPasswordResetOtp({
+          verificationToken,
+          otpCode: otp.trim(),
+        });
+        if (!data?.resetToken) {
+          setError("Reset token missing. Please request another code.");
+          return;
+        }
+        navigation.replace("ResetPassword", {
+          resetToken: data?.resetToken || "",
+          phone: data?.maskedPhone || phone || "",
+          email: data?.email || email || "",
+        });
       } else {
         await confirmPhoneOtp({ verificationToken, otpCode: otp.trim() });
       }
@@ -91,8 +109,10 @@ export default function PhoneVerifyScreen({ navigation, route }) {
     setResending(true);
     try {
       const data =
-        flowType === "two_factor"
+        isTwoFactorFlow
           ? await resendTwoFactorCode({ verificationToken })
+          : isPasswordResetFlow
+            ? await resendPasswordResetCode({ verificationToken })
           : await resendPhoneVerification({ verificationToken });
       if (data?.verificationToken) {
         setVerificationToken(data.verificationToken);
@@ -117,7 +137,6 @@ export default function PhoneVerifyScreen({ navigation, route }) {
   };
 
   const maskedTarget = phone || email || "";
-  const isTwoFactorFlow = flowType === "two_factor";
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -131,29 +150,45 @@ export default function PhoneVerifyScreen({ navigation, route }) {
               <Ionicons name="arrow-back" size={20} color="#000" />
             </Pressable>
             <Text style={styles.hello}>
-              {isTwoFactorFlow ? "Security Check" : "Verify Phone"}
+              {isTwoFactorFlow
+                ? "Security Check"
+                : isPasswordResetFlow
+                  ? "Reset Password"
+                  : "Verify Phone"}
             </Text>
             <Text style={styles.welcome}>
               {maskedTarget
                 ? `We sent a code to ${maskedTarget}`
                 : isTwoFactorFlow
                   ? "Enter the security code we sent to your phone."
+                  : isPasswordResetFlow
+                    ? "Enter the reset code we sent to your verified phone."
                   : "Enter the code we sent to your phone."}
             </Text>
           </View>
 
           <View style={styles.card}>
             <Text style={styles.cardTitle}>
-              {isTwoFactorFlow ? "Enter Security Code" : "Enter Verification Code"}
+              {isTwoFactorFlow
+                ? "Enter Security Code"
+                : isPasswordResetFlow
+                  ? "Enter Reset Code"
+                  : "Enter Verification Code"}
             </Text>
             <Text style={styles.cardSubtitle}>
               {isTwoFactorFlow
                 ? "Use the 6-digit code to finish signing in securely."
+                : isPasswordResetFlow
+                  ? "Use the 6-digit code before creating your new password."
                 : "Use the 6-digit code to finish setting up your account."}
             </Text>
 
             <Text style={styles.label}>
-              {isTwoFactorFlow ? "Security Code" : "Verification Code"}
+              {isTwoFactorFlow
+                ? "Security Code"
+                : isPasswordResetFlow
+                  ? "Reset Code"
+                  : "Verification Code"}
             </Text>
             <TextInput
               placeholder="123456"
@@ -170,7 +205,9 @@ export default function PhoneVerifyScreen({ navigation, route }) {
               {loading ? (
                 <ActivityIndicator color="#000" />
               ) : (
-                  <Text style={styles.loginText}>{isTwoFactorFlow ? "Continue" : "Verify"}</Text>
+                  <Text style={styles.loginText}>
+                    {isTwoFactorFlow || isPasswordResetFlow ? "Continue" : "Verify"}
+                  </Text>
                 )}
             </Pressable>
 

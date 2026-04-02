@@ -13,6 +13,7 @@ import api, { setApiAccessToken } from "../services/api";
 import { disableDevicePushTokenRegistrationAsync } from "../services/fuelAlertService";
 import { clearOfflineStorage, isNetworkError } from "../services/offlineService";
 import {
+  completePasswordReset,
   biometricLogin,
   disableTwoFactorAuth,
   getMyProfile,
@@ -21,9 +22,12 @@ import {
   logoutUser,
   refreshUserToken,
   registerUser,
+  resendPasswordResetOtp,
   resendPhoneOtp,
   resendTwoFactorOtp,
+  startPasswordReset,
   startTwoFactorSetup,
+  verifyPasswordResetOtp,
   verifyPhoneOtp,
   verifyTwoFactorOtp,
 } from "../services/authService";
@@ -187,6 +191,7 @@ export function AuthProvider({ children }) {
           original.url?.includes("/auth/register") ||
           original.url?.includes("/auth/refresh") ||
           original.url?.includes("/auth/google") ||
+          original.url?.includes("/auth/password-reset") ||
           original.url?.includes("/auth/phone/verify") ||
           original.url?.includes("/auth/phone/resend");
         if (isAuthMutation) {
@@ -349,6 +354,22 @@ export function AuthProvider({ children }) {
     return resendPhoneOtp({ verificationToken });
   }, []);
 
+  const beginPasswordReset = useCallback(async ({ email }) => {
+    return startPasswordReset({ email });
+  }, []);
+
+  const confirmPasswordResetOtp = useCallback(async ({ verificationToken, otpCode }) => {
+    return verifyPasswordResetOtp({ verificationToken, otpCode });
+  }, []);
+
+  const resendPasswordResetCode = useCallback(async ({ verificationToken }) => {
+    return resendPasswordResetOtp({ verificationToken });
+  }, []);
+
+  const finishPasswordReset = useCallback(async ({ resetToken, newPassword }) => {
+    return completePasswordReset({ resetToken, newPassword });
+  }, []);
+
   const confirmTwoFactorOtp = useCallback(
     async ({ verificationToken, otpCode }) => {
       const expectedVersion = getSessionVersion();
@@ -437,6 +458,10 @@ export function AuthProvider({ children }) {
       replaceUser,
       confirmPhoneOtp,
       resendPhoneVerification,
+      beginPasswordReset,
+      confirmPasswordResetOtp,
+      resendPasswordResetCode,
+      finishPasswordReset,
       confirmTwoFactorOtp,
       resendTwoFactorCode,
       beginTwoFactorSetup,
@@ -456,6 +481,10 @@ export function AuthProvider({ children }) {
       replaceUser,
       confirmPhoneOtp,
       resendPhoneVerification,
+      beginPasswordReset,
+      confirmPasswordResetOtp,
+      resendPasswordResetCode,
+      finishPasswordReset,
       confirmTwoFactorOtp,
       resendTwoFactorCode,
       beginTwoFactorSetup,

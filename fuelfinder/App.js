@@ -32,7 +32,9 @@ import StationDetails from "./src/component/screens/home/StationDetails";
 import MapScreen from "./src/component/screens/map/MapScreen";
 import LoginScreen from "./src/component/screens/auth/LoginScreen";
 import RegisterScreen from "./src/component/screens/auth/RegisterScreen";
+import ForgotPasswordScreen from "./src/component/screens/auth/ForgotPasswordScreen";
 import PhoneVerifyScreen from "./src/component/screens/auth/PhoneVerifyScreen";
+import ResetPasswordScreen from "./src/component/screens/auth/ResetPasswordScreen";
 import StationDiscoveryChoiceScreen from "./src/component/screens/auth/StationDiscoveryChoiceScreen";
 import AlertsScreen from "./src/component/screens/alerts/AlertsScreen";
 import TransactionHistoryScreen from "./src/component/screens/profile/TransactionHistoryScreen";
@@ -2481,7 +2483,9 @@ function AuthStack() {
     <RootStack.Navigator screenOptions={{ headerShown: false }}>
       <RootStack.Screen name="Login" component={LoginScreen} />
       <RootStack.Screen name="Register" component={RegisterScreen} />
+      <RootStack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
       <RootStack.Screen name="VerifyPhone" component={PhoneVerifyScreen} />
+      <RootStack.Screen name="ResetPassword" component={ResetPasswordScreen} />
     </RootStack.Navigator>
   );
 }
