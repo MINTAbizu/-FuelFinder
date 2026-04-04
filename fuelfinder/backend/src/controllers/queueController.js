@@ -237,7 +237,7 @@ function resolveRequestedBand(value) {
 function resolveFuelType(value) {
   const fuelType = String(value || "").trim().toLowerCase();
   if (!fuelType) return "gasoline";
-  if (["gasoline", "diesel", "other"].includes(fuelType)) return fuelType;
+  if (["gasoline", "diesel", "other", "electric"].includes(fuelType)) return fuelType;
   return null;
 }
 
@@ -557,7 +557,7 @@ exports.reserveQueueSlot = async (req, res) => {
       return res.status(400).json({ message: "requestedBand must be one of: 10-20, 20-40, 40+." });
     }
     if (!fuelType) {
-      return res.status(400).json({ message: "fuelType must be one of: gasoline, diesel, other." });
+      return res.status(400).json({ message: "fuelType must be one of: gasoline, diesel, other, electric." });
     }
     if (requestedLiters === null) {
       return res.status(400).json({ message: "requestedLiters must be a number between 1 and 1000." });

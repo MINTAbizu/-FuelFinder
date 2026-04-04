@@ -28,6 +28,7 @@ import PushNotificationMonitor from "./src/component/alerts/PushNotificationMoni
 import QueueTurnAlertMonitor from "./src/component/alerts/QueueTurnAlertMonitor";
 import HomeScreen from "./src/component/screens/home/HomeScreen";
 import ElectricHomeScreen from "./src/component/screens/home/ElectricHomeScreen";
+import ElectricStationDetails from "./src/component/screens/home/ElectricStationDetails";
 import StationDetails from "./src/component/screens/home/StationDetails";
 import MapScreen from "./src/component/screens/map/MapScreen";
 import LoginScreen from "./src/component/screens/auth/LoginScreen";
@@ -2375,6 +2376,13 @@ function HomeStackNavigator() {
         name="StationDetails"
         component={StationDetails}
         options={{ title: t("stationDetails.screenTitle", { defaultValue: "Station Details" }) }}
+      />
+      <HomeStack.Screen
+        name="ElectricStationDetails"
+        component={ElectricStationDetails}
+        options={{
+          title: t("electricStationDetails.screenTitle", { defaultValue: "EV Station Details" }),
+        }}
       />
     </HomeStack.Navigator>
   );

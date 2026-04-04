@@ -381,6 +381,12 @@ function getStationRenderKey(station) {
   return identity;
 }
 
+function getStationDetailsScreenName(station) {
+  return getStationTypeForClient(station) === "electric"
+    ? "ElectricStationDetails"
+    : "StationDetails";
+}
+
 function toSavedStationMap(stations) {
   return (stations || []).reduce((accumulator, station) => {
     const key = String(station?.id || "").trim();
@@ -1428,7 +1434,9 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
 
       const linkedStation = stationByBackendId[String(promotion?.stationId || "").trim()];
       if (linkedStation) {
-        navigation?.navigate?.("StationDetails", { station: linkedStation });
+        navigation?.navigate?.(getStationDetailsScreenName(linkedStation), {
+          station: linkedStation,
+        });
       }
     },
     [navigation, stationByBackendId]
@@ -1804,7 +1812,9 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.card}
-            onPress={() => navigation?.navigate?.("StationDetails", { station: item })}
+            onPress={() =>
+              navigation?.navigate?.(getStationDetailsScreenName(item), { station: item })
+            }
           >
             {item.image ? (
               <Image source={{ uri: item.image }} style={styles.stationImage} />

@@ -83,6 +83,10 @@ function buildFuelPricesResponse(value) {
 
 function resolveFuelPriceForType(value, fuelType) {
   const normalizedFuelType = String(fuelType || "").trim().toLowerCase();
+  if (normalizedFuelType === "electric") {
+    const fuelPrices = normalizeFuelPrices(value);
+    return fuelPrices.other;
+  }
   if (!FUEL_PRICE_KEYS.includes(normalizedFuelType)) {
     return null;
   }

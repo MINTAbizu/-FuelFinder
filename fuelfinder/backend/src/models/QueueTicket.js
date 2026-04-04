@@ -19,7 +19,7 @@ const queueTicketSchema = new mongoose.Schema(
     position: { type: Number, required: true },
     fuelType: {
       type: String,
-      enum: ["gasoline", "diesel", "other"],
+      enum: ["gasoline", "diesel", "other", "electric"],
       default: "gasoline"
     },
     requestedLiters: { type: Number, default: 0 },
