@@ -23,6 +23,9 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import * as WebBrowser from "expo-web-browser";
+import * as Google from "expo-auth-session/providers/google";
+import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
 import FuelAlertMonitor from "./src/component/alerts/FuelAlertMonitor";
 import PushNotificationMonitor from "./src/component/alerts/PushNotificationMonitor";
 import QueueTurnAlertMonitor from "./src/component/alerts/QueueTurnAlertMonitor";
@@ -41,6 +44,7 @@ import AlertsScreen from "./src/component/screens/alerts/AlertsScreen";
 import TransactionHistoryScreen from "./src/component/screens/profile/TransactionHistoryScreen";
 import {
   changeMyPassword,
+  linkGoogleAccount as linkGoogleAccountAuth,
   registerBiometricLogin,
   resendEmailVerification,
   unregisterBiometricLogin,
@@ -76,7 +80,11 @@ import * as LocalAuthentication from "expo-local-authentication";
 import { AuthProvider, useAuth } from "./src/component/context/AuthContext";
 import { OfflineProvider, useOffline } from "./src/component/context/OfflineContext";
 import { LanguageProvider, useLanguage } from "./src/component/context/LanguageContext";
+import { buildGoogleAuthConfig } from "./src/component/services/googleAuthConfig";
+import { firebaseAuth } from "./src/component/services/firebase";
 import { clearOfflineStorage } from "./src/component/services/offlineService";
+
+WebBrowser.maybeCompleteAuthSession();
 
 const queryClient = new QueryClient();
 const RootStack = createNativeStackNavigator();
@@ -350,8 +358,49 @@ function ProfileScreen({ navigation }) {
   const [twoFactorCode, setTwoFactorCode] = React.useState("");
   const [twoFactorCooldown, setTwoFactorCooldown] = React.useState(0);
   const [twoFactorResending, setTwoFactorResending] = React.useState(false);
+  const [googleLinkLoading, setGoogleLinkLoading] = React.useState(false);
   const [vehicleEditorVisible, setVehicleEditorVisible] = React.useState(false);
   const [vehicleDraft, setVehicleDraft] = React.useState(() => createEmptyVehicleDraft());
+
+  const googleConfig = React.useMemo(() => buildGoogleAuthConfig(), []);
+  const [googleLinkRequest, googleLinkResponse, promptGoogleLinkAsync] = Google.useAuthRequest(googleConfig);
+
+  React.useEffect(() => {
+    if (googleLinkResponse?.type !== "success") return;
+
+    const idToken = googleLinkResponse.params?.id_token;
+    if (!idToken) {
+      Alert.alert(
+        t("updateFailed", { defaultValue: "Update failed" }),
+        t("auth.googleFailed", { defaultValue: "Google sign-in failed." })
+      );
+      return;
+    }
+
+    (async () => {
+      setGoogleLinkLoading(true);
+      try {
+        const credential = GoogleAuthProvider.credential(idToken);
+        const firebaseUser = await signInWithCredential(firebaseAuth, credential);
+        const firebaseIdToken = await firebaseUser.user.getIdToken();
+        const data = await linkGoogleAccountAuth(firebaseIdToken);
+        if (data?.user) {
+          await replaceUser(data.user);
+        }
+        Alert.alert(
+          t("done"),
+          data?.message || t("googleLinkSuccess", { defaultValue: "Google account linked successfully." })
+        );
+      } catch (error) {
+        Alert.alert(
+          t("updateFailed", { defaultValue: "Update failed" }),
+          error?.response?.data?.message || t("somethingWentWrong")
+        );
+      } finally {
+        setGoogleLinkLoading(false);
+      }
+    })();
+  }, [googleLinkResponse, replaceUser, t]);
 
   React.useEffect(() => {
     let mounted = true;
@@ -994,6 +1043,25 @@ function ProfileScreen({ navigation }) {
       setAccountBusy(false);
     }
   }, [replaceUser, t]);
+
+  const startGoogleLink = React.useCallback(async () => {
+    if (!googleLinkRequest) {
+      Alert.alert(
+        t("updateFailed", { defaultValue: "Update failed" }),
+        t("auth.googleNotReady", { defaultValue: "Google sign-in is not ready yet." })
+      );
+      return;
+    }
+
+    try {
+      await promptGoogleLinkAsync();
+    } catch (error) {
+      Alert.alert(
+        t("updateFailed", { defaultValue: "Update failed" }),
+        error?.message || t("somethingWentWrong")
+      );
+    }
+  }, [googleLinkRequest, promptGoogleLinkAsync, t]);
 
   const savePasswordChanges = React.useCallback(async () => {
     const currentPassword = String(passwordForm.currentPassword || "");
@@ -1886,6 +1954,26 @@ function ProfileScreen({ navigation }) {
           subtitle={t("changePasswordSubtitle")}
           onPress={() => openAccountModal("changePassword")}
         />
+        {user?.authProvider !== "google" ? (
+          <SettingRow
+            icon="logo-google"
+            title={t("googleLinkTitle", { defaultValue: "Link Google sign-in" })}
+            subtitle={
+              user?.emailVerified
+                ? t("googleLinkSubtitle", {
+                    defaultValue: "Use the same verified email to connect your Google account.",
+                  })
+                : t("googleLinkVerifyFirst", {
+                    defaultValue: "Verify your email first, then link the matching Google account.",
+                  })
+            }
+            onPress={user?.emailVerified && !googleLinkLoading ? startGoogleLink : undefined}
+            disabled={!user?.emailVerified || googleLinkLoading}
+            right={
+              googleLinkLoading ? <ActivityIndicator size="small" color="#0F766E" /> : undefined
+            }
+          />
+        ) : null}
         <SettingRow
           icon="car-outline"
           title={t("myVehicles")}

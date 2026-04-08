@@ -163,3 +163,8 @@ export async function loginWithGoogle(idToken) {
   const { data } = await api.post("/auth/google", { idToken });
   return data;
 }
+
+export async function linkGoogleAccount(idToken) {
+  const { data } = await api.post("/auth/google/link", { idToken });
+  return data;
+}

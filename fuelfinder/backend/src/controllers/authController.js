@@ -719,6 +719,7 @@ exports.bootstrapSuperAdmin = async (req, res) => {
       name,
       phone,
       email,
+      emailVerified: true,
       passwordHash,
       role: "super_admin"
     });

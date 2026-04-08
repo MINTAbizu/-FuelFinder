@@ -195,7 +195,7 @@ exports.validatePasswordResetComplete = (req, res, next) => {
 };
 
 exports.validateEmailToken = (req, res, next) => {
-  const token = normalize(req.body.token || req.query.token);
+  const token = normalize(req.body?.token || req.query?.token);
   if (!token) {
     return sendValidationError(res, "token is required.");
   }
