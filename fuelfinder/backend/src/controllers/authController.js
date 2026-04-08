@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const User = require("../models/User");
+const { sendEmail } = require("../services/emailService");
 const { sendSms } = require("../services/smsService");
 const { getFirebaseAuth } = require("../services/firebaseAdmin");
 const { setDevOtp, getDevOtp } = require("../utils/devOtpStore");
@@ -22,13 +23,17 @@ const { normalizeStationType } = require("../utils/stationType");
 const PASSWORD_SALT_ROUNDS = Math.max(8, Number(process.env.PASSWORD_SALT_ROUNDS || 10));
 const PHONE_OTP_MAX_ATTEMPTS = Number(process.env.PHONE_OTP_MAX_ATTEMPTS || 5);
 const PHONE_OTP_RESEND_COOLDOWN_SECONDS = Number(process.env.PHONE_OTP_RESEND_COOLDOWN_SECONDS || 60);
+const EMAIL_VERIFICATION_TTL_SECONDS = Number(process.env.EMAIL_VERIFICATION_TTL_SECONDS || 60 * 60 * 24);
+const EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS = Number(
+  process.env.EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS || 120
+);
 const OTP_SMS_RESPONSE_WAIT_MS = Math.max(
   0,
   Number(process.env.OTP_SMS_RESPONSE_WAIT_MS || 1500)
 );
 const PUBLIC_USER_SELECT =
-  "_id name email phone phoneVerified twoFactorEnabled authProvider isBlocked role preferredStationType organizationId cityIds stationIds branchIds createdAt";
-const AUTH_FLOW_USER_SELECT = `${PUBLIC_USER_SELECT} passwordHash refreshTokenHash googleSub biometricDevices phoneVerificationHash phoneVerificationExpiresAt phoneVerificationAttempts phoneVerificationLastSentAt twoFactorOtpHash twoFactorOtpExpiresAt twoFactorOtpAttempts twoFactorOtpLastSentAt passwordResetHash passwordResetExpiresAt passwordResetAttempts passwordResetLastSentAt`;
+  "_id name email emailVerified pendingEmail phone phoneVerified twoFactorEnabled authProvider isBlocked role preferredStationType organizationId cityIds stationIds branchIds createdAt";
+const AUTH_FLOW_USER_SELECT = `${PUBLIC_USER_SELECT} passwordHash refreshTokenHash googleSub biometricDevices emailVerificationHash emailVerificationExpiresAt emailVerificationLastSentAt pendingEmailVerificationHash pendingEmailVerificationExpiresAt pendingEmailVerificationLastSentAt phoneVerificationHash phoneVerificationExpiresAt phoneVerificationAttempts phoneVerificationLastSentAt twoFactorOtpHash twoFactorOtpExpiresAt twoFactorOtpAttempts twoFactorOtpLastSentAt passwordResetHash passwordResetExpiresAt passwordResetAttempts passwordResetLastSentAt`;
 const REFRESH_USER_SELECT = `${PUBLIC_USER_SELECT} refreshTokenHash`;
 const BIOMETRIC_USER_SELECT = `${PUBLIC_USER_SELECT} biometricDevices`;
 const BCRYPT_HASH_PREFIX = /^\$2[abxy]\$\d{2}\$/;
@@ -65,6 +70,9 @@ function buildUserResponse(user) {
     id: user._id,
     name: user.name,
     email: user.email,
+    emailVerified: Boolean(user.emailVerified),
+    pendingEmail: String(user.pendingEmail || ""),
+    pendingEmailMasked: maskEmailForDisplay(user.pendingEmail || ""),
     phone: user.phone || "",
     phoneVerified: Boolean(user.phoneVerified),
     twoFactorEnabled: Boolean(user.twoFactorEnabled),
@@ -95,6 +103,15 @@ function buildPasswordResetMessage(code) {
   return `Your FuelFinder password reset code is ${code}. It expires in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function hashStoredToken(value) {
   return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
 }
@@ -112,6 +129,70 @@ function verifyStoredTokenHash(savedHash, value) {
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildEmailVerificationUrl(token) {
+  const explicitBase = String(process.env.EMAIL_VERIFICATION_BASE_URL || "").trim();
+  const port = String(process.env.PORT || "5000").trim() || "5000";
+  const baseUrl = explicitBase || `http://localhost:${port}/api/auth/email/verify`;
+  const separator = baseUrl.includes("?") ? "&" : "?";
+  return `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
+}
+
+function buildEmailVerificationMail(targetEmail, verifyUrl, { isEmailChange = false } = {}) {
+  const escapedEmail = escapeHtml(targetEmail);
+  const escapedUrl = escapeHtml(verifyUrl);
+  const actionText = isEmailChange ? "confirm your new email address" : "verify your email address";
+  const subject = isEmailChange
+    ? "Confirm your new FuelFinder email"
+    : "Verify your FuelFinder email";
+  const text =
+    `Finish setting up your FuelFinder account and ${actionText}.\n\n` +
+    `Open this link:\n${verifyUrl}\n\n` +
+    `This link expires in ${Math.max(1, Math.ceil(EMAIL_VERIFICATION_TTL_SECONDS / 3600))} hour(s).`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #0f172a;">
+      <h2 style="margin-bottom: 12px;">FuelFinder email verification</h2>
+      <p>${isEmailChange ? "A change to your FuelFinder email was requested." : "Thanks for joining FuelFinder."}</p>
+      <p>Please confirm <strong>${escapedEmail}</strong> to keep your account secure.</p>
+      <p style="margin: 24px 0;">
+        <a
+          href="${escapedUrl}"
+          style="display: inline-block; padding: 12px 18px; background: #0f766e; color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 700;"
+        >
+          ${escapeHtml(isEmailChange ? "Confirm new email" : "Verify email")}
+        </a>
+      </p>
+      <p>If the button does not open, copy and paste this link into your browser:</p>
+      <p><a href="${escapedUrl}">${escapedUrl}</a></p>
+      <p>This link expires in ${Math.max(1, Math.ceil(EMAIL_VERIFICATION_TTL_SECONDS / 3600))} hour(s).</p>
+    </div>
+  `;
+
+  return { subject, text, html };
+}
+
+function sendEmailVerificationPage(res, status, title, message) {
+  return res.status(status).send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 32px 16px; }
+      .card { max-width: 560px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; padding: 24px; }
+      h1 { margin: 0 0 12px; font-size: 26px; }
+      p { margin: 0; line-height: 1.6; color: #475569; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>${escapeHtml(title)}</h1>
+      <p>${escapeHtml(message)}</p>
+    </div>
+  </body>
+</html>`);
 }
 
 async function saveOtpChallengeAndDispatchSms(user, message) {
@@ -176,11 +257,40 @@ function getPasswordResetCooldownRemainingSeconds(user) {
   return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
 }
 
+function getEmailVerificationCooldownRemainingSeconds(user) {
+  const lastSentAt = user.emailVerificationLastSentAt;
+  if (!lastSentAt) return 0;
+  const elapsedMs = Date.now() - new Date(lastSentAt).getTime();
+  const remainingMs = EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS * 1000 - elapsedMs;
+  return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
+}
+
+function getPendingEmailVerificationCooldownRemainingSeconds(user) {
+  const lastSentAt = user.pendingEmailVerificationLastSentAt;
+  if (!lastSentAt) return 0;
+  const elapsedMs = Date.now() - new Date(lastSentAt).getTime();
+  const remainingMs = EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS * 1000 - elapsedMs;
+  return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
+}
+
+function clearEmailVerificationChallenge(user) {
+  user.emailVerificationHash = "";
+  user.emailVerificationExpiresAt = null;
+  user.emailVerificationLastSentAt = null;
+}
+
 function clearTwoFactorChallenge(user) {
   user.twoFactorOtpHash = "";
   user.twoFactorOtpExpiresAt = null;
   user.twoFactorOtpAttempts = 0;
   user.twoFactorOtpLastSentAt = null;
+}
+
+function clearPendingEmailVerificationChallenge(user) {
+  user.pendingEmail = "";
+  user.pendingEmailVerificationHash = "";
+  user.pendingEmailVerificationExpiresAt = null;
+  user.pendingEmailVerificationLastSentAt = null;
 }
 
 function clearPasswordResetChallenge(user) {
@@ -197,6 +307,17 @@ function maskPhoneForDisplay(phone) {
   return `***${lastDigits ? ` ${lastDigits}` : ""}`.trim();
 }
 
+function maskEmailForDisplay(email) {
+  const value = normalizeEmail(email);
+  if (!value || !value.includes("@")) return "";
+  const [localPart, domain] = value.split("@");
+  const safeLocal =
+    localPart.length <= 2
+      ? `${localPart.slice(0, 1)}*`
+      : `${localPart.slice(0, 2)}${"*".repeat(Math.max(1, Math.min(4, localPart.length - 2)))}`;
+  return `${safeLocal}@${domain}`;
+}
+
 function upsertBiometricDevice(user, device) {
   const currentDevices = Array.isArray(user.biometricDevices) ? user.biometricDevices : [];
   const nextDevices = currentDevices.filter(
@@ -209,6 +330,127 @@ function upsertBiometricDevice(user, device) {
 function findBiometricDevice(user, deviceId) {
   const devices = Array.isArray(user?.biometricDevices) ? user.biometricDevices : [];
   return devices.find((item) => String(item.deviceId || "") === String(deviceId || ""));
+}
+
+async function findConflictingEmailUser(email, excludeUserId = "") {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return null;
+
+  const query = {
+    $or: [{ email: normalizedEmail }, { pendingEmail: normalizedEmail }],
+  };
+  if (excludeUserId) {
+    query._id = { $ne: excludeUserId };
+  }
+
+  return User.findOne(query).select("_id email pendingEmail");
+}
+
+async function issueEmailVerification(user, { enforceCooldown = false, persistUser = false } = {}) {
+  const now = new Date();
+  const cooldownRemaining = getEmailVerificationCooldownRemainingSeconds(user);
+  const hasActiveChallenge =
+    user.emailVerificationExpiresAt &&
+    new Date(user.emailVerificationExpiresAt) > now &&
+    String(user.emailVerificationHash || "");
+
+  if (enforceCooldown && cooldownRemaining > 0) {
+    const error = new Error("Please wait before requesting another email verification link.");
+    error.status = 429;
+    error.retryAfterSeconds = cooldownRemaining;
+    throw error;
+  }
+
+  if (!enforceCooldown && cooldownRemaining > 0 && hasActiveChallenge) {
+    if (persistUser) {
+      await user.save();
+    }
+    return {
+      expiresAt: user.emailVerificationExpiresAt,
+      resendCooldownSeconds: cooldownRemaining,
+      reused: true,
+    };
+  }
+
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const verifyUrl = buildEmailVerificationUrl(rawToken);
+  const tokenHash = hashStoredToken(rawToken);
+  const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_TTL_SECONDS * 1000);
+  const mail = buildEmailVerificationMail(user.email, verifyUrl);
+
+  user.emailVerificationHash = tokenHash;
+  user.emailVerificationExpiresAt = expiresAt;
+  user.emailVerificationLastSentAt = now;
+  await user.save();
+  await sendEmail({
+    to: user.email,
+    subject: mail.subject,
+    text: mail.text,
+    html: mail.html,
+  });
+
+  return {
+    expiresAt,
+    resendCooldownSeconds: EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS,
+    reused: false,
+  };
+}
+
+async function issuePendingEmailVerification(user, { enforceCooldown = false, persistUser = false } = {}) {
+  const now = new Date();
+  const targetEmail = normalizeEmail(user.pendingEmail);
+  if (!targetEmail) {
+    const error = new Error("A pending email address is required.");
+    error.status = 400;
+    throw error;
+  }
+
+  const cooldownRemaining = getPendingEmailVerificationCooldownRemainingSeconds(user);
+  const hasActiveChallenge =
+    user.pendingEmailVerificationExpiresAt &&
+    new Date(user.pendingEmailVerificationExpiresAt) > now &&
+    String(user.pendingEmailVerificationHash || "");
+
+  if (enforceCooldown && cooldownRemaining > 0) {
+    const error = new Error("Please wait before requesting another email verification link.");
+    error.status = 429;
+    error.retryAfterSeconds = cooldownRemaining;
+    throw error;
+  }
+
+  if (!enforceCooldown && cooldownRemaining > 0 && hasActiveChallenge) {
+    if (persistUser) {
+      await user.save();
+    }
+    return {
+      expiresAt: user.pendingEmailVerificationExpiresAt,
+      resendCooldownSeconds: cooldownRemaining,
+      reused: true,
+    };
+  }
+
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const verifyUrl = buildEmailVerificationUrl(rawToken);
+  const tokenHash = hashStoredToken(rawToken);
+  const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_TTL_SECONDS * 1000);
+  const mail = buildEmailVerificationMail(targetEmail, verifyUrl, { isEmailChange: true });
+
+  user.pendingEmailVerificationHash = tokenHash;
+  user.pendingEmailVerificationExpiresAt = expiresAt;
+  user.pendingEmailVerificationLastSentAt = now;
+  await user.save();
+  await sendEmail({
+    to: targetEmail,
+    subject: mail.subject,
+    text: mail.text,
+    html: mail.html,
+  });
+
+  return {
+    expiresAt,
+    resendCooldownSeconds: EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS,
+    reused: false,
+  };
 }
 
 async function issuePhoneVerification(user, { enforceCooldown = false } = {}) {
@@ -415,6 +657,7 @@ exports.register = async (req, res) => {
       name,
       phone,
       email,
+      emailVerified: false,
       passwordHash,
       role: "customer",
       phoneVerified: false
@@ -422,11 +665,15 @@ exports.register = async (req, res) => {
 
     try {
       const verification = await issuePhoneVerification(user, { enforceCooldown: false });
+      const emailVerification = await issueEmailVerification(user, { enforceCooldown: false });
       return res.status(201).json({
         verificationRequired: true,
         verificationToken: verification.verificationToken,
         expiresAt: verification.expiresAt,
         resendCooldownSeconds: verification.resendCooldownSeconds,
+        emailVerificationRequired: true,
+        emailVerificationSent: !emailVerification.reused,
+        emailVerificationResendCooldownSeconds: emailVerification.resendCooldownSeconds,
         user: buildUserResponse(user)
       });
     } catch (sendErr) {
@@ -658,11 +905,10 @@ exports.updateProfile = async (req, res) => {
     }
 
     if (nextEmailChanged) {
-      const existingUser = await User.findOne({ email, _id: { $ne: user._id } }).select("_id");
+      const existingUser = await findConflictingEmailUser(email, user._id);
       if (existingUser) {
         return res.status(409).json({ message: "Email already registered." });
       }
-      user.email = email;
     }
 
     const nextPhoneChanged = phone !== normalizePhone(user.phone);
@@ -685,11 +931,30 @@ exports.updateProfile = async (req, res) => {
       user.preferredStationType = preferredStationType;
     }
 
-    await user.save();
+    let emailChange = null;
+    if (nextEmailChanged) {
+      const previousPendingEmail = normalizeEmail(user.pendingEmail);
+      if (previousPendingEmail !== email) {
+        user.pendingEmailVerificationHash = "";
+        user.pendingEmailVerificationExpiresAt = null;
+        user.pendingEmailVerificationLastSentAt = null;
+      }
+      user.pendingEmail = email;
+      emailChange = await issuePendingEmailVerification(user, {
+        enforceCooldown: false,
+        persistUser: true,
+      });
+    } else {
+      await user.save();
+    }
 
     return res.json({
       user: buildUserResponse(user),
-      message: "Profile updated successfully."
+      emailChangePending: Boolean(nextEmailChanged),
+      emailVerificationSent: Boolean(nextEmailChanged && !emailChange?.reused),
+      message: nextEmailChanged
+        ? "Profile updated. Verify the new email before it replaces your current one."
+        : "Profile updated successfully."
     });
   } catch (_error) {
     return res.status(500).json({ message: "Failed to update profile." });
@@ -1020,6 +1285,175 @@ exports.completePasswordReset = async (req, res) => {
   }
 };
 
+exports.verifyEmailLink = async (req, res) => {
+  const token = String(req.emailVerificationToken || req.body?.token || req.query?.token || "").trim();
+  const respond = (status, title, message, extra = {}) => {
+    if (req.method === "POST") {
+      return res.status(status).json({ title, message, ...extra });
+    }
+    return sendEmailVerificationPage(res, status, title, message);
+  };
+
+  if (!token) {
+    return respond(400, "Missing token", "This verification link is incomplete.");
+  }
+
+  try {
+    const tokenHash = hashStoredToken(token);
+    const user = await User.findOne({
+      $or: [{ emailVerificationHash: tokenHash }, { pendingEmailVerificationHash: tokenHash }],
+    }).select(AUTH_FLOW_USER_SELECT);
+
+    if (!user) {
+      return respond(404, "Verification link not found", "This verification link is invalid or has already been used.");
+    }
+    if (user.isBlocked) {
+      return respond(403, "Account blocked", "This account is blocked. Contact support for help.");
+    }
+
+    if (String(user.emailVerificationHash || "") === tokenHash) {
+      if (!user.emailVerificationExpiresAt || user.emailVerificationExpiresAt <= new Date()) {
+        return respond(410, "Verification link expired", "Request a new verification email and try again.");
+      }
+
+      user.emailVerified = true;
+      clearEmailVerificationChallenge(user);
+      await user.save();
+
+      return respond(200, "Email verified", "Your FuelFinder email address is now verified.", {
+        verified: true,
+        user: buildUserResponse(user),
+      });
+    }
+
+    if (String(user.pendingEmailVerificationHash || "") === tokenHash) {
+      if (!user.pendingEmailVerificationExpiresAt || user.pendingEmailVerificationExpiresAt <= new Date()) {
+        return respond(410, "Verification link expired", "Request a new verification email and try again.");
+      }
+
+      const nextEmail = normalizeEmail(user.pendingEmail);
+      if (!nextEmail) {
+        return respond(400, "Pending email missing", "This email-change request is no longer available.");
+      }
+
+      const conflict = await findConflictingEmailUser(nextEmail, user._id);
+      if (conflict) {
+        clearPendingEmailVerificationChallenge(user);
+        await user.save();
+        return respond(
+          409,
+          "Email unavailable",
+          "That email address is already in use. Start the email change again with a different address."
+        );
+      }
+
+      user.email = nextEmail;
+      user.emailVerified = true;
+      clearPendingEmailVerificationChallenge(user);
+      await user.save();
+
+      return respond(200, "Email updated", "Your new FuelFinder email address is now active.", {
+        verified: true,
+        user: buildUserResponse(user),
+      });
+    }
+
+    return respond(404, "Verification link not found", "This verification link is invalid or has already been used.");
+  } catch (_error) {
+    return respond(500, "Verification failed", "FuelFinder could not verify this email link right now.");
+  }
+};
+
+exports.resendEmailVerification = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select(AUTH_FLOW_USER_SELECT);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+
+    let challenge = null;
+    if (String(user.pendingEmail || "").trim()) {
+      challenge = await issuePendingEmailVerification(user, { enforceCooldown: true });
+      return res.json({
+        user: buildUserResponse(user),
+        pendingEmailVerification: true,
+        resendCooldownSeconds: challenge.resendCooldownSeconds,
+        message: "Verification email sent to your pending email address.",
+      });
+    }
+
+    if (user.emailVerified) {
+      return res.status(409).json({ message: "Email already verified." });
+    }
+
+    challenge = await issueEmailVerification(user, { enforceCooldown: true });
+    return res.json({
+      user: buildUserResponse(user),
+      emailVerificationRequired: true,
+      resendCooldownSeconds: challenge.resendCooldownSeconds,
+      message: "Verification email sent.",
+    });
+  } catch (error) {
+    if (error?.status === 429) {
+      return res.status(429).json({
+        message: String(error.message || "Please wait before requesting another verification email."),
+        retryAfterSeconds: Number(error.retryAfterSeconds || 0),
+      });
+    }
+    return res.status(500).json({ message: "Failed to resend verification email." });
+  }
+};
+
+exports.startEmailChange = async (req, res) => {
+  try {
+    const nextEmail = normalizeEmail(req.body.nextEmail);
+    const user = await User.findById(req.user.id).select(AUTH_FLOW_USER_SELECT);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+    if (String(user.authProvider || "local") === "google") {
+      return res.status(400).json({ message: "Google accounts cannot change email from the app." });
+    }
+    if (!nextEmail || nextEmail === normalizeEmail(user.email)) {
+      return res.status(400).json({ message: "Choose a different email address to continue." });
+    }
+
+    const existingUser = await findConflictingEmailUser(nextEmail, user._id);
+    if (existingUser) {
+      return res.status(409).json({ message: "Email already registered." });
+    }
+
+    const previousPendingEmail = normalizeEmail(user.pendingEmail);
+    if (previousPendingEmail !== nextEmail) {
+      user.pendingEmailVerificationHash = "";
+      user.pendingEmailVerificationExpiresAt = null;
+      user.pendingEmailVerificationLastSentAt = null;
+    }
+    user.pendingEmail = nextEmail;
+    const challenge = await issuePendingEmailVerification(user, {
+      enforceCooldown: false,
+      persistUser: true,
+    });
+
+    return res.json({
+      user: buildUserResponse(user),
+      resendCooldownSeconds: challenge.resendCooldownSeconds,
+      emailChangePending: true,
+      message: "Verification email sent. Confirm the new address before it replaces your current email.",
+    });
+  } catch (error) {
+    if (error?.status === 429) {
+      return res.status(429).json({
+        message: String(error.message || "Please wait before requesting another verification email."),
+        retryAfterSeconds: Number(error.retryAfterSeconds || 0),
+      });
+    }
+    return res.status(500).json({ message: "Failed to start email change." });
+  }
+};
+
 exports.registerBiometricDevice = async (req, res) => {
   try {
     const deviceId = String(req.body.deviceId || "").trim();
@@ -1276,6 +1710,10 @@ exports.verifyPhone = async (req, res) => {
       return res.status(401).json({ message: "Invalid or expired verification token." });
     }
 
+    if (String(payload?.purpose || "") !== "phone_verification") {
+      return res.status(401).json({ message: "Invalid verification purpose." });
+    }
+
     const userId = String(payload?.sub || "");
     if (!userId) {
       return res.status(401).json({ message: "Invalid verification token payload." });
@@ -1339,6 +1777,10 @@ exports.resendPhoneOtp = async (req, res) => {
       payload = verifyPhoneOtpToken(verificationToken);
     } catch (_err) {
       return res.status(401).json({ message: "Invalid or expired verification token." });
+    }
+
+    if (String(payload?.purpose || "") !== "phone_verification") {
+      return res.status(401).json({ message: "Invalid verification purpose." });
     }
 
     const userId = String(payload?.sub || "");
@@ -1425,6 +1867,55 @@ exports.devGetPhoneOtp = async (req, res) => {
   }
 };
 
+exports.linkGoogleAccount = async (req, res) => {
+  try {
+    const idToken = String(req.body.idToken || "").trim();
+    const firebaseAuth = getFirebaseAuth();
+    const payload = await firebaseAuth.verifyIdToken(idToken);
+    const googleEmail = normalizeEmail(payload.email || "");
+    const emailVerified = Boolean(payload.email_verified);
+    const googleSub = String(payload.uid || "").trim();
+
+    if (!googleEmail || !emailVerified || !googleSub) {
+      return res.status(401).json({ message: "Google account not verified." });
+    }
+
+    const user = await User.findById(req.user.id).select(AUTH_FLOW_USER_SELECT);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Account is blocked. Contact administrator." });
+    }
+    if (!user.emailVerified) {
+      return res.status(409).json({ message: "Verify your current email before linking Google." });
+    }
+    if (normalizeEmail(user.email) !== googleEmail) {
+      return res.status(409).json({ message: "Google email must match your verified FuelFinder email." });
+    }
+
+    const otherLinkedUser = await User.findOne({
+      googleSub,
+      _id: { $ne: user._id },
+    }).select("_id");
+    if (otherLinkedUser) {
+      return res.status(409).json({ message: "That Google account is already linked to another FuelFinder user." });
+    }
+
+    if (user.googleSub && user.googleSub !== googleSub) {
+      return res.status(409).json({ message: "A different Google account is already linked here." });
+    }
+
+    user.googleSub = googleSub;
+    await user.save();
+
+    return res.json({
+      user: buildUserResponse(user),
+      message: "Google account linked successfully.",
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to link Google account." });
+  }
+};
+
 exports.googleAuth = async (req, res) => {
   try {
     const idToken = String(req.body.idToken || "").trim();
@@ -1438,7 +1929,10 @@ exports.googleAuth = async (req, res) => {
       return res.status(401).json({ message: "Google account not verified." });
     }
 
-    let user = await User.findOne({ email }).select(AUTH_FLOW_USER_SELECT);
+    let user = await User.findOne({ googleSub }).select(AUTH_FLOW_USER_SELECT);
+    if (!user) {
+      user = await User.findOne({ email }).select(AUTH_FLOW_USER_SELECT);
+    }
     if (user && user.isBlocked) {
       return res.status(403).json({ message: "Account is blocked. Contact administrator." });
     }
@@ -1450,6 +1944,7 @@ exports.googleAuth = async (req, res) => {
       user = await User.create({
         name,
         email,
+        emailVerified: true,
         phone: "",
         phoneVerified: false,
         passwordHash,
@@ -1458,22 +1953,23 @@ exports.googleAuth = async (req, res) => {
         googleSub
       });
     } else {
-      let shouldSave = false;
-      if (!user.googleSub || user.googleSub !== googleSub) {
-        user.googleSub = googleSub;
-        shouldSave = true;
+      const normalizedUserEmail = normalizeEmail(user.email);
+      const hasLinkedGoogle = Boolean(String(user.googleSub || "").trim());
+
+      if (hasLinkedGoogle && String(user.googleSub || "") !== googleSub) {
+        return res.status(409).json({ message: "This FuelFinder account is already linked to a different Google account." });
       }
-      if (!user.authProvider || user.authProvider === "local") {
-        // Keep local users intact; only tag provider if unset.
-        if (!user.authProvider) {
-          user.authProvider = "local";
-          shouldSave = true;
-        }
-      } else if (user.authProvider !== "google") {
-        user.authProvider = "google";
-        shouldSave = true;
+
+      if (!hasLinkedGoogle && normalizedUserEmail === email) {
+        return res.status(409).json({
+          message: "Account already exists with this email. Sign in first, then link Google from Profile.",
+        });
       }
-      if (shouldSave) await user.save();
+
+      if (!user.emailVerified && normalizedUserEmail === email && String(user.authProvider || "local") === "google") {
+        user.emailVerified = true;
+        await user.save();
+      }
     }
 
     const requiresPhoneVerification =

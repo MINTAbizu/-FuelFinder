@@ -15,6 +15,8 @@ const {
   validatePasswordResetComplete,
   validatePasswordResetStart,
   validateGoogleAuth,
+  validateEmailToken,
+  validateEmailChangeStart,
   validateUpdateProfile
 } = require("../middleware/validateAuth");
 
@@ -34,6 +36,10 @@ router.post("/password-reset/start", authLimiter, validatePasswordResetStart, au
 router.post("/password-reset/verify", authLimiter, validatePhoneVerification, authController.verifyPasswordResetOtp);
 router.post("/password-reset/resend", authLimiter, validatePhoneResend, authController.resendPasswordResetOtp);
 router.post("/password-reset/complete", authLimiter, validatePasswordResetComplete, authController.completePasswordReset);
+router.get("/email/verify", authLimiter, validateEmailToken, authController.verifyEmailLink);
+router.post("/email/verify", authLimiter, validateEmailToken, authController.verifyEmailLink);
+router.post("/email/resend", auth, authController.resendEmailVerification);
+router.post("/email/change/start", auth, validateEmailChangeStart, authController.startEmailChange);
 router.post("/biometric/login", authLimiter, validateBiometricLogin, authController.biometricLogin);
 router.post("/logout", auth, authController.logout);
 router.get("/me", auth, authController.me);
@@ -43,6 +49,7 @@ router.post("/push-token/remove", auth, authController.unregisterPushToken);
 router.post("/change-password", auth, validateChangePassword, authController.changePassword);
 router.post("/biometric/register", auth, validateBiometricRegister, authController.registerBiometricDevice);
 router.post("/biometric/unregister", auth, validateBiometricRegister, authController.unregisterBiometricDevice);
+router.post("/google/link", auth, authLimiter, validateGoogleAuth, authController.linkGoogleAccount);
 router.post("/two-factor/start", auth, authController.startTwoFactor);
 router.post("/two-factor/verify", authLimiter, validatePhoneVerification, authController.verifyTwoFactor);
 router.post("/two-factor/resend", authLimiter, validatePhoneResend, authController.resendTwoFactorOtp);

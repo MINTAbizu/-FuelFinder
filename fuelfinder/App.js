@@ -42,6 +42,7 @@ import TransactionHistoryScreen from "./src/component/screens/profile/Transactio
 import {
   changeMyPassword,
   registerBiometricLogin,
+  resendEmailVerification,
   unregisterBiometricLogin,
   updateMyProfile,
 } from "./src/component/services/authService";
@@ -938,7 +939,13 @@ function ProfileScreen({ navigation }) {
     setAccountBusy(true);
     try {
       const data = await updateMyProfile(payload);
-      const nextUser = data?.offlineQueued ? { ...user, ...payload } : data?.user;
+      const nextUser = data?.offlineQueued
+        ? {
+            ...user,
+            name: payload.name,
+            phone: payload.phone,
+          }
+        : data?.user;
       if (nextUser) {
         await replaceUser(nextUser);
       }
@@ -963,6 +970,30 @@ function ProfileScreen({ navigation }) {
       setAccountBusy(false);
     }
   }, [closeAccountModal, prefs.biometricUnlock, profileForm.email, profileForm.name, profileForm.phone, replaceUser, t, user]);
+
+  const resendEmailVerificationLink = React.useCallback(async () => {
+    setAccountBusy(true);
+    try {
+      const data = await resendEmailVerification();
+      if (data?.user) {
+        await replaceUser(data.user);
+      }
+      Alert.alert(
+        t("done"),
+        data?.message ||
+          t("emailVerificationSentBody", {
+            defaultValue: "Verification email sent. Check your inbox and spam folder.",
+          })
+      );
+    } catch (error) {
+      Alert.alert(
+        t("updateFailed", { defaultValue: "Update failed" }),
+        error?.response?.data?.message || t("somethingWentWrong")
+      );
+    } finally {
+      setAccountBusy(false);
+    }
+  }, [replaceUser, t]);
 
   const savePasswordChanges = React.useCallback(async () => {
     const currentPassword = String(passwordForm.currentPassword || "");
@@ -1248,6 +1279,14 @@ function ProfileScreen({ navigation }) {
 
   const displayName = user?.name || "-";
   const displayEmail = user?.email || "-";
+  const pendingEmail = String(user?.pendingEmail || "").trim();
+  const emailStatusText = pendingEmail
+    ? t("pendingEmailStatus", {
+        defaultValue: `Pending email change: ${pendingEmail}`,
+      })
+    : user?.emailVerified
+      ? t("emailVerifiedStatus", { defaultValue: "Email verified" })
+      : t("emailUnverifiedStatus", { defaultValue: "Email not verified yet" });
   const avatarLetter = (user?.name || user?.email || "?").trim().slice(0, 1).toUpperCase();
   const isGoogleAccount = String(user?.authProvider || "local") === "google";
   const modalMeta = {
@@ -1317,6 +1356,35 @@ function ProfileScreen({ navigation }) {
                   defaultValue: "Google sign-in accounts keep their email synced from Google.",
                 })}
               </Text>
+            ) : null}
+            {!isGoogleAccount && (pendingEmail || !user?.emailVerified) ? (
+              <View style={styles.editorCard}>
+                <Text style={styles.inputHelper}>
+                  {pendingEmail
+                    ? t("pendingEmailHelper", {
+                        defaultValue: `Your current email stays active until ${pendingEmail} is verified from the inbox link.`,
+                      })
+                    : t("unverifiedEmailHelper", {
+                        defaultValue: "This email is not verified yet. Open the inbox link to confirm ownership.",
+                      })}
+                </Text>
+                <Pressable
+                  style={[styles.modalGhostButton, accountBusy && styles.modalButtonDisabled]}
+                  onPress={resendEmailVerificationLink}
+                  disabled={accountBusy}
+                >
+                  {accountBusy ? (
+                    <ActivityIndicator size="small" color="#0F766E" />
+                  ) : (
+                    <>
+                      <Ionicons name="mail-outline" size={16} color="#0F766E" />
+                      <Text style={styles.modalGhostButtonText}>
+                        {t("resendEmailVerificationCta", { defaultValue: "Resend verification email" })}
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
             ) : null}
           </View>
 
@@ -1784,6 +1852,15 @@ function ProfileScreen({ navigation }) {
           <Text style={styles.profileEmail} numberOfLines={1}>{displayEmail}</Text>
           <Text style={styles.profileMeta} numberOfLines={1}>
             {t("signedInOn")} {Platform.OS === "ios" ? "iOS" : Platform.OS === "android" ? "Android" : "Web"}
+          </Text>
+          <Text
+            style={[
+              styles.profileMeta,
+              user?.emailVerified && !pendingEmail ? styles.profileMetaSuccess : styles.profileMetaWarn,
+            ]}
+            numberOfLines={2}
+          >
+            {emailStatusText}
           </Text>
         </View>
       </View>
@@ -2870,6 +2947,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#64748B",
     fontWeight: "700",
+  },
+  profileMetaSuccess: {
+    color: "#166534",
+  },
+  profileMetaWarn: {
+    color: "#92400E",
   },
   inlineLoading: {
     flexDirection: "row",

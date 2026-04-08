@@ -41,6 +41,11 @@ export async function resendPasswordResetOtp(payload) {
   return data;
 }
 
+export async function resendEmailVerification() {
+  const { data } = await api.post("/auth/email/resend");
+  return data;
+}
+
 export async function completePasswordReset(payload) {
   const { data } = await api.post("/auth/password-reset/complete", payload);
   return data;

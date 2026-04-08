@@ -36,6 +36,14 @@ const userSchema = new mongoose.Schema(
       }
     ],
     email: { type: String, required: true, trim: true, lowercase: true, unique: true },
+    emailVerified: { type: Boolean, default: false },
+    emailVerificationHash: { type: String, default: "" },
+    emailVerificationExpiresAt: { type: Date, default: null, index: true },
+    emailVerificationLastSentAt: { type: Date, default: null },
+    pendingEmail: { type: String, trim: true, lowercase: true, default: "" },
+    pendingEmailVerificationHash: { type: String, default: "" },
+    pendingEmailVerificationExpiresAt: { type: Date, default: null, index: true },
+    pendingEmailVerificationLastSentAt: { type: Date, default: null },
     authProvider: { type: String, enum: ["local", "google"], default: "local" },
     googleSub: { type: String, default: "" },
     passwordHash: { type: String, required: true },
@@ -62,5 +70,6 @@ const userSchema = new mongoose.Schema(
 userSchema.index({ googleSub: 1 }, { sparse: true });
 userSchema.index({ "biometricDevices.deviceId": 1 }, { sparse: true });
 userSchema.index({ "pushTokens.token": 1 }, { sparse: true });
+userSchema.index({ pendingEmail: 1 }, { sparse: true });
 
 module.exports = mongoose.model("User", userSchema);

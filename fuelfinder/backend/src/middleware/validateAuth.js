@@ -194,6 +194,35 @@ exports.validatePasswordResetComplete = (req, res, next) => {
   return next();
 };
 
+exports.validateEmailToken = (req, res, next) => {
+  const token = normalize(req.body.token || req.query.token);
+  if (!token) {
+    return sendValidationError(res, "token is required.");
+  }
+
+  if (req.body && Object.prototype.hasOwnProperty.call(req.body, "token")) {
+    req.body.token = token;
+  }
+  if (req.query && Object.prototype.hasOwnProperty.call(req.query, "token")) {
+    req.query.token = token;
+  }
+  req.emailVerificationToken = token;
+  return next();
+};
+
+exports.validateEmailChangeStart = (req, res, next) => {
+  const nextEmail = normalizeEmail(req.body.nextEmail);
+  if (!nextEmail) {
+    return sendValidationError(res, "nextEmail is required.");
+  }
+  if (!isValidEmail(nextEmail)) {
+    return sendValidationError(res, "Invalid email format.");
+  }
+
+  req.body.nextEmail = nextEmail;
+  return next();
+};
+
 exports.validateUpdateProfile = (req, res, next) => {
   const name = normalize(req.body.name);
   const phone = normalizePhone(req.body.phone);
