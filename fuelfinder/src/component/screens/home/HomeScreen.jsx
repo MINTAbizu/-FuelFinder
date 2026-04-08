@@ -23,6 +23,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLanguage } from "../../context/LanguageContext";
 import api from "../../services/api";
 import { loadSavedStations, toggleSavedStation } from "../../services/accountStorage";
+import { isNetworkError } from "../../services/offlineService";
+import { fetchBrowseCities, fetchDirectoryStations } from "../../services/stationDirectoryService";
 import PromotionCarousel from "./PromotionCarousel";
 
 const DEFAULT_REGION = {
@@ -35,7 +37,8 @@ const STATUS_FILTERS = ["all", "available", "limited", "empty"];
 const FUEL_FILTERS = ["any", "gasoline", "diesel", "other"];
 const SORT_OPTIONS = ["distance", "queue", "name"];
 const HOME_STATIONS_CACHE_KEY = "ff_home_nearby_stations_v2";
-const HOME_STATIONS_CACHE_TTL_MS = 1000 * 60 * 10;
+const HOME_STATIONS_CACHE_FRESH_TTL_MS = 1000 * 60 * 10;
+const HOME_STATIONS_CACHE_OFFLINE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const HOME_STATIONS_MEMORY_TTL_MS = 1000 * 45;
 const HOME_MANAGER_FUEL_TTL_MS = 1000 * 15;
 const LOCATION_REFRESH_THRESHOLD_DEGREES = 0.01;
@@ -104,13 +107,16 @@ function setNearbyStationsInMemory(cacheKey, stations) {
   });
 }
 
-async function readCachedNearbyStations(stationType = "") {
+async function readCachedNearbyStations(
+  stationType = "",
+  { maxAgeMs = HOME_STATIONS_CACHE_FRESH_TTL_MS } = {}
+) {
   try {
     const raw = await AsyncStorage.getItem(HOME_STATIONS_CACHE_KEY);
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
-    if (!parsed || parsed.savedAt <= Date.now() - HOME_STATIONS_CACHE_TTL_MS) {
+    if (!parsed || Number(parsed.savedAt || 0) <= Date.now() - maxAgeMs) {
       return null;
     }
 
@@ -238,30 +244,6 @@ async function fetchStationPromotions(stationIds, limit = 6) {
   return Array.isArray(data?.promotions) ? data.promotions : [];
 }
 
-async function fetchBrowseCities(params = {}) {
-  const { data } = await api.get("/map/cities", {
-    params: {
-      q: String(params?.q || "").trim() || undefined,
-      limit: params?.limit || 20,
-      stationType: normalizeStationType(params?.stationType) || "fuel",
-    }
-  });
-  return Array.isArray(data?.cities) ? data.cities : [];
-}
-
-async function fetchDirectoryStations(params = {}) {
-  const { data } = await api.get("/map/stations", {
-    params: {
-      cityId: String(params?.cityId || "").trim() || undefined,
-      regionId: String(params?.regionId || "").trim() || undefined,
-      q: String(params?.q || "").trim() || undefined,
-      limit: params?.limit || 120,
-      stationType: normalizeStationType(params?.stationType) || "fuel",
-    }
-  });
-  return Array.isArray(data?.stations) ? data.stations : [];
-}
-
 function statusLabel(t, status, homeConfig = null) {
   const customLabels = homeConfig?.statusLabels || null;
   if (customLabels) {
@@ -295,6 +277,22 @@ function formatDistance(t, distanceKm) {
   if (distanceKm == null) return "N/A";
   if (distanceKm < 1) return `${Math.round(distanceKm * 1000)} ${t("homeScreen.units.meters")}`;
   return `${distanceKm.toFixed(1)} ${t("homeScreen.units.km")}`;
+}
+
+function buildOfflineStationsNotice(t, isElectricHome) {
+  return t("homeScreen.offlineStationsNotice", {
+    defaultValue: isElectricHome
+      ? "Showing saved charging stations from this device until the connection comes back."
+      : "Showing saved stations from this device until the connection comes back.",
+  });
+}
+
+function buildOfflineStationsUnavailableMessage(t, isElectricHome) {
+  return t("homeScreen.offlineStationsUnavailable", {
+    defaultValue: isElectricHome
+      ? "Offline and no saved charging stations are available yet. Open this screen once while online to save the list for later."
+      : "Offline and no saved station list is available yet. Open this screen once while online to save the list for later.",
+  });
 }
 
 function buildCoordinateCentroid(stations = []) {
@@ -638,6 +636,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
   const [loadingStations, setLoadingStations] = useState(false);
   const [locationError, setLocationError] = useState("");
   const [stationsError, setStationsError] = useState("");
+  const [offlineStationsNotice, setOfflineStationsNotice] = useState("");
   const [centerNotice, setCenterNotice] = useState("");
   const [routingError, setRoutingError] = useState("");
   const [routeCoords, setRouteCoords] = useState([]);
@@ -670,7 +669,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
       }
       setCityOptionsLoading(true);
       try {
-        const nextCities = await fetchBrowseCities({
+        const { cities: nextCities } = await fetchBrowseCities({
           q: query,
           limit: query ? 30 : 18,
           stationType: preferredStationType,
@@ -696,12 +695,13 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
       setLoadingStations(true);
       setStationsError("");
       try {
-        const nextStations = await fetchDirectoryStations({
+        const { stations: nextStations, fromCache } = await fetchDirectoryStations({
           cityId,
           limit: 220,
           stationType: preferredStationType,
         });
         setStations(nextStations);
+        setOfflineStationsNotice(fromCache ? buildOfflineStationsNotice(t, isElectricHome) : "");
 
         const centroid = buildCoordinateCentroid(nextStations);
         const cityLatitude = Number(city?.latitude);
@@ -744,17 +744,20 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
           );
         }
       } catch (error) {
+        setOfflineStationsNotice("");
         setStationsError(
-          t("cityStationsLoadFail", {
-            defaultValue: "Failed to load stations for the selected city."
-          })
+          isNetworkError(error)
+            ? buildOfflineStationsUnavailableMessage(t, isElectricHome)
+            : t("cityStationsLoadFail", {
+                defaultValue: "Failed to load stations for the selected city."
+              })
         );
         console.error("[Stations:loadCityStations]", error?.response?.status, error?.response?.data, error?.message);
       } finally {
         setLoadingStations(false);
       }
     },
-    [preferredStationType, t]
+    [isElectricHome, preferredStationType, t]
   );
 
   const loadNationwideStations = useCallback(
@@ -762,11 +765,12 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
       setLoadingStations(true);
       setStationsError("");
       try {
-        const nextStations = await fetchDirectoryStations({
+        const { stations: nextStations, fromCache } = await fetchDirectoryStations({
           limit: 220,
           stationType: preferredStationType,
         });
         setStations(nextStations);
+        setOfflineStationsNotice(fromCache ? buildOfflineStationsNotice(t, isElectricHome) : "");
 
         const centroid = buildCoordinateCentroid(nextStations);
         if (centroid) {
@@ -789,12 +793,15 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
           setStationsError(screenCopy.noNationwideStationsMessage);
         }
       } catch (error) {
+        setOfflineStationsNotice("");
         setStationsError(
-          isElectricHome
-            ? "Failed to load the electric charging network."
-            : t("cityStationsLoadFail", {
-                defaultValue: "Failed to load stations for the selected city.",
-              })
+          isNetworkError(error)
+            ? buildOfflineStationsUnavailableMessage(t, isElectricHome)
+            : isElectricHome
+              ? "Failed to load the electric charging network."
+              : t("cityStationsLoadFail", {
+                  defaultValue: "Failed to load stations for the selected city.",
+                })
         );
         console.error(
           "[Stations:loadNationwideStations]",
@@ -863,6 +870,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     setBrowseMode(defaultBrowseMode);
     setSelectedCity(null);
     setStations([]);
+    setOfflineStationsNotice("");
   }, [defaultBrowseMode, preferredStationType]);
 
   useEffect(() => {
@@ -883,6 +891,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
           requiredAccuracy: 250,
         });
         if (mounted && lastKnown?.coords) {
+          loadedRef.current = false;
           setLocation(lastKnown.coords);
           setMapCenter({
             latitude: Number(lastKnown.coords.latitude || DEFAULT_REGION.latitude),
@@ -932,13 +941,17 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
   const loadNearbyStations = useCallback(async ({ forceRefresh = false } = {}) => {
     const basePoint = location;
     if (!basePoint) {
-      const cached = await readCachedNearbyStations(preferredStationType);
+      const cached = await readCachedNearbyStations(preferredStationType, {
+        maxAgeMs: HOME_STATIONS_CACHE_OFFLINE_TTL_MS,
+      });
       if (cached?.stations?.length) {
         setStations(cached.stations);
         setStationsError("");
+        setOfflineStationsNotice(buildOfflineStationsNotice(t, isElectricHome));
         return;
       }
 
+      setOfflineStationsNotice("");
       setStations([]);
       setStationsError(t("homeScreen.location.denied"));
       return;
@@ -952,14 +965,23 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
         stationType: preferredStationType,
       });
       setStations(next);
+      setOfflineStationsNotice("");
       void saveCachedNearbyStations(basePoint, next, nearbyRadiusMeters, preferredStationType);
     } catch (error) {
-      const cached = await readCachedNearbyStations(preferredStationType);
+      const cached = await readCachedNearbyStations(preferredStationType, {
+        maxAgeMs: HOME_STATIONS_CACHE_OFFLINE_TTL_MS,
+      });
       if (cached?.stations?.length) {
         setStations(cached.stations);
         setStationsError("");
+        setOfflineStationsNotice(buildOfflineStationsNotice(t, isElectricHome));
       } else {
-        setStationsError(t("homeScreen.stations.loadFail"));
+        setOfflineStationsNotice("");
+        setStationsError(
+          isNetworkError(error)
+            ? buildOfflineStationsUnavailableMessage(t, isElectricHome)
+            : t("homeScreen.stations.loadFail")
+        );
       }
       console.error(
         "[Stations:loadNearbyStations:debug]",
@@ -970,12 +992,13 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     } finally {
       setLoadingStations(false);
     }
-  }, [location, nearbyRadiusMeters, preferredStationType, t]);
+  }, [isElectricHome, location, nearbyRadiusMeters, preferredStationType, t]);
 
   const handleBrowseModeChange = useCallback(
     async (nextMode) => {
       setBrowseMode(nextMode);
       setStationsError("");
+      setOfflineStationsNotice("");
       loadedRef.current = true;
 
       if (nextMode === "nationwide") {
@@ -984,11 +1007,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
       }
 
       if (nextMode === "nearby") {
-        if (location) {
-          await loadNearbyStations({ forceRefresh: true });
-        } else {
-          setStations([]);
-        }
+        await loadNearbyStations({ forceRefresh: true });
         return;
       }
 
@@ -1002,7 +1021,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
         await handleSelectCity(fallbackCity);
       }
     },
-    [cityOptions, handleSelectCity, loadCityStations, loadNationwideStations, loadNearbyStations, location, selectedCity]
+    [cityOptions, handleSelectCity, loadCityStations, loadNationwideStations, loadNearbyStations, selectedCity]
   );
 
   useEffect(() => {
@@ -1012,10 +1031,10 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
   }, [browseMode, loadNationwideStations]);
 
   useEffect(() => {
-    if (browseMode !== "nearby" || !location || loadedRef.current) return;
+    if (browseMode !== "nearby" || loadedRef.current) return;
     loadedRef.current = true;
-    loadNearbyStations();
-  }, [browseMode, location, loadNearbyStations]);
+    void loadNearbyStations();
+  }, [browseMode, loadNearbyStations, location]);
 
   useEffect(() => {
     if (browseMode !== "city" || selectedCity || !cityOptions.length) return;
@@ -1643,17 +1662,13 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
                 >
                   <Text style={styles.buttonText}>{screenCopy.reloadCityLabel}</Text>
                 </Pressable>
-              ) : location ? (
+              ) : (
                 <Pressable
                   style={[styles.button, styles.secondary, isElectricHome && styles.secondaryElectric]}
                   onPress={() => loadNearbyStations({ forceRefresh: true })}
                 >
                   <Text style={styles.buttonText}>{screenCopy.reloadNearbyLabel}</Text>
                 </Pressable>
-              ) : (
-                <View style={[styles.button, styles.disabled]}>
-                  <Text style={styles.buttonText}>{screenCopy.reloadNearbyLabel}</Text>
-                </View>
               )}
             </View>
 
@@ -1665,6 +1680,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
             ) : null}
             {centerNotice ? <Text style={styles.ok}>{centerNotice}</Text> : null}
             {locationError ? <Text style={styles.notice}>{locationError}</Text> : null}
+            {offlineStationsNotice ? <Text style={styles.notice}>{offlineStationsNotice}</Text> : null}
             {stationsError ? <Text style={styles.error}>{stationsError}</Text> : null}
             {routingError ? <Text style={styles.error}>{routingError}</Text> : null}
             <TextInput

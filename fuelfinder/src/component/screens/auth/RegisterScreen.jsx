@@ -16,7 +16,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import * as WebBrowser from "expo-web-browser";
-import { makeRedirectUri } from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
 
 import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
@@ -25,6 +24,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useLanguage } from "../../context/LanguageContext";
 
 import { API_BASE_URL } from "../../services/api";
+import { buildGoogleAuthConfig } from "../../services/googleAuthConfig";
 import { firebaseAuth } from "../../services/firebase";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -51,29 +51,12 @@ const [languageQuery,setLanguageQuery]=useState("");
 /* GOOGLE CONFIG */
 
 const googleConfig = useMemo(()=>{
-
-const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
-
-const redirectUri = makeRedirectUri({
-useProxy:true,
-projectNameForProxy:"@mintesenotbizuayehw/fuelfinder"
-});
-
-return{
-clientId:webClientId,
-webClientId,
-scopes:["profile","email"],
-responseType:"id_token",
-redirectUri
-};
+return buildGoogleAuthConfig();
 
 },[]);
 
 const [request,response,promptAsync] =
-Google.useAuthRequest(googleConfig,{
-useProxy:true,
-projectNameForProxy:"@mintesenotbizuayehw/fuelfinder"
-});
+Google.useAuthRequest(googleConfig);
 
 /* GOOGLE LOGIN */
 
@@ -218,7 +201,7 @@ setError(t("auth.googleNotReady"));
 return;
 }
 
-await promptAsync({ useProxy:true });
+await promptAsync();
 
 };
 

@@ -1,0 +1,178 @@
+<mxfile host="app.diagrams.net" modified="2026-04-04T00:00:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="fuelFinderUseCase" name="FuelFinder Use Case Diagram">
+    <mxGraphModel dx="1600" dy="960" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="system" value="FuelFinder System" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;fillColor=#f8fafc;strokeColor=#334155;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="240" y="40" width="1260" height="1180" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="actor_customer" value="Customer" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="70" y="150" width="60" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="actor_staff" value="Station Staff" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="70" y="490" width="60" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="actor_owner" value="Station Owner / Admin" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="1540" y="260" width="60" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="actor_super" value="Super Admin" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="1540" y="670" width="60" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="actor_sms" value="SMS Provider" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="70" y="930" width="60" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="actor_payment" value="Payment Gateway" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="1540" y="930" width="60" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="actor_map" value="Map / Location Service" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="1540" y="70" width="60" height="120" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc_register" value="Register Account" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#166534;" vertex="1" parent="1">
+          <mxGeometry x="320" y="70" width="180" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_verify_otp" value="Verify Phone OTP" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#166534;" vertex="1" parent="1">
+          <mxGeometry x="550" y="70" width="190" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_login" value="Login" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#166534;" vertex="1" parent="1">
+          <mxGeometry x="790" y="70" width="170" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_forgot" value="Reset Forgotten Password" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#166534;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="70" width="220" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc_select_mode" value="Select Fuel / EV Mode" style="ellipse;whiteSpace=wrap;html=1;fillColor=#cffafe;strokeColor=#155e75;" vertex="1" parent="1">
+          <mxGeometry x="450" y="170" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_discover_fuel" value="Discover Fuel Stations" style="ellipse;whiteSpace=wrap;html=1;fillColor=#cffafe;strokeColor=#155e75;" vertex="1" parent="1">
+          <mxGeometry x="300" y="260" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_discover_ev" value="Discover EV Stations" style="ellipse;whiteSpace=wrap;html=1;fillColor=#cffafe;strokeColor=#155e75;" vertex="1" parent="1">
+          <mxGeometry x="560" y="260" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_station_detail" value="View Station Details" style="ellipse;whiteSpace=wrap;html=1;fillColor=#e0f2fe;strokeColor=#1d4ed8;" vertex="1" parent="1">
+          <mxGeometry x="830" y="260" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_route" value="Get Route to Station" style="ellipse;whiteSpace=wrap;html=1;fillColor=#e0f2fe;strokeColor=#1d4ed8;" vertex="1" parent="1">
+          <mxGeometry x="1090" y="260" width="220" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc_queue" value="Reserve Queue Slot" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fef3c7;strokeColor=#b45309;" vertex="1" parent="1">
+          <mxGeometry x="320" y="380" width="200" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_payment" value="Pay Reservation Fee" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fef3c7;strokeColor=#b45309;" vertex="1" parent="1">
+          <mxGeometry x="560" y="380" width="200" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_check_payment" value="Check Payment Status" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fef3c7;strokeColor=#b45309;" vertex="1" parent="1">
+          <mxGeometry x="800" y="380" width="210" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_leave_queue" value="Leave Queue" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fef3c7;strokeColor=#b45309;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="380" width="180" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_checkin" value="Start Station Check-In" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fef3c7;strokeColor=#b45309;" vertex="1" parent="1">
+          <mxGeometry x="460" y="470" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_alerts" value="Receive Alerts and Notifications" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fef3c7;strokeColor=#b45309;" vertex="1" parent="1">
+          <mxGeometry x="760" y="470" width="280" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc_profile" value="Manage Profile" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ede9fe;strokeColor=#6d28d9;" vertex="1" parent="1">
+          <mxGeometry x="320" y="590" width="180" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_history" value="View Transaction History" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ede9fe;strokeColor=#6d28d9;" vertex="1" parent="1">
+          <mxGeometry x="540" y="590" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_logout" value="Logout" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ede9fe;strokeColor=#6d28d9;" vertex="1" parent="1">
+          <mxGeometry x="810" y="590" width="150" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc_verify_customer" value="Verify Customer Check-In" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ddd6fe;strokeColor=#6d28d9;" vertex="1" parent="1">
+          <mxGeometry x="300" y="720" width="230" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_update_status" value="Update Fuel / Charger Status" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ddd6fe;strokeColor=#6d28d9;" vertex="1" parent="1">
+          <mxGeometry x="570" y="720" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_manage_queue" value="Manage Queue Flow" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ddd6fe;strokeColor=#6d28d9;" vertex="1" parent="1">
+          <mxGeometry x="850" y="720" width="200" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_complete_service" value="Confirm Customer Service Completion" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ddd6fe;strokeColor=#6d28d9;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="720" width="280" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc_manage_station" value="Manage Station Profile" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fde68a;strokeColor=#92400e;" vertex="1" parent="1">
+          <mxGeometry x="320" y="860" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_manage_staff" value="Manage Staff Accounts" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fde68a;strokeColor=#92400e;" vertex="1" parent="1">
+          <mxGeometry x="590" y="860" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_manage_payments" value="Monitor Reservations and Payments" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fde68a;strokeColor=#92400e;" vertex="1" parent="1">
+          <mxGeometry x="860" y="860" width="270" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_reports" value="View Reports and Analytics" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fde68a;strokeColor=#92400e;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="860" width="230" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="uc_bootstrap" value="Bootstrap First Super Admin" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fecaca;strokeColor=#b91c1c;" vertex="1" parent="1">
+          <mxGeometry x="350" y="1010" width="250" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_manage_roles" value="Manage Users and Roles" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fecaca;strokeColor=#b91c1c;" vertex="1" parent="1">
+          <mxGeometry x="670" y="1010" width="230" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_global_settings" value="Manage Global System Settings" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fecaca;strokeColor=#b91c1c;" vertex="1" parent="1">
+          <mxGeometry x="960" y="1010" width="260" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e1" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_register"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_login"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_forgot"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_select_mode"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_discover_fuel"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_discover_ev"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_station_detail"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_route"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_queue"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e10" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_payment"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_check_payment"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_leave_queue"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e13" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_checkin"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e14" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_alerts"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e15" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_profile"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e16" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_history"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e17" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_customer" target="uc_logout"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e18" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_staff" target="uc_verify_customer"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e19" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_staff" target="uc_update_status"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e20" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_staff" target="uc_manage_queue"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e21" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_staff" target="uc_complete_service"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e22" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_owner" target="uc_manage_station"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e23" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_owner" target="uc_manage_staff"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e24" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_owner" target="uc_manage_payments"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e25" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_owner" target="uc_reports"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e26" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_owner" target="uc_update_status"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e27" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_super" target="uc_bootstrap"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e28" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_super" target="uc_manage_roles"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e29" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_super" target="uc_global_settings"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e30" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_super" target="uc_reports"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e31" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_super" target="uc_manage_station"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e32" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_sms" target="uc_verify_otp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e33" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_sms" target="uc_forgot"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e34" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_payment" target="uc_payment"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e35" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_payment" target="uc_check_payment"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e36" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_map" target="uc_discover_fuel"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e37" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_map" target="uc_discover_ev"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e38" style="endArrow=none;html=1;" edge="1" parent="1" source="actor_map" target="uc_route"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="inc1" value="&lt;&lt;include&gt;&gt;" style="dashed=1;endArrow=open;html=1;" edge="1" parent="1" source="uc_register" target="uc_verify_otp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="inc2" value="&lt;&lt;include&gt;&gt;" style="dashed=1;endArrow=open;html=1;" edge="1" parent="1" source="uc_forgot" target="uc_verify_otp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="inc3" value="&lt;&lt;include&gt;&gt;" style="dashed=1;endArrow=open;html=1;" edge="1" parent="1" source="uc_queue" target="uc_payment"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="inc4" value="&lt;&lt;include&gt;&gt;" style="dashed=1;endArrow=open;html=1;" edge="1" parent="1" source="uc_checkin" target="uc_verify_customer"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
