@@ -169,7 +169,9 @@ setLoading(true);
   navigation.navigate("VerifyPhone",{
   verificationToken:result.verificationToken,
   phone:result?.user?.phone || phone.trim(),
-  email:result?.user?.email || email.trim()
+  email:result?.user?.email || email.trim(),
+  emailVerificationSent: result?.emailVerificationSent,
+  emailVerificationMessage: result?.emailVerificationMessage || ""
   });
 
   }

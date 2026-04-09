@@ -131,6 +131,10 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function describeError(error, fallback = "Unknown error") {
+  return String(error?.message || fallback);
+}
+
 function buildEmailVerificationUrl(token) {
   const explicitBase = String(process.env.EMAIL_VERIFICATION_BASE_URL || "").trim();
   const port = String(process.env.PORT || "5000").trim() || "5000";
@@ -382,12 +386,18 @@ async function issueEmailVerification(user, { enforceCooldown = false, persistUs
   user.emailVerificationExpiresAt = expiresAt;
   user.emailVerificationLastSentAt = now;
   await user.save();
-  await sendEmail({
-    to: user.email,
-    subject: mail.subject,
-    text: mail.text,
-    html: mail.html,
-  });
+  try {
+    await sendEmail({
+      to: user.email,
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
+    });
+  } catch (error) {
+    user.emailVerificationLastSentAt = null;
+    await user.save();
+    throw error;
+  }
 
   return {
     expiresAt,
@@ -439,12 +449,18 @@ async function issuePendingEmailVerification(user, { enforceCooldown = false, pe
   user.pendingEmailVerificationExpiresAt = expiresAt;
   user.pendingEmailVerificationLastSentAt = now;
   await user.save();
-  await sendEmail({
-    to: targetEmail,
-    subject: mail.subject,
-    text: mail.text,
-    html: mail.html,
-  });
+  try {
+    await sendEmail({
+      to: targetEmail,
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
+    });
+  } catch (error) {
+    user.pendingEmailVerificationLastSentAt = null;
+    await user.save();
+    throw error;
+  }
 
   return {
     expiresAt,
@@ -663,24 +679,40 @@ exports.register = async (req, res) => {
       phoneVerified: false
     });
 
+    let verification;
     try {
-      const verification = await issuePhoneVerification(user, { enforceCooldown: false });
-      const emailVerification = await issueEmailVerification(user, { enforceCooldown: false });
-      return res.status(201).json({
-        verificationRequired: true,
-        verificationToken: verification.verificationToken,
-        expiresAt: verification.expiresAt,
-        resendCooldownSeconds: verification.resendCooldownSeconds,
-        emailVerificationRequired: true,
-        emailVerificationSent: !emailVerification.reused,
-        emailVerificationResendCooldownSeconds: emailVerification.resendCooldownSeconds,
-        user: buildUserResponse(user)
-      });
+      verification = await issuePhoneVerification(user, { enforceCooldown: false });
     } catch (sendErr) {
       await User.deleteOne({ _id: user._id });
       throw sendErr;
     }
+
+    let emailVerification = null;
+    let emailVerificationMessage = "";
+    try {
+      emailVerification = await issueEmailVerification(user, { enforceCooldown: false });
+    } catch (emailError) {
+      console.error(
+        "[auth:email] Failed to send registration verification email:",
+        describeError(emailError)
+      );
+      emailVerificationMessage =
+        "Your account was created and your phone code was sent, but we could not send the email verification link yet. Verify your phone first, then resend the email from your profile.";
+    }
+
+    return res.status(201).json({
+      verificationRequired: true,
+      verificationToken: verification.verificationToken,
+      expiresAt: verification.expiresAt,
+      resendCooldownSeconds: verification.resendCooldownSeconds,
+      emailVerificationRequired: true,
+      emailVerificationSent: Boolean(emailVerification && !emailVerification.reused),
+      emailVerificationResendCooldownSeconds: Number(emailVerification?.resendCooldownSeconds || 0),
+      emailVerificationMessage,
+      user: buildUserResponse(user)
+    });
   } catch (error) {
+    console.error("[auth:register] Registration failed:", describeError(error));
     return res.status(500).json({ message: "Registration failed." });
   }
 };
@@ -1396,6 +1428,7 @@ exports.resendEmailVerification = async (req, res) => {
       message: "Verification email sent.",
     });
   } catch (error) {
+    console.error("[auth:email] Failed to resend verification email:", describeError(error));
     if (error?.status === 429) {
       return res.status(429).json({
         message: String(error.message || "Please wait before requesting another verification email."),

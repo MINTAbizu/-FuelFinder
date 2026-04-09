@@ -32,9 +32,15 @@ export default function PhoneVerifyScreen({ navigation, route }) {
   );
   const phone = route?.params?.phone || "";
   const email = route?.params?.email || "";
+  const emailVerificationSent = route?.params?.emailVerificationSent;
+  const emailVerificationMessage = String(route?.params?.emailVerificationMessage || "").trim();
   const flowType = route?.params?.flowType || "phone_verification";
   const isTwoFactorFlow = flowType === "two_factor";
   const isPasswordResetFlow = flowType === "password_reset";
+  const showEmailVerificationWarning =
+    !isTwoFactorFlow &&
+    !isPasswordResetFlow &&
+    emailVerificationSent === false;
 
   const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
@@ -183,6 +189,16 @@ export default function PhoneVerifyScreen({ navigation, route }) {
                 : "Use the 6-digit code to finish setting up your account."}
             </Text>
 
+            {showEmailVerificationWarning ? (
+              <View style={styles.infoBanner}>
+                <Ionicons name="mail-unread-outline" size={18} color="#92400E" />
+                <Text style={styles.infoBannerText}>
+                  {emailVerificationMessage ||
+                    "We could not send your email verification link yet. Finish phone verification first, then resend the email from your profile."}
+                </Text>
+              </View>
+            ) : null}
+
             <Text style={styles.label}>
               {isTwoFactorFlow
                 ? "Security Code"
@@ -263,6 +279,25 @@ const styles = StyleSheet.create({
   },
   cardTitle: { fontSize: 20, fontWeight: "800", marginBottom: 5 },
   cardSubtitle: { color: "#777", fontSize: 13, marginBottom: 20 },
+  infoBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    backgroundColor: "#FEF3C7",
+    borderWidth: 1,
+    borderColor: "#FCD34D",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  infoBannerText: {
+    flex: 1,
+    color: "#92400E",
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+  },
   label: { fontSize: 13, color: "#777" },
   input: { borderBottomWidth: 1, borderBottomColor: "#ddd", paddingVertical: 10, marginBottom: 15 },
   loginBtn: {
