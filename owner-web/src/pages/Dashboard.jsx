@@ -13,6 +13,7 @@ import {
   getStationFuelStockSummary,
   listAdminStations,
   listNearbyFuelStations,
+  listPublicMapStations,
   getStationQueue,
   listAdminCities,
   listAdminRegions,
@@ -640,6 +641,100 @@ function buildCoordinateCentroid(items = []) {
     longitude: totals.longitude / coords.length,
     sampleSize: coords.length
   };
+}
+
+function distanceMetersBetweenPoints(from, to) {
+  const fromLatitude = readOptionalFiniteNumber(from?.latitude);
+  const fromLongitude = readOptionalFiniteNumber(from?.longitude);
+  const toLatitude = readOptionalFiniteNumber(to?.latitude);
+  const toLongitude = readOptionalFiniteNumber(to?.longitude);
+  if (
+    !Number.isFinite(fromLatitude) ||
+    !Number.isFinite(fromLongitude) ||
+    !Number.isFinite(toLatitude) ||
+    !Number.isFinite(toLongitude)
+  ) {
+    return null;
+  }
+
+  const earthRadiusMeters = 6371000;
+  const dLat = ((toLatitude - fromLatitude) * Math.PI) / 180;
+  const dLon = ((toLongitude - fromLongitude) * Math.PI) / 180;
+  const lat1 = (fromLatitude * Math.PI) / 180;
+  const lat2 = (toLatitude * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+
+  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function buildLiveCitySearchRadiusMeters(center, stations = []) {
+  const stationList = Array.isArray(stations) ? stations : [];
+  const maxStationDistance = stationList.reduce((currentMax, station) => {
+    const distance = distanceMetersBetweenPoints(center, {
+      latitude: station?.latitude,
+      longitude: station?.longitude
+    });
+    return Number.isFinite(distance) ? Math.max(currentMax, distance) : currentMax;
+  }, 0);
+
+  const bufferedDistance = maxStationDistance > 0 ? maxStationDistance + 5000 : 12000;
+  return Math.min(50000, Math.max(12000, Math.round(bufferedDistance)));
+}
+
+function buildLiveStationMergeKey(station) {
+  const linkedStationId = String(station?.stationId || "").trim();
+  if (linkedStationId) return `station:${linkedStationId}`;
+
+  const publicId = String(station?.id || "").trim();
+  if (publicId) return `public:${publicId}`;
+
+  const nameKey = normalizeKey(station?.name || "station");
+  const latitude = readOptionalFiniteNumber(station?.latitude);
+  const longitude = readOptionalFiniteNumber(station?.longitude);
+  return `${nameKey}:${latitude ?? "na"}:${longitude ?? "na"}`;
+}
+
+function mergeLiveStationLists(primary = [], secondary = []) {
+  const merged = new Map();
+
+  [...(Array.isArray(primary) ? primary : []), ...(Array.isArray(secondary) ? secondary : [])].forEach((station) => {
+    const key = buildLiveStationMergeKey(station);
+    const existing = merged.get(key);
+
+    if (!existing) {
+      merged.set(key, station);
+      return;
+    }
+
+    merged.set(key, {
+      ...existing,
+      ...station,
+      id: station?.id || existing?.id,
+      stationId: station?.stationId || existing?.stationId,
+      distanceMeters:
+        readOptionalFiniteNumber(station?.distanceMeters) ?? readOptionalFiniteNumber(existing?.distanceMeters),
+      latitude: readOptionalFiniteNumber(station?.latitude) ?? readOptionalFiniteNumber(existing?.latitude),
+      longitude: readOptionalFiniteNumber(station?.longitude) ?? readOptionalFiniteNumber(existing?.longitude)
+    });
+  });
+
+  return Array.from(merged.values()).sort((left, right) => {
+    const leftDistance = readOptionalFiniteNumber(left?.distanceMeters);
+    const rightDistance = readOptionalFiniteNumber(right?.distanceMeters);
+    const leftHasDistance = Number.isFinite(leftDistance);
+    const rightHasDistance = Number.isFinite(rightDistance);
+
+    if (leftHasDistance && rightHasDistance && leftDistance !== rightDistance) {
+      return leftDistance - rightDistance;
+    }
+    if (leftHasDistance !== rightHasDistance) {
+      return leftHasDistance ? -1 : 1;
+    }
+
+    return String(left?.name || "").localeCompare(String(right?.name || ""));
+  });
 }
 
 function readStorageJSON(key, fallback) {
@@ -1833,34 +1928,68 @@ export default function Dashboard() {
       return;
     }
 
-    if (!selectedCityCenter) {
-      setLiveCityStations([]);
-      setLiveCityStationsLoading(false);
-      setLiveCityStationsError(
-        selectedCityRecord
-          ? `No city-center estimate is available for ${selectedCityRecord.name} yet. Link at least one station to this city first.`
-          : ""
-      );
-      return;
-    }
-
     let isActive = true;
 
     const loadLiveCityStations = async () => {
       try {
         setLiveCityStationsLoading(true);
         setLiveCityStationsError("");
-        const data = await listNearbyFuelStations({
-          lat: selectedCityCenter.latitude,
-          lon: selectedCityCenter.longitude,
-          radius: 12000
-        });
+
+        const cityId = String(selectedCityRecord?.id || selectedCityRecord?._id || cityFilter || "").trim();
+        const customerCityData = cityId
+          ? await listPublicMapStations({
+              cityId,
+              limit: 220
+            })
+          : { stations: [] };
         if (!isActive) return;
-        setLiveCityStations(Array.isArray(data?.stations) ? data.stations : []);
+
+        const customerCityStations = Array.isArray(customerCityData?.stations)
+          ? customerCityData.stations
+          : [];
+        const fallbackCenter = buildCoordinateCentroid(customerCityStations);
+        const liveSearchCenter = selectedCityCenter || fallbackCenter;
+
+        if (!liveSearchCenter) {
+          setLiveCityStations(customerCityStations);
+          setLiveCityStationsError(
+            customerCityStations.length
+              ? ""
+              : selectedCityRecord
+                ? `No city-center estimate is available for ${selectedCityRecord.name} yet, and no customer city stations were found for it.`
+                : "No customer city stations were found."
+          );
+          return;
+        }
+
+        const nearbyRadius = buildLiveCitySearchRadiusMeters(liveSearchCenter, customerCityStations);
+        let nearbyStations = [];
+
+        try {
+          const nearbyData = await listNearbyFuelStations({
+            lat: liveSearchCenter.latitude,
+            lon: liveSearchCenter.longitude,
+            radius: nearbyRadius
+          });
+          if (!isActive) return;
+          nearbyStations = Array.isArray(nearbyData?.stations) ? nearbyData.stations : [];
+        } catch (nearbyError) {
+          if (!customerCityStations.length) {
+            throw nearbyError;
+          }
+        }
+
+        const mergedStations = mergeLiveStationLists(customerCityStations, nearbyStations);
+        setLiveCityStations(mergedStations);
+        setLiveCityStationsError(
+          mergedStations.length
+            ? ""
+            : `No customer-visible stations were found for ${selectedCityRecord?.name || "this city"} yet.`
+        );
       } catch (error) {
         if (!isActive) return;
         setLiveCityStations([]);
-        setLiveCityStationsError(error?.message || "Failed to load live map stations for this city.");
+        setLiveCityStationsError(error?.message || "Failed to load customer-visible stations for this city.");
       } finally {
         if (isActive) {
           setLiveCityStationsLoading(false);
@@ -3466,10 +3595,10 @@ export default function Dashboard() {
               <div className="city-live-panel">
                 <div className="city-station-head">
                   <div>
-                    <p className="section-title">Live map stations</p>
+                    <p className="section-title">Customer app stations</p>
                     <h4>{selectedCityRecord?.name || "Selected city"}</h4>
                     <span>
-                      Nearby stations from the customer map flow
+                      Stations visible in the customer app for this city
                       {selectedCityCenter?.sampleSize
                         ? `, centered from ${selectedCityCenter.sampleSize} known station${selectedCityCenter.sampleSize === 1 ? "" : "s"}`
                         : ""}
@@ -3481,7 +3610,7 @@ export default function Dashboard() {
                 <div className="station-browser">
                   {liveCityStationsLoading ? (
                     <div className="station-browser-empty">
-                      Loading live map stations for {selectedCityRecord?.name || "this city"}...
+                      Loading customer-visible stations for {selectedCityRecord?.name || "this city"}...
                     </div>
                   ) : liveCityStations.length ? (
                     liveCityStations.map((item) => {
@@ -3555,7 +3684,7 @@ export default function Dashboard() {
                     })
                   ) : (
                     <div className="station-browser-empty">
-                      {liveCityStationsError || `No live map stations were found near ${selectedCityRecord?.name || "this city"} yet.`}
+                      {liveCityStationsError || `No customer-visible stations were found for ${selectedCityRecord?.name || "this city"} yet.`}
                     </div>
                   )}
                 </div>

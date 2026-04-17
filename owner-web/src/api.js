@@ -257,6 +257,16 @@ export async function listNearbyFuelStations(params = {}) {
   return apiRequest(`/map/nearby-fuel${query ? `?${query}` : ""}`, {}, { auth: false, cacheTtlMs: 1000 * 45 });
 }
 
+export async function listPublicMapStations(params = {}) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return apiRequest(`/map/stations${query ? `?${query}` : ""}`, {}, { auth: false, cacheTtlMs: 1000 * 45 });
+}
+
 export async function getStationQueue(stationId) {
   return apiRequest(
     `/queue/station/${stationId}?includePending=true`,
