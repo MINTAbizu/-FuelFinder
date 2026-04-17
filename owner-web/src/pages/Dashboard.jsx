@@ -1296,6 +1296,43 @@ export default function Dashboard() {
     );
   }, [cityFilter, directoryCities]);
 
+  const selectedCityNameKey = useMemo(() => {
+    return normalizeKey(selectedCityRecord?.name || "");
+  }, [selectedCityRecord]);
+
+  const selectedCityRegionId = useMemo(() => {
+    return String(selectedCityRecord?.regionId || "").trim();
+  }, [selectedCityRecord]);
+
+  const selectedCityStations = useMemo(() => {
+    if (!selectedCityRecord) return [];
+
+    const selectedCityId = String(selectedCityRecord.id || selectedCityRecord._id || "").trim();
+    return stationGeo.filter((item) => {
+      const directCityKey = String(item.cityLabelKey || "").trim();
+      if (selectedCityId && directCityKey === selectedCityId) {
+        return true;
+      }
+
+      if (!selectedCityNameKey) {
+        return false;
+      }
+
+      if (normalizeKey(item.cityLabel || "") !== selectedCityNameKey) {
+        return false;
+      }
+
+      if (!selectedCityRegionId) {
+        return true;
+      }
+
+      const itemRegionId = String(
+        item.regionRecord?.id || item.regionRecord?._id || item.cityRecord?.regionId || ""
+      ).trim();
+      return !itemRegionId || itemRegionId === selectedCityRegionId;
+    });
+  }, [selectedCityNameKey, selectedCityRecord, selectedCityRegionId, stationGeo]);
+
   const selectedCityCenter = useMemo(() => {
     if (!selectedCityRecord) return null;
     const recordLatitude = readOptionalFiniteNumber(selectedCityRecord.latitude);
@@ -1308,8 +1345,8 @@ export default function Dashboard() {
       };
     }
     const cityId = String(selectedCityRecord.id || selectedCityRecord._id || "").trim();
-    return cityCenterById.get(cityId) || null;
-  }, [cityCenterById, selectedCityRecord]);
+    return cityCenterById.get(cityId) || buildCoordinateCentroid(selectedCityStations) || null;
+  }, [cityCenterById, selectedCityRecord, selectedCityStations]);
 
   const regionOptions = useMemo(() => {
     if (directoryRegions.length) {
@@ -1341,13 +1378,16 @@ export default function Dashboard() {
 
   const regionScopedStations = useMemo(() => {
     return stationGeo.filter((item) => {
+      if (cityFilter !== "all" && selectedCityStations.some((stationItem) => String(stationItem.id || "") === String(item.id || ""))) {
+        return true;
+      }
       return (
         regionFilter === "all" ||
         item.regionKey === regionFilter ||
         (!item.regionKey && cityFilter !== "all" && item.cityLabelKey === cityFilter)
       );
     });
-  }, [cityFilter, regionFilter, stationGeo]);
+  }, [cityFilter, regionFilter, selectedCityStations, stationGeo]);
 
   const cityOptions = useMemo(() => {
     if (directoryCities.length) {
@@ -1396,8 +1436,19 @@ export default function Dashboard() {
   }, [directoryCities, isSuperAdmin, regionFilter, regionScopedStations.length, stationCountByCity, stationGeo]);
 
   const cityScopedStations = useMemo(() => {
-    return regionScopedStations.filter((item) => cityFilter === "all" || item.cityLabelKey === cityFilter);
-  }, [cityFilter, regionScopedStations]);
+    if (cityFilter === "all") {
+      return regionScopedStations;
+    }
+
+    const selectedIds = new Set(
+      selectedCityStations.map((item) => String(item.id || item._id || "").trim()).filter(Boolean)
+    );
+
+    return regionScopedStations.filter((item) => {
+      const itemId = String(item.id || item._id || "").trim();
+      return item.cityLabelKey === cityFilter || (itemId && selectedIds.has(itemId));
+    });
+  }, [cityFilter, regionScopedStations, selectedCityStations]);
 
   const woredaOptions = useMemo(() => {
     if (directoryWoredas.length) {
