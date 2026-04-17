@@ -2092,7 +2092,7 @@ export default function Dashboard() {
     return () => {
       isActive = false;
     };
-  }, [cityFilter, isSuperAdmin, selectedCityCenter, selectedCityRecord]);
+  }, [cityFilter, isSuperAdmin, selectedCityCenter, selectedCityRecord, selectedCityStations]);
 
   useEffect(() => {
     if (!visibleStations.length) {
