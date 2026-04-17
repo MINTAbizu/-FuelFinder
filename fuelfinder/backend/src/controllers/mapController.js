@@ -9,6 +9,7 @@ const QueueTicket = require("../models/QueueTicket");
 const City = require("../models/City");
 const Region = require("../models/Region");
 const Woreda = require("../models/Woreda");
+const slugify = require("../utils/slugify");
 const { buildFuelPricesResponse } = require("../utils/stationFuelPrices");
 const { normalizePaymentDetails } = require("../utils/stationPaymentDetails");
 const {
@@ -35,6 +36,14 @@ const DEFAULT_DIRECTORY_STATION_LIMIT = 120;
 const MAX_DIRECTORY_LIMIT = 250;
 const MAX_LIVE_ADDRESS_ENRICHMENTS = 20;
 const PUBLIC_QUEUE_STATUSES = ["waiting", "called"];
+const CITY_SLUG_ALIASES = new Map([
+  ["addis-abeba", "addis-ababa"],
+  ["awassa", "hawassa"],
+  ["asela", "asella"],
+  ["shashamane", "shashemene"],
+  ["shashamene", "shashemene"],
+  ["deberh-berhan", "debre-birhan"]
+]);
 
 const nearbyStationsResponseCache = new Map();
 
@@ -53,6 +62,25 @@ function normalizeDirectoryLimit(value, fallback = DEFAULT_DIRECTORY_LIMIT) {
 
 function escapeRegex(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeCitySearchSlug(value) {
+  const raw = slugify(asLocationText(value));
+  return CITY_SLUG_ALIASES.get(raw) || raw;
+}
+
+function buildCityFallbackTerms(value) {
+  const rawName = asLocationText(value);
+  if (!rawName) return [];
+
+  const normalized = normalizeCitySearchSlug(rawName);
+  const aliasTerms = Array.from(CITY_SLUG_ALIASES.entries())
+    .filter(([alias, canonical]) => alias === normalized || canonical === normalized)
+    .flatMap(([alias, canonical]) => [alias, canonical])
+    .map((item) => String(item || "").replace(/-/g, " ").trim())
+    .filter(Boolean);
+
+  return Array.from(new Set([rawName, ...aliasTerms]));
 }
 
 function normalizeNearbyRadius(value) {
@@ -1137,7 +1165,29 @@ exports.listDirectoryStations = async (req, res) => {
     }
     applyStationTypeFilter(matchQuery, stationType);
 
-    const stations = await queryDirectoryStations(matchQuery, limit);
+    let stations = await queryDirectoryStations(matchQuery, limit);
+
+    if (cityId && !stations.length) {
+      const city = await City.findById(cityId).select("_id name").lean();
+      const fallbackTerms = buildCityFallbackTerms(city?.name);
+      if (fallbackTerms.length) {
+        const fallbackRegex = new RegExp(fallbackTerms.map((term) => escapeRegex(term)).join("|"), "i");
+        const fallbackQuery = {
+          isActive: true,
+          $or: [
+            { name: fallbackRegex },
+            { address: fallbackRegex },
+            { subcity: fallbackRegex },
+            { woreda: fallbackRegex },
+            { landmark: fallbackRegex }
+          ]
+        };
+
+        applyStationTypeFilter(fallbackQuery, stationType);
+        stations = await queryDirectoryStations(fallbackQuery, limit);
+      }
+    }
+
     return res.json({
       total: stations.length,
       stations

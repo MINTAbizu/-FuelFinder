@@ -67,6 +67,21 @@ function asNumber(value, fieldName) {
   return num;
 }
 
+function isPlaceholderAddress(value) {
+  const text = asText(value).toLowerCase();
+  if (!text) return true;
+  if (text === "address not listed") return true;
+  return text.startsWith("approx location");
+}
+
+function shouldPreferIncomingText(currentValue, nextValue) {
+  const current = asText(currentValue);
+  const next = asText(nextValue);
+  if (!next) return false;
+  if (!current) return true;
+  return isPlaceholderAddress(current) && !isPlaceholderAddress(next);
+}
+
 function extractId(value) {
   if (!value) return null;
   if (typeof value === "object" && value._id) return String(value._id);
@@ -205,6 +220,32 @@ function getActorOrgId(req) {
   return String(req?.user?.organizationId || "").trim();
 }
 
+function resolveImportedFuelStatus(value) {
+  const normalized = asText(value).toLowerCase();
+  if (normalized === "available" || normalized === "full") return "full";
+  if (normalized === "limited" || normalized === "partial") return "partial";
+  if (normalized === "empty") return "empty";
+  return "partial";
+}
+
+async function findImportTargetStation(body = {}) {
+  const stationId = asText(body.stationId);
+  if (stationId) {
+    if (!mongoose.isValidObjectId(stationId)) {
+      throw new Error("stationId must be a valid ObjectId.");
+    }
+    return Station.findById(stationId);
+  }
+
+  const liveStationId = asText(body.liveStationId || body.externalSourceId || body.id);
+  if (!liveStationId) return null;
+
+  return Station.findOne({
+    externalSource: asText(body.externalSource || "osm") || "osm",
+    externalSourceId: liveStationId
+  });
+}
+
 exports.listStations = async (req, res) => {
   try {
     const query = {};
@@ -313,6 +354,172 @@ exports.listStations = async (req, res) => {
     });
   } catch (_err) {
     return res.status(500).json({ message: "Failed to load stations." });
+  }
+};
+
+exports.importLiveStation = async (req, res) => {
+  try {
+    const name = asText(req.body.name);
+    const address = asText(req.body.address) || "Address not listed";
+    const latitude = asNumber(req.body.latitude, "latitude");
+    const longitude = asNumber(req.body.longitude, "longitude");
+    const contact = asText(req.body.contact);
+    const stationType = normalizeStationType(req.body.stationType) || "fuel";
+    const fuelStatus = resolveImportedFuelStatus(req.body.fuelStatus);
+    const locationCategories = normalizeLocationCategories(req.body.locationCategories);
+    const paymentDetails = pickPaymentDetailsPayload(req.body);
+    const fuelPrices = pickFuelPricesPayload(req.body);
+    let organizationId = asObjectIdOrNull(req.body.organizationId, "organizationId");
+    const requestedRegionId = asObjectIdOrNull(req.body.regionId, "regionId");
+    const requestedCityId = asObjectIdOrNull(req.body.cityId, "cityId");
+    const requestedWoredaId = asObjectIdOrNull(req.body.woredaId, "woredaId");
+    const branchId = asObjectIdOrNull(req.body.branchId, "branchId");
+    const liveStationId = asText(req.body.liveStationId || req.body.externalSourceId || req.body.id);
+    const externalSource = asText(req.body.externalSource || "osm") || "osm";
+
+    if (!name) {
+      return res.status(400).json({ message: "name is required." });
+    }
+    if (latitude < -90 || latitude > 90) {
+      return res.status(400).json({ message: "latitude must be between -90 and 90." });
+    }
+    if (longitude < -180 || longitude > 180) {
+      return res.status(400).json({ message: "longitude must be between -180 and 180." });
+    }
+    if (isOrgAdmin(req)) {
+      const actorOrgId = getActorOrgId(req);
+      if (!actorOrgId) {
+        return res.status(403).json({ message: "Forbidden: organization scope not configured." });
+      }
+      if (organizationId && organizationId !== actorOrgId) {
+        return res.status(403).json({ message: "Forbidden: cannot import station for another organization." });
+      }
+      organizationId = actorOrgId;
+    }
+
+    const resolvedLocation = await resolveStationLocation({
+      regionId: requestedRegionId,
+      cityId: requestedCityId,
+      woredaId: requestedWoredaId
+    });
+
+    let station = await findImportTargetStation(req.body);
+
+    if (station) {
+      if (isOrgAdmin(req)) {
+        const actorOrgId = getActorOrgId(req);
+        const stationOrg = station.organizationId ? String(station.organizationId) : "";
+        if (stationOrg && stationOrg !== actorOrgId) {
+          return res.status(403).json({ message: "Forbidden: cannot import station outside your organization." });
+        }
+      }
+
+      if (!station.organizationId && organizationId) {
+        station.organizationId = organizationId;
+      } else if (req.body.organizationId !== undefined && !isOrgAdmin(req)) {
+        station.organizationId = organizationId;
+      }
+
+      if (resolvedLocation.regionId) station.regionId = resolvedLocation.regionId;
+      if (resolvedLocation.cityId) station.cityId = resolvedLocation.cityId;
+      if (resolvedLocation.woredaId) station.woredaId = resolvedLocation.woredaId;
+      if (branchId) station.branchId = branchId;
+
+      if (shouldPreferIncomingText(station.name, name)) station.name = name;
+      if (shouldPreferIncomingText(station.address, address)) station.address = address;
+      if (shouldPreferIncomingText(station.contact, contact)) station.contact = contact;
+      if (shouldPreferIncomingText(station.subcity, req.body.subcity)) station.subcity = asText(req.body.subcity);
+      if (shouldPreferIncomingText(station.woreda, req.body.woreda || resolvedLocation.woreda?.name)) {
+        station.woreda = asText(req.body.woreda || resolvedLocation.woreda?.name);
+      }
+      if (shouldPreferIncomingText(station.landmark, req.body.landmark)) station.landmark = asText(req.body.landmark);
+
+      if (!normalizeStationType(station.stationType)) {
+        station.stationType = stationType;
+      }
+      if (!station.externalSource && liveStationId) {
+        station.externalSource = externalSource;
+        station.externalSourceId = liveStationId;
+      }
+      if ((!station.location?.coordinates || station.location.coordinates.length < 2) && Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        station.location = {
+          type: "Point",
+          coordinates: [longitude, latitude]
+        };
+      }
+      if (!Array.isArray(station.locationCategories) || !station.locationCategories.length) {
+        station.locationCategories = locationCategories;
+      }
+      if (station.fuelStatus !== fuelStatus) {
+        station.fuelStatus = fuelStatus;
+      }
+      if (station.isActive !== true && req.body.isActive !== undefined) {
+        station.isActive = Boolean(req.body.isActive);
+      }
+      if ((!station.fuelPrices || !Object.values(station.fuelPrices || {}).some(Boolean)) && fuelPrices) {
+        station.fuelPrices = normalizeFuelPrices(fuelPrices);
+      }
+      if ((!station.paymentDetails || !Object.values(station.paymentDetails || {}).some(Boolean)) && paymentDetails) {
+        station.paymentDetails = normalizePaymentDetails(paymentDetails);
+      }
+
+      await station.save();
+      const stationDoc = await loadStationForResponse(station._id);
+      return res.json({
+        message: "Live station saved to the station directory.",
+        station: buildStationResponse(stationDoc || station)
+      });
+    }
+
+    station = await Station.create({
+      name,
+      address,
+      contact,
+      stationType,
+      ...(fuelPrices ? { fuelPrices: normalizeFuelPrices(fuelPrices) } : {}),
+      ...(paymentDetails ? { paymentDetails: normalizePaymentDetails(paymentDetails) } : {}),
+      fuelStatus,
+      isActive: req.body.isActive !== undefined ? Boolean(req.body.isActive) : true,
+      organizationId,
+      regionId: resolvedLocation.regionId,
+      cityId: resolvedLocation.cityId,
+      woredaId: resolvedLocation.woredaId,
+      branchId,
+      subcity: asText(req.body.subcity),
+      woreda: asText(req.body.woreda || resolvedLocation.woreda?.name),
+      landmark: asText(req.body.landmark),
+      locationCategories,
+      ...(liveStationId
+        ? {
+            externalSource,
+            externalSourceId: liveStationId
+          }
+        : {}),
+      location: {
+        type: "Point",
+        coordinates: [longitude, latitude]
+      }
+    });
+
+    const stationDoc = await loadStationForResponse(station._id);
+    return res.status(201).json({
+      message: "Live station saved to the station directory.",
+      station: buildStationResponse(stationDoc || station)
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("must be a valid")) {
+      return res.status(400).json({ message: err.message });
+    }
+    if (err instanceof Error && err.message.includes("does not exist")) {
+      return res.status(400).json({ message: err.message });
+    }
+    if (err instanceof Error && err.message.includes("does not belong")) {
+      return res.status(400).json({ message: err.message });
+    }
+    if (err?.code === 11000) {
+      return res.status(409).json({ message: "This live station is already saved in the station directory." });
+    }
+    return res.status(500).json({ message: "Failed to save live station." });
   }
 };
 

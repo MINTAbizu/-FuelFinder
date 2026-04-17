@@ -11,6 +11,7 @@ import {
   forceLogoutStationTeamUser,
   getOwnerStation,
   getStationFuelStockSummary,
+  importLiveStation,
   listAdminStations,
   listNearbyFuelStations,
   listPublicMapStations,
@@ -137,6 +138,14 @@ function formatFuelStatusLabel(status) {
   if (normalized === "limited") return "Low stock";
   if (normalized === "empty") return "Out of stock";
   return "Partial stock";
+}
+
+function normalizeLiveFuelStatusForImport(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "available" || normalized === "full") return "full";
+  if (normalized === "limited" || normalized === "partial") return "partial";
+  if (normalized === "empty") return "empty";
+  return "partial";
 }
 
 function asFiniteNumber(value, fallback = 0) {
@@ -1006,6 +1015,9 @@ export default function Dashboard() {
   const [liveCityStations, setLiveCityStations] = useState([]);
   const [liveCityStationsLoading, setLiveCityStationsLoading] = useState(false);
   const [liveCityStationsError, setLiveCityStationsError] = useState("");
+  const [liveStationImportingKey, setLiveStationImportingKey] = useState("");
+  const [liveStationImportError, setLiveStationImportError] = useState("");
+  const [liveStationImportStatus, setLiveStationImportStatus] = useState("");
   const [allStationsList, setAllStationsList] = useState([]);
   const [allStationsListLoading, setAllStationsListLoading] = useState(false);
   const [allStationsListError, setAllStationsListError] = useState("");
@@ -2223,6 +2235,89 @@ export default function Dashboard() {
     startTransition(() => {
       setStationId(String(nextStationId || ""));
     });
+  };
+
+  const handleImportLiveStation = async (item) => {
+    if (!canManageStations) return;
+
+    const actionKey = buildLiveStationMergeKey(item);
+    const latitude = readOptionalFiniteNumber(item?.latitude);
+    const longitude = readOptionalFiniteNumber(item?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      setLiveStationImportError("This live station does not have valid coordinates to save.");
+      setLiveStationImportStatus("");
+      return;
+    }
+
+    const selectedCityId = String(selectedCityRecord?.id || selectedCityRecord?._id || cityFilter || "").trim();
+    const selectedRegionId = String(
+      selectedCityRecord?.regionId || selectedCityRecord?.region?.id || regionFilter || ""
+    ).trim();
+    const selectedWoredaId = woredaFilter !== "all" ? String(woredaFilter || "").trim() : "";
+    const bestKnownAddress =
+      String(item?.rawAddress || "").trim() ||
+      String(item?.address || "").trim() ||
+      buildHumanReadableLiveAddress(
+        item,
+        selectedCityRecord?.name || "Selected city",
+        selectedCityRecord?.region?.name || selectedStationGeo?.regionLabel || item?.region?.name || "Selected region"
+      );
+
+    setLiveStationImportingKey(actionKey);
+    setLiveStationImportError("");
+    setLiveStationImportStatus("");
+
+    try {
+      const result = await importLiveStation({
+        stationId: String(item?.stationId || "").trim() || null,
+        liveStationId: String(item?.id || "").trim() || null,
+        externalSource: "osm",
+        name: String(item?.name || "Fuel Station").trim(),
+        address: bestKnownAddress,
+        contact: String(item?.contact || "").trim(),
+        stationType: String(item?.stationType || "fuel").trim().toLowerCase(),
+        latitude,
+        longitude,
+        fuelStatus: normalizeLiveFuelStatusForImport(item?.fuel_status || item?.fuelStatus),
+        organizationId: isSuperAdmin ? null : String(session?.user?.organizationId || "").trim() || null,
+        regionId: selectedRegionId || null,
+        cityId: selectedCityId || null,
+        woredaId: selectedWoredaId || null,
+        subcity: String(item?.subcity || selectedCityRecord?.name || "").trim(),
+        woreda: String(item?.woreda || "").trim(),
+        landmark: String(item?.landmark || "").trim(),
+        locationCategories: Array.isArray(item?.locationCategories) ? item.locationCategories : [],
+        isActive: item?.isActive !== false
+      });
+
+      const savedStation = result?.station || null;
+      if (!savedStation?.id) {
+        throw new Error("The live station was saved, but no station id was returned.");
+      }
+
+      setLiveCityStations((prev) =>
+        (Array.isArray(prev) ? prev : []).map((liveItem) =>
+          buildLiveStationMergeKey(liveItem) === actionKey
+            ? {
+                ...liveItem,
+                stationId: savedStation.id,
+                isActive: savedStation.isActive,
+                address: savedStation.address || liveItem.address,
+                rawAddress: savedStation.address || liveItem.rawAddress
+              }
+            : liveItem
+        )
+      );
+      setStationId(String(savedStation.id));
+      setSuperAdminStationSearch("");
+      setSuperAdminStationDirectoryRefreshKey((prev) => prev + 1);
+      setLiveStationImportStatus(result?.message || "Live station saved to the station directory.");
+    } catch (error) {
+      setLiveStationImportError(error?.message || "Failed to save live station.");
+      setLiveStationImportStatus("");
+    } finally {
+      setLiveStationImportingKey("");
+    }
   };
 
   useEffect(() => {
@@ -3698,6 +3793,9 @@ export default function Dashboard() {
                   <span className="pill">{liveCityStations.length} live stations</span>
                 </div>
 
+                {liveStationImportError ? <span className="error-text">{liveStationImportError}</span> : null}
+                {liveStationImportStatus ? <span className="status-banner">{liveStationImportStatus}</span> : null}
+
                 <div className="station-browser">
                   {liveCityStationsLoading ? (
                     <div className="station-browser-empty">
@@ -3709,6 +3807,11 @@ export default function Dashboard() {
                       const canOpenLinkedStation = filteredStations.some(
                         (stationItem) => String(stationItem.id || "") === linkedStationId
                       );
+                      const knownSavedStation = allStationsList.some(
+                        (stationItem) => String(stationItem.id || "") === linkedStationId
+                      );
+                      const actionKey = buildLiveStationMergeKey(item);
+                      const isImportingLiveStation = liveStationImportingKey === actionKey;
                       const content = (
                         <>
                           <div className="station-browser-top">
@@ -3724,7 +3827,9 @@ export default function Dashboard() {
                               {linkedStationId
                                 ? canOpenLinkedStation
                                   ? "Linked"
-                                  : "Linked in directory"
+                                  : knownSavedStation
+                                    ? "Saved"
+                                    : "Linked in directory"
                                 : "Live map only"}
                             </span>
                           </div>
@@ -3748,21 +3853,28 @@ export default function Dashboard() {
                               </span>
                             ) : null}
                           </div>
+                          <div className="station-browser-actions">
+                            {canOpenLinkedStation ? (
+                              <button
+                                type="button"
+                                className="btn alt small"
+                                onClick={() => selectStation(linkedStationId)}
+                              >
+                                Open saved station
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn small"
+                                onClick={() => handleImportLiveStation(item)}
+                                disabled={isImportingLiveStation}
+                              >
+                                {isImportingLiveStation ? "Saving..." : "Save to saved stations"}
+                              </button>
+                            )}
+                          </div>
                         </>
                       );
-
-                      if (linkedStationId && canOpenLinkedStation) {
-                        return (
-                          <button
-                            key={`${item.id || item.stationId || item.name}-${linkedStationId}`}
-                            type="button"
-                            className="station-browser-card"
-                            onClick={() => selectStation(linkedStationId)}
-                          >
-                            {content}
-                          </button>
-                        );
-                      }
 
                       return (
                         <div

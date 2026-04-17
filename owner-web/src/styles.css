@@ -372,6 +372,13 @@ body {
   font-size: 12px;
 }
 
+.station-browser-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+}
+
 .station-browser-empty {
   border: 1px dashed #c9c4ba;
   border-radius: 18px;

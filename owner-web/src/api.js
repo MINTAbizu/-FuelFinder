@@ -434,6 +434,13 @@ export async function createAdminStation(payload) {
   });
 }
 
+export async function importLiveStation(payload) {
+  return apiRequest("/admin/stations/import-live", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function updateAdminStation(stationId, payload) {
   return apiRequest(`/admin/stations/${stationId}`, {
     method: "PATCH",

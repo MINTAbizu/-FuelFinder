@@ -158,6 +158,13 @@ router.post(
   adminStationController.createStation
 );
 
+router.post(
+  "/stations/import-live",
+  requireRole(["super_admin", "org_admin"]),
+  auditAction("admin.station.import_live", { targetType: "station" }),
+  adminStationController.importLiveStation
+);
+
 router.patch(
   "/stations/:stationId",
   requireRole(["super_admin", "org_admin"]),
