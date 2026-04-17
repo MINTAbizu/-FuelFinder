@@ -54,6 +54,12 @@ function asObjectIdOrNull(value, fieldName) {
 }
 
 function asNumber(value, fieldName) {
+  if (value === null || value === undefined) {
+    throw new Error(`${fieldName} must be a valid number.`);
+  }
+  if (typeof value === "string" && !value.trim()) {
+    throw new Error(`${fieldName} must be a valid number.`);
+  }
   const num = Number(value);
   if (!Number.isFinite(num)) {
     throw new Error(`${fieldName} must be a valid number.`);

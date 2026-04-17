@@ -143,6 +143,13 @@ function asFiniteNumber(value, fallback = 0) {
   return Number.isFinite(next) ? next : fallback;
 }
 
+function readOptionalFiniteNumber(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const next = Number(value);
+  return Number.isFinite(next) ? next : null;
+}
+
 function csvEscape(value) {
   const text = String(value ?? "");
   if (/[",\n]/.test(text)) {
@@ -613,8 +620,8 @@ function buildEmptyInventorySummary(dateKey = localDateKey()) {
 function buildCoordinateCentroid(items = []) {
   const coords = (Array.isArray(items) ? items : [])
     .map((item) => ({
-      latitude: Number(item?.latitude),
-      longitude: Number(item?.longitude)
+      latitude: readOptionalFiniteNumber(item?.latitude),
+      longitude: readOptionalFiniteNumber(item?.longitude)
     }))
     .filter((point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude));
 
@@ -1166,8 +1173,8 @@ export default function Dashboard() {
 
     stationGeo.forEach((item) => {
       const key = String(item.cityLabelKey || "").trim();
-      const latitude = Number(item?.latitude);
-      const longitude = Number(item?.longitude);
+      const latitude = readOptionalFiniteNumber(item?.latitude);
+      const longitude = readOptionalFiniteNumber(item?.longitude);
       if (!key || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
 
       const existing = groupedStations.get(key) || [];
@@ -1196,8 +1203,8 @@ export default function Dashboard() {
 
   const selectedCityCenter = useMemo(() => {
     if (!selectedCityRecord) return null;
-    const recordLatitude = Number(selectedCityRecord.latitude);
-    const recordLongitude = Number(selectedCityRecord.longitude);
+    const recordLatitude = readOptionalFiniteNumber(selectedCityRecord.latitude);
+    const recordLongitude = readOptionalFiniteNumber(selectedCityRecord.longitude);
     if (Number.isFinite(recordLatitude) && Number.isFinite(recordLongitude)) {
       return {
         latitude: recordLatitude,
@@ -2896,13 +2903,19 @@ export default function Dashboard() {
     setCreateStationStatus("");
 
     try {
+      const latitude = readOptionalFiniteNumber(createStationForm.latitude);
+      const longitude = readOptionalFiniteNumber(createStationForm.longitude);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        throw new Error("Latitude and longitude are required.");
+      }
+
       const payload = {
         name: String(createStationForm.name || "").trim(),
         address: String(createStationForm.address || "").trim(),
         contact: String(createStationForm.contact || "").trim(),
         stationType: String(createStationForm.stationType || "fuel").trim().toLowerCase(),
-        latitude: Number(createStationForm.latitude),
-        longitude: Number(createStationForm.longitude),
+        latitude,
+        longitude,
         fuelStatus: String(createStationForm.fuelStatus || "partial").trim().toLowerCase(),
         fuelPrices: buildFuelPricesPayload(createStationForm),
         isActive: Boolean(createStationForm.isActive),
@@ -3508,9 +3521,10 @@ export default function Dashboard() {
                             {Number.isFinite(Number(item.distanceMeters)) ? (
                               <span>{Math.round(Number(item.distanceMeters) / 1000)} km from city center</span>
                             ) : null}
-                            {Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)) ? (
+                            {Number.isFinite(readOptionalFiniteNumber(item.latitude)) &&
+                            Number.isFinite(readOptionalFiniteNumber(item.longitude)) ? (
                               <span>
-                                Coords: {Number(item.latitude).toFixed(5)}, {Number(item.longitude).toFixed(5)}
+                                Coords: {readOptionalFiniteNumber(item.latitude).toFixed(5)}, {readOptionalFiniteNumber(item.longitude).toFixed(5)}
                               </span>
                             ) : null}
                           </div>

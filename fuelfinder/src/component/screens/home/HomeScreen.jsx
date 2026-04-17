@@ -1462,7 +1462,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
   );
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <FlatList
         ref={listRef}
         data={filteredStations}

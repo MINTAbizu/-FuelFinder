@@ -12,6 +12,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Switch,
   Text,
@@ -119,7 +120,7 @@ function LoadingScreen() {
   );
 }
 
-function OfflineStatusBanner() {
+function OfflineStatusBanner({ topInset = 0 }) {
   const { t } = useLanguage();
   const { isOffline, isSyncing, pendingActionsCount } = useOffline();
 
@@ -146,7 +147,13 @@ function OfflineStatusBanner() {
         });
 
   return (
-    <View style={[styles.offlineBanner, isOffline ? styles.offlineBannerWarn : styles.offlineBannerSync]}>
+    <View
+      style={[
+        styles.offlineBanner,
+        topInset > 0 ? { paddingTop: topInset + 10 } : null,
+        isOffline ? styles.offlineBannerWarn : styles.offlineBannerSync,
+      ]}
+    >
       <Ionicons
         name={isSyncing ? "sync-outline" : isOffline ? "cloud-offline-outline" : "cloud-done-outline"}
         size={16}
@@ -1348,6 +1355,7 @@ function ProfileScreen({ navigation }) {
   const displayName = user?.name || "-";
   const displayEmail = user?.email || "-";
   const pendingEmail = String(user?.pendingEmail || "").trim();
+  const isGoogleAccount = String(user?.authProvider || "local") === "google";
   const emailStatusText = pendingEmail
     ? t("pendingEmailStatus", {
         defaultValue: `Pending email change: ${pendingEmail}`,
@@ -1355,8 +1363,27 @@ function ProfileScreen({ navigation }) {
     : user?.emailVerified
       ? t("emailVerifiedStatus", { defaultValue: "Email verified" })
       : t("emailUnverifiedStatus", { defaultValue: "Email not verified yet" });
+  const canResendEmailVerification =
+    !isGoogleAccount && (Boolean(pendingEmail) || !user?.emailVerified);
+  const emailVerificationActionLabel = pendingEmail
+    ? t("emailVerificationPendingAction", { defaultValue: "Resend link" })
+    : user?.emailVerified
+      ? t("emailVerificationDoneAction", { defaultValue: "Verified" })
+      : t("emailVerificationAction", { defaultValue: "Send link" });
+  const emailVerificationSubtitle = canResendEmailVerification
+    ? pendingEmail
+      ? t("pendingEmailActionSubtitle", {
+          defaultValue: "Tap to resend the verification link to your pending email.",
+        })
+      : t("unverifiedEmailActionSubtitle", {
+          defaultValue: "Tap to resend the verification email to your current inbox.",
+        })
+    : isGoogleAccount
+      ? t("googleEmailVerifiedSubtitle", {
+          defaultValue: "Google sign-in keeps this email verified automatically.",
+        })
+      : emailStatusText;
   const avatarLetter = (user?.name || user?.email || "?").trim().slice(0, 1).toUpperCase();
-  const isGoogleAccount = String(user?.authProvider || "local") === "google";
   const modalMeta = {
     editProfile: {
       title: t("editProfile"),
@@ -1921,15 +1948,29 @@ function ProfileScreen({ navigation }) {
           <Text style={styles.profileMeta} numberOfLines={1}>
             {t("signedInOn")} {Platform.OS === "ios" ? "iOS" : Platform.OS === "android" ? "Android" : "Web"}
           </Text>
-          <Text
-            style={[
-              styles.profileMeta,
-              user?.emailVerified && !pendingEmail ? styles.profileMetaSuccess : styles.profileMetaWarn,
+          <Pressable
+            onPress={canResendEmailVerification ? resendEmailVerificationLink : undefined}
+            disabled={!canResendEmailVerification || accountBusy}
+            style={({ pressed }) => [
+              styles.profileMetaAction,
+              canResendEmailVerification && styles.profileMetaActionInteractive,
+              pressed && canResendEmailVerification && styles.profileMetaActionPressed,
             ]}
-            numberOfLines={2}
           >
-            {emailStatusText}
-          </Text>
+            {accountBusy && canResendEmailVerification ? (
+              <ActivityIndicator size="small" color="#92400E" />
+            ) : null}
+            <Text
+              style={[
+                styles.profileMeta,
+                user?.emailVerified && !pendingEmail ? styles.profileMetaSuccess : styles.profileMetaWarn,
+                canResendEmailVerification && styles.profileMetaActionText,
+              ]}
+              numberOfLines={2}
+            >
+              {emailStatusText}
+            </Text>
+          </Pressable>
         </View>
       </View>
 
@@ -1947,6 +1988,19 @@ function ProfileScreen({ navigation }) {
           title={t("editProfile")}
           subtitle={t("editProfileSubtitle")}
           onPress={() => openAccountModal("editProfile")}
+        />
+        <SettingRow
+          icon="mail-open-outline"
+          title={t("emailVerificationTitle", { defaultValue: "Email verification" })}
+          subtitle={emailVerificationSubtitle}
+          valueText={accountBusy && canResendEmailVerification ? undefined : emailVerificationActionLabel}
+          onPress={canResendEmailVerification ? resendEmailVerificationLink : undefined}
+          disabled={accountBusy && canResendEmailVerification}
+          right={
+            accountBusy && canResendEmailVerification
+              ? <ActivityIndicator size="small" color="#0F766E" />
+              : undefined
+          }
         />
         <SettingRow
           icon="key-outline"
@@ -2610,44 +2664,52 @@ function AppTabs() {
   }, []);
 
   return (
-    <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarActiveTintColor: "#0F766E",
-        tabBarInactiveTintColor: "#64748B",
-        tabBarStyle: {
-          height: tabBarHeight,
-          paddingTop: 6,
-          paddingBottom: 8 + insets.bottom,
-          borderTopWidth: 1,
-          borderTopColor: "#E2E8F0",
-          backgroundColor: "#FFFFFF",
-        },
-        tabBarLabelStyle: { fontSize: 12, fontWeight: "700" },
-        tabBarIcon: ({ focused, color, size }) => {
-          const iconByRoute = {
-            Home: focused ? "home" : "home-outline",
-            Map: focused ? "map" : "map-outline",
-            Alerts: focused ? "notifications" : "notifications-outline",
-            Profile: focused ? "person" : "person-outline",
-          };
-          return <Ionicons name={iconByRoute[route.name]} size={size} color={color} />;
-        },
-      })}
-    >
-      <Tab.Screen name="Home" component={HomeStackNavigator} options={{ title: t("home") }} />
-      <Tab.Screen name="Map" component={MapScreen} options={{ title: t("map") }} />
-      <Tab.Screen
-        name="Alerts"
-        options={{
-          title: t("alerts"),
-          tabBarBadge: alertBadgeCount > 0 ? (alertBadgeCount > 99 ? "99+" : alertBadgeCount) : undefined,
-          tabBarBadgeStyle: styles.alertTabBadge,
-        }}
-        component={AlertsScreen}
+    <>
+      <StatusBar
+        animated
+        backgroundColor="#F8FAFC"
+        barStyle="dark-content"
+        translucent={false}
       />
-      <Tab.Screen name="Profile" component={ProfileStackNavigator} options={{ title: t("profile") }} />
-    </Tab.Navigator>
+      <Tab.Navigator
+        screenOptions={({ route }) => ({
+          headerShown: false,
+          tabBarActiveTintColor: "#0F766E",
+          tabBarInactiveTintColor: "#64748B",
+          tabBarStyle: {
+            height: tabBarHeight,
+            paddingTop: 6,
+            paddingBottom: 8 + insets.bottom,
+            borderTopWidth: 1,
+            borderTopColor: "#E2E8F0",
+            backgroundColor: "#FFFFFF",
+          },
+          tabBarLabelStyle: { fontSize: 12, fontWeight: "700" },
+          tabBarIcon: ({ focused, color, size }) => {
+            const iconByRoute = {
+              Home: focused ? "home" : "home-outline",
+              Map: focused ? "map" : "map-outline",
+              Alerts: focused ? "notifications" : "notifications-outline",
+              Profile: focused ? "person" : "person-outline",
+            };
+            return <Ionicons name={iconByRoute[route.name]} size={size} color={color} />;
+          },
+        })}
+      >
+        <Tab.Screen name="Home" component={HomeStackNavigator} options={{ title: t("home") }} />
+        <Tab.Screen name="Map" component={MapScreen} options={{ title: t("map") }} />
+        <Tab.Screen
+          name="Alerts"
+          options={{
+            title: t("alerts"),
+            tabBarBadge: alertBadgeCount > 0 ? (alertBadgeCount > 99 ? "99+" : alertBadgeCount) : undefined,
+            tabBarBadgeStyle: styles.alertTabBadge,
+          }}
+          component={AlertsScreen}
+        />
+        <Tab.Screen name="Profile" component={ProfileStackNavigator} options={{ title: t("profile") }} />
+      </Tab.Navigator>
+    </>
   );
 }
 
@@ -2674,6 +2736,7 @@ function StationDiscoveryStack() {
 function AppNavigator() {
   const { isLoading, isAuthenticated, signOut, user } = useAuth();
   const { t } = useLanguage();
+  const insets = useSafeAreaInsets();
   const [requiresBiometricUnlock, setRequiresBiometricUnlock] = React.useState(false);
   const [isUnlocking, setIsUnlocking] = React.useState(false);
   const appStateRef = React.useRef(AppState.currentState);
@@ -2791,7 +2854,7 @@ function AppNavigator() {
   return (
     <NavigationContainer>
       <View style={styles.navigatorRoot}>
-        <OfflineStatusBanner />
+        <OfflineStatusBanner topInset={insets.top} />
         {isAuthenticated
           ? requiresStationChoice
             ? <StationDiscoveryStack />
@@ -3041,6 +3104,27 @@ const styles = StyleSheet.create({
   },
   profileMetaWarn: {
     color: "#92400E",
+  },
+  profileMetaAction: {
+    marginTop: 2,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+  },
+  profileMetaActionInteractive: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    backgroundColor: "#FEF3C7",
+    borderWidth: 1,
+    borderColor: "#FCD34D",
+  },
+  profileMetaActionPressed: {
+    opacity: 0.82,
+  },
+  profileMetaActionText: {
+    marginBottom: 0,
   },
   inlineLoading: {
     flexDirection: "row",
