@@ -643,6 +643,15 @@ function buildCoordinateCentroid(items = []) {
   };
 }
 
+function buildCitySearchTerms(cityName) {
+  const rawName = String(cityName || "").trim();
+  if (!rawName) return [];
+
+  const normalized = normalizeKey(rawName);
+  const aliasTerms = CITY_NAME_SEARCH_ALIASES.get(normalized) || [];
+  return Array.from(new Set([rawName, ...aliasTerms].filter(Boolean)));
+}
+
 function distanceMetersBetweenPoints(from, to) {
   const fromLatitude = readOptionalFiniteNumber(from?.latitude);
   const fromLongitude = readOptionalFiniteNumber(from?.longitude);
@@ -823,6 +832,13 @@ const STATION_MANAGER_QUICK_ACTIONS = [
 ];
 
 const LOCATION_DIRECTORY_STORAGE_KEY = "ff_owner_location_directory_v1";
+const CITY_NAME_SEARCH_ALIASES = new Map([
+  ["addis abeba", ["Addis Abeba", "Addis Ababa"]],
+  ["awassa", ["Awassa", "Hawassa"]],
+  ["asela", ["Asela", "Asella"]],
+  ["shashemene", ["Shashemene", "Shashamane", "Shashamene"]],
+  ["deberh berhan", ["Deberh Berhan", "Debre Birhan"]]
+]);
 
 function readCachedLocationDirectory() {
   const cached = readStorageJSON(LOCATION_DIRECTORY_STORAGE_KEY, {});
@@ -1995,10 +2011,34 @@ export default function Dashboard() {
           : { stations: [] };
         if (!isActive) return;
 
-        const customerCityStations = Array.isArray(customerCityData?.stations)
+        let customerCityStations = Array.isArray(customerCityData?.stations)
           ? customerCityData.stations
           : [];
-        const fallbackCenter = buildCoordinateCentroid(customerCityStations);
+
+        if (!customerCityStations.length && selectedCityRecord?.name) {
+          const searchTerms = buildCitySearchTerms(selectedCityRecord.name);
+          const textSearchResults = await Promise.all(
+            searchTerms.map((term) =>
+              listPublicMapStations({
+                q: term,
+                limit: 220
+              }).catch(() => ({ stations: [] }))
+            )
+          );
+          if (!isActive) return;
+
+          customerCityStations = mergeLiveStationLists(
+            customerCityStations,
+            textSearchResults.flatMap((result) => (Array.isArray(result?.stations) ? result.stations : []))
+          );
+        }
+
+        const savedCityStations = selectedCityStations.map((item) => ({
+          ...item,
+          stationId: String(item?.id || item?._id || item?.stationId || "").trim()
+        }));
+        const centerSeedStations = customerCityStations.length ? customerCityStations : savedCityStations;
+        const fallbackCenter = buildCoordinateCentroid(centerSeedStations);
         const liveSearchCenter = selectedCityCenter || fallbackCenter;
 
         if (!liveSearchCenter) {
@@ -2007,13 +2047,13 @@ export default function Dashboard() {
             customerCityStations.length
               ? ""
               : selectedCityRecord
-                ? `No city-center estimate is available for ${selectedCityRecord.name} yet, and no customer city stations were found for it.`
+                ? `No city-center estimate is available for ${selectedCityRecord.name} yet, and no customer city stations were found for it. This usually means the station records are not linked to that city yet.`
                 : "No customer city stations were found."
           );
           return;
         }
 
-        const nearbyRadius = buildLiveCitySearchRadiusMeters(liveSearchCenter, customerCityStations);
+        const nearbyRadius = buildLiveCitySearchRadiusMeters(liveSearchCenter, centerSeedStations);
         let nearbyStations = [];
 
         try {
