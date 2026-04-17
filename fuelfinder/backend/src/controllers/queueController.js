@@ -25,7 +25,6 @@ const WAITING_WINDOW_MINUTES = Number(process.env.WAITING_WINDOW_MINUTES || 120)
 const CALL_WINDOW_MINUTES = 5;
 const CHECKIN_RADIUS_METERS = 250;
 const CHECKIN_MAX_ACCURACY_METERS = 120;
-const CHECKIN_OTP_TTL_SECONDS = 300;
 const CHECKIN_MAX_OTP_ATTEMPTS = 5;
 const RESERVATION_BAND_DEPOSITS = {
   "10-20": 100,
@@ -504,7 +503,7 @@ function verifyCheckInQrToken(token) {
   const valid = crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(providedSignature));
   if (!valid) return null;
   const payload = JSON.parse(payloadString);
-  if (!payload?.exp || Number(payload.exp) * 1000 < Date.now()) return null;
+  if (payload?.exp && Number(payload.exp) * 1000 < Date.now()) return null;
   return payload;
 }
 
@@ -1491,20 +1490,18 @@ exports.startCheckIn = async (req, res) => {
 
     const otpCode = generateOtpCode();
     const otpHash = hashOtpCode(otpCode);
-    const otpExpiresAt = new Date(Date.now() + CHECKIN_OTP_TTL_SECONDS * 1000);
     const qrNonce = crypto.randomBytes(12).toString("hex");
     const qrToken = buildCheckInQrToken({
       ticketId: String(ticket._id),
       reservationCode: String(ticket.publicTicketCode || ""),
       stationId: String(ticket.stationId),
       nonce: qrNonce,
-      exp: Math.floor(otpExpiresAt.getTime() / 1000)
     });
 
     ticket.checkInStatus = "arrived";
     ticket.checkInStartedAt = new Date();
     ticket.checkInOtpHash = otpHash;
-    ticket.checkInOtpExpiresAt = otpExpiresAt;
+    ticket.checkInOtpExpiresAt = null;
     ticket.checkInOtpAttempts = 0;
     ticket.checkInQrNonce = qrNonce;
     ticket.checkInLocation = {
@@ -1518,7 +1515,7 @@ exports.startCheckIn = async (req, res) => {
       ticketId: ticket._id,
       reservationCode: ticket.publicTicketCode || "",
       checkInStatus: ticket.checkInStatus,
-      expiresAt: otpExpiresAt,
+      expiresAt: null,
       otpCode,
       qrToken,
       distanceMeters: Math.round(distanceMeters),
@@ -1570,8 +1567,8 @@ exports.verifyCheckIn = async (req, res) => {
       if (!qrPayload) {
         return res.status(401).json({
           message:
-            "QR check-in proof is invalid or expired. Ask the customer to open Check-In again and show the latest QR or OTP.",
-          reason: "invalid_or_expired_qr"
+            "QR check-in proof is invalid or inactive. Ask the customer to open Check-In again and show the latest QR or OTP.",
+          reason: "invalid_or_inactive_qr"
         });
       }
       if (!isObjectId(qrPayload.ticketId)) {
@@ -1618,8 +1615,8 @@ exports.verifyCheckIn = async (req, res) => {
     if (ticket.checkInStatus !== "arrived") {
       return res.status(400).json({ message: "Check-in session not started. Start check-in first." });
     }
-    if (!ticket.checkInOtpExpiresAt || ticket.checkInOtpExpiresAt <= new Date()) {
-      return res.status(410).json({ message: "Check-in session expired. Restart check-in." });
+    if (!String(ticket.checkInOtpHash || "").trim() && !String(ticket.checkInQrNonce || "").trim()) {
+      return res.status(410).json({ message: "Check-in session is no longer active. Restart check-in." });
     }
     if (ticket.checkInOtpAttempts >= CHECKIN_MAX_OTP_ATTEMPTS) {
       return res.status(429).json({ message: "Maximum OTP attempts reached. Restart check-in." });
@@ -1630,7 +1627,7 @@ exports.verifyCheckIn = async (req, res) => {
       const payload = qrPayload || verifyCheckInQrToken(qrToken);
       if (!payload) {
         proofFailureMessage =
-          "QR check-in proof is invalid or expired. Ask the customer to open Check-In again and show the latest QR or OTP.";
+          "QR check-in proof is invalid or inactive. Ask the customer to open Check-In again and show the latest QR or OTP.";
       } else if (String(payload.ticketId) !== String(ticket._id) || String(payload.stationId) !== String(ticket.stationId)) {
         proofFailureMessage = "This QR belongs to a different reservation or station. Please scan the current check-in QR.";
       } else if (String(payload.nonce) !== String(ticket.checkInQrNonce || "")) {
@@ -1743,7 +1740,7 @@ exports.validateReservationIdForStaff = async (req, res) => {
       if (!qrPayload) {
         return res.status(401).json({
           message:
-            "QR check-in proof is invalid or expired. Ask the customer to open Check-In again and show the latest QR or OTP."
+            "QR check-in proof is invalid or inactive. Ask the customer to open Check-In again and show the latest QR or OTP."
         });
       }
       if (!isObjectId(qrPayload.ticketId)) {
@@ -1780,10 +1777,13 @@ exports.validateReservationIdForStaff = async (req, res) => {
     const eligibleStatuses = new Set(["waiting", "called"]);
     const status = String(ticket.status || "");
     const checkInStatus = String(ticket.checkInStatus || "pending");
+    const hasActiveCheckInProof =
+      Boolean(String(ticket.checkInOtpHash || "").trim()) ||
+      Boolean(String(ticket.checkInQrNonce || "").trim());
     const canVerifyCheckIn =
       eligibleStatuses.has(status) &&
       checkInStatus === "arrived" &&
-      (!ticket.checkInOtpExpiresAt || new Date(ticket.checkInOtpExpiresAt) > new Date());
+      hasActiveCheckInProof;
 
     return res.json({
       ok: true,
