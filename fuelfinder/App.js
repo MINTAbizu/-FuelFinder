@@ -93,6 +93,22 @@ const HomeStack = createNativeStackNavigator();
 const ProfileStack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 const BIOMETRIC_PREF_KEY = "ff_pref_biometric_unlock";
+const HOME_MODE_OPTIONS = [
+  {
+    value: "fuel",
+    icon: "car-sport-outline",
+    accentColor: "#0F766E",
+    backgroundColor: "#CCFBF1",
+    borderColor: "#99F6E4",
+  },
+  {
+    value: "electric",
+    icon: "flash-outline",
+    accentColor: "#7C3AED",
+    backgroundColor: "#F3E8FF",
+    borderColor: "#D8B4FE",
+  },
+];
 
 import * as Sentry from "@sentry/react-native";
 // Unlike Sentry on other platforms, you do not need to import anything to use tracing on React Native
@@ -303,6 +319,38 @@ function getTransactionFuelLabel(t, fuelType) {
   return t("fuelGasoline");
 }
 
+function normalizePreferredStationType(value) {
+  return String(value || "").trim().toLowerCase() === "electric" ? "electric" : "fuel";
+}
+
+function buildProfileFormState(user) {
+  return {
+    name: user?.name || "",
+    email: user?.email || "",
+    phone: user?.phone || "",
+    preferredStationType: normalizePreferredStationType(user?.preferredStationType),
+  };
+}
+
+function getStationHomeModeCopy(t, preferredStationType) {
+  const normalized = normalizePreferredStationType(preferredStationType);
+  if (normalized === "electric") {
+    return {
+      label: t("homeModeElectricLabel", { defaultValue: "EV Home" }),
+      subtitle: t("homeModeElectricSubtitle", {
+        defaultValue: "Show EV charging stations and electric discovery on Home.",
+      }),
+    };
+  }
+
+  return {
+    label: t("homeModeFuelLabel", { defaultValue: "Fuel Home" }),
+    subtitle: t("homeModeFuelSubtitle", {
+      defaultValue: "Show fuel stations and the regular fuel discovery experience on Home.",
+    }),
+  };
+}
+
 function ProfileScreen({ navigation }) {
   const {
     user,
@@ -351,11 +399,7 @@ function ProfileScreen({ navigation }) {
   const [accountBusy, setAccountBusy] = React.useState(false);
   const [vehicles, setVehicles] = React.useState([]);
   const [savedStations, setSavedStations] = React.useState([]);
-  const [profileForm, setProfileForm] = React.useState({
-    name: "",
-    email: "",
-    phone: "",
-  });
+  const [profileForm, setProfileForm] = React.useState(() => buildProfileFormState(user));
   const [passwordForm, setPasswordForm] = React.useState({
     currentPassword: "",
     newPassword: "",
@@ -454,12 +498,8 @@ function ProfileScreen({ navigation }) {
   }, [PREF_KEYS]);
 
   React.useEffect(() => {
-    setProfileForm({
-      name: user?.name || "",
-      email: user?.email || "",
-      phone: user?.phone || "",
-    });
-  }, [user?.email, user?.name, user?.phone]);
+    setProfileForm(buildProfileFormState(user));
+  }, [user?.email, user?.name, user?.phone, user?.preferredStationType]);
 
   const refreshAccountCollections = React.useCallback(async () => {
     try {
@@ -823,18 +863,14 @@ function ProfileScreen({ navigation }) {
     setTwoFactorCode("");
     setTwoFactorCooldown(0);
     setTwoFactorResending(false);
-    setProfileForm({
-      name: user?.name || "",
-      email: user?.email || "",
-      phone: user?.phone || "",
-    });
+    setProfileForm(buildProfileFormState(user));
     setPasswordForm({
       currentPassword: "",
       newPassword: "",
       confirmPassword: "",
     });
     resetVehicleEditor();
-  }, [resetVehicleEditor, user?.email, user?.name, user?.phone]);
+  }, [resetVehicleEditor, user]);
 
   const verifyTwoFactorSetup = React.useCallback(async () => {
     if (!twoFactorCode.trim()) {
@@ -953,12 +989,8 @@ function ProfileScreen({ navigation }) {
   const openAccountModal = React.useCallback(
     async (modalName) => {
       setAccountModal(modalName);
-      if (modalName === "editProfile") {
-        setProfileForm({
-          name: user?.name || "",
-          email: user?.email || "",
-          phone: user?.phone || "",
-        });
+      if (modalName === "editProfile" || modalName === "homeMode") {
+        setProfileForm(buildProfileFormState(user));
       }
       if (modalName === "changePassword") {
         setPasswordForm({
@@ -974,7 +1006,14 @@ function ProfileScreen({ navigation }) {
         await refreshAccountCollections();
       }
     },
-    [refreshAccountCollections, resetVehicleEditor, user?.email, user?.name, user?.phone]
+    [
+      refreshAccountCollections,
+      resetVehicleEditor,
+      user?.email,
+      user?.name,
+      user?.phone,
+      user?.preferredStationType,
+    ]
   );
 
   const saveProfileChanges = React.useCallback(async () => {
@@ -982,6 +1021,7 @@ function ProfileScreen({ navigation }) {
       name: String(profileForm.name || "").trim(),
       email: String(profileForm.email || "").trim().toLowerCase(),
       phone: String(profileForm.phone || "").trim(),
+      preferredStationType: normalizePreferredStationType(profileForm.preferredStationType),
     };
 
     if (!payload.name || !payload.email) {
@@ -1000,6 +1040,7 @@ function ProfileScreen({ navigation }) {
             ...user,
             name: payload.name,
             phone: payload.phone,
+            preferredStationType: payload.preferredStationType,
           }
         : data?.user;
       if (nextUser) {
@@ -1025,7 +1066,17 @@ function ProfileScreen({ navigation }) {
     } finally {
       setAccountBusy(false);
     }
-  }, [closeAccountModal, prefs.biometricUnlock, profileForm.email, profileForm.name, profileForm.phone, replaceUser, t, user]);
+  }, [
+    closeAccountModal,
+    prefs.biometricUnlock,
+    profileForm.email,
+    profileForm.name,
+    profileForm.phone,
+    profileForm.preferredStationType,
+    replaceUser,
+    t,
+    user,
+  ]);
 
   const resendEmailVerificationLink = React.useCallback(async () => {
     setAccountBusy(true);
@@ -1384,11 +1435,19 @@ function ProfileScreen({ navigation }) {
         })
       : emailStatusText;
   const avatarLetter = (user?.name || user?.email || "?").trim().slice(0, 1).toUpperCase();
+  const currentHomeMode = normalizePreferredStationType(user?.preferredStationType);
+  const currentHomeModeCopy = getStationHomeModeCopy(t, currentHomeMode);
   const modalMeta = {
     editProfile: {
       title: t("editProfile"),
       subtitle: t("editProfileSheetSubtitle", {
         defaultValue: "Keep your name, email, and phone number current.",
+      }),
+    },
+    homeMode: {
+      title: t("homeModeTitle", { defaultValue: "Home mode" }),
+      subtitle: t("homeModeSheetSubtitle", {
+        defaultValue: "Choose whether Home opens fuel stations or EV charging stations.",
       }),
     },
     changePassword: {
@@ -1498,6 +1557,96 @@ function ProfileScreen({ navigation }) {
                 defaultValue: "Updating your phone will require verification before customer actions that depend on it.",
               })}
             </Text>
+          </View>
+
+          <View style={styles.modalActionRow}>
+            <Pressable style={styles.modalSecondaryButton} onPress={closeAccountModal}>
+              <Text style={styles.modalSecondaryButtonText}>{t("cancel")}</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.modalPrimaryButton, accountBusy && styles.modalButtonDisabled]}
+              onPress={saveProfileChanges}
+              disabled={accountBusy}
+            >
+              {accountBusy ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.modalPrimaryButtonText}>
+                  {t("saveProfileCta", { defaultValue: "Save changes" })}
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
+    if (accountModal === "homeMode") {
+      const selectedHomeMode = normalizePreferredStationType(profileForm.preferredStationType);
+
+      return (
+        <View style={styles.modalContent}>
+          <Text style={styles.modalHelperText}>
+            {t("homeModeSheetHelper", {
+              defaultValue:
+                "This changes what the customer sees on the Home tab. They can switch between Fuel and EV any time.",
+            })}
+          </Text>
+
+          <View style={styles.homeModeOptionList}>
+            {HOME_MODE_OPTIONS.map((option) => {
+              const optionCopy = getStationHomeModeCopy(t, option.value);
+              const isSelected = selectedHomeMode === option.value;
+
+              return (
+                <Pressable
+                  key={option.value}
+                  style={[
+                    styles.homeModeOption,
+                    {
+                      backgroundColor: isSelected ? option.backgroundColor : "#FFFFFF",
+                      borderColor: isSelected ? option.borderColor : "#E2E8F0",
+                    },
+                  ]}
+                  onPress={() =>
+                    setProfileForm((current) => ({ ...current, preferredStationType: option.value }))
+                  }
+                >
+                  <View
+                    style={[
+                      styles.homeModeIconWrap,
+                      { backgroundColor: isSelected ? option.accentColor : "#E2E8F0" },
+                    ]}
+                  >
+                    <Ionicons
+                      name={option.icon}
+                      size={22}
+                      color={isSelected ? "#FFFFFF" : "#475569"}
+                    />
+                  </View>
+
+                  <View style={styles.homeModeCopy}>
+                    <View style={styles.homeModeTitleRow}>
+                      <Text style={styles.homeModeTitle}>{optionCopy.label}</Text>
+                      {isSelected ? (
+                        <View style={styles.homeModeBadge}>
+                          <Text style={styles.homeModeBadgeText}>
+                            {t("selected", { defaultValue: "Selected" })}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={styles.homeModeSubtitle}>{optionCopy.subtitle}</Text>
+                  </View>
+
+                  <Ionicons
+                    name={isSelected ? "checkmark-circle" : "ellipse-outline"}
+                    size={20}
+                    color={isSelected ? option.accentColor : "#94A3B8"}
+                  />
+                </Pressable>
+              );
+            })}
           </View>
 
           <View style={styles.modalActionRow}>
@@ -1988,6 +2137,15 @@ function ProfileScreen({ navigation }) {
           title={t("editProfile")}
           subtitle={t("editProfileSubtitle")}
           onPress={() => openAccountModal("editProfile")}
+        />
+        <SettingRow
+          icon="swap-horizontal-outline"
+          title={t("homeModeTitle", { defaultValue: "Home mode" })}
+          subtitle={t("homeModeSettingSubtitle", {
+            defaultValue: "Switch the Home tab between fuel stations and EV charging.",
+          })}
+          valueText={currentHomeModeCopy.label}
+          onPress={() => openAccountModal("homeMode")}
         />
         <SettingRow
           icon="mail-open-outline"
@@ -2580,12 +2738,10 @@ function ProfileScreen({ navigation }) {
 function HomeStackNavigator() {
   const { t } = useLanguage();
   const { user } = useAuth();
-  const HomeComponent =
-    String(user?.preferredStationType || "").trim().toLowerCase() === "electric"
-      ? ElectricHomeScreen
-      : HomeScreen;
+  const preferredStationType = normalizePreferredStationType(user?.preferredStationType);
+  const HomeComponent = preferredStationType === "electric" ? ElectricHomeScreen : HomeScreen;
   return (
-    <HomeStack.Navigator>
+    <HomeStack.Navigator key={preferredStationType}>
       <HomeStack.Screen
         name="HomeMain"
         component={HomeComponent}
@@ -3538,6 +3694,58 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: "#64748B",
     fontWeight: "700",
+  },
+  homeModeOptionList: {
+    gap: 12,
+  },
+  homeModeOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+  },
+  homeModeIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  homeModeCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  homeModeTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  homeModeTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+  homeModeSubtitle: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#475569",
+    fontWeight: "600",
+  },
+  homeModeBadge: {
+    borderRadius: 999,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  homeModeBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#0F172A",
   },
   modalActionRow: {
     flexDirection: "row",
