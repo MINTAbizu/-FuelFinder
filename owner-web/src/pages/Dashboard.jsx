@@ -2225,6 +2225,35 @@ export default function Dashboard() {
       });
   }, [allStationsList]);
 
+  const filteredAllStationsSorted = useMemo(() => {
+    const collator = new Intl.Collator(undefined, {
+      numeric: true,
+      sensitivity: "base"
+    });
+
+    const getStationSortParts = (item) => [
+      String(item?.regionLabel || item?.region?.name || "").trim(),
+      String(item?.cityLabel || item?.city?.name || item?.subcity || "").trim(),
+      String(item?.woredaLabel || item?.woredaDirectory?.name || item?.woreda || "").trim(),
+      String(item?.name || "").trim(),
+      String(item?.address || "").trim()
+    ];
+
+    return (Array.isArray(filteredStations) ? filteredStations : [])
+      .slice()
+      .sort((left, right) => {
+        const leftParts = getStationSortParts(left);
+        const rightParts = getStationSortParts(right);
+
+        for (let index = 0; index < leftParts.length; index += 1) {
+          const comparison = collator.compare(leftParts[index], rightParts[index]);
+          if (comparison !== 0) return comparison;
+        }
+
+        return collator.compare(String(left?.id || ""), String(right?.id || ""));
+      });
+  }, [filteredStations]);
+
   const openSection = (nextSection) => {
     startTransition(() => {
       setActive(nextSection);
@@ -3579,7 +3608,9 @@ export default function Dashboard() {
             <div className="station-chip">
               <strong>Directory:</strong>
               <span style={{ fontWeight: 700 }}>
-                {allStationsListLoading ? "Loading all stations..." : `${allStationsSorted.length} stations`}
+                {allStationsListLoading
+                  ? "Loading all stations..."
+                  : `${filteredAllStationsSorted.length} shown of ${allStationsSorted.length}`}
               </span>
             </div>
           ) : (
@@ -4175,12 +4206,14 @@ export default function Dashboard() {
                   <p className="section-title">Ethiopia station directory</p>
                   <h3>All saved stations</h3>
                   <p>
-                    This root admin page shows the full saved station list across Ethiopia with no
-                    filters, no actions, and no extra controls.
+                    This root admin page shows the saved station list across Ethiopia using your
+                    current region, city, woreda, and search filters.
                   </p>
                 </div>
                 <div className="pill">
-                  {allStationsListLoading ? "Loading station list..." : `${allStationsSorted.length} stations`}
+                  {allStationsListLoading
+                    ? "Loading station list..."
+                    : `${filteredAllStationsSorted.length} shown of ${allStationsSorted.length}`}
                 </div>
               </div>
 
@@ -4192,18 +4225,18 @@ export default function Dashboard() {
                 <div className="station-browser-empty">Loading the Ethiopia station list...</div>
               ) : null}
 
-              {!allStationsListLoading && !allStationsListError && !allStationsSorted.length ? (
-                <div className="station-browser-empty">No saved stations were found yet.</div>
+              {!allStationsListLoading && !allStationsListError && !filteredAllStationsSorted.length ? (
+                <div className="station-browser-empty">No saved stations match the current filters.</div>
               ) : null}
 
-              {!allStationsListLoading && !allStationsListError && allStationsSorted.length ? (
+              {!allStationsListLoading && !allStationsListError && filteredAllStationsSorted.length ? (
                 <ol className="all-station-list">
-                  {allStationsSorted.map((item, index) => {
-                    const regionLabel = String(item?.region?.name || "").trim() || "Unspecified region";
+                  {filteredAllStationsSorted.map((item, index) => {
+                    const regionLabel = String(item?.regionLabel || item?.region?.name || "").trim() || "Unspecified region";
                     const cityLabel =
-                      String(item?.city?.name || item?.subcity || "").trim() || "Unspecified city";
+                      String(item?.cityLabel || item?.city?.name || item?.subcity || "").trim() || "Unspecified city";
                     const woredaLabel =
-                      String(item?.woredaDirectory?.name || item?.woreda || "").trim() ||
+                      String(item?.woredaLabel || item?.woredaDirectory?.name || item?.woreda || "").trim() ||
                       "Unspecified woreda";
 
                     return (
@@ -4216,7 +4249,7 @@ export default function Dashboard() {
                               {item?.isActive ? "Open" : "Inactive"}
                             </span>
                           </div>
-                          <p>{buildStationFullAddress(item, item?.city?.name, item?.region?.name)}</p>
+                          <p>{buildStationFullAddress(item, cityLabel, regionLabel)}</p>
                           <div className="all-station-meta">
                             <span>{regionLabel}</span>
                             <span>{cityLabel}</span>
