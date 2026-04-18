@@ -11,12 +11,15 @@ import {
   storeQueueTurnAlert,
 } from "../../services/fuelAlertService";
 import {
+  clearStoredCheckInSession,
   getMyQueueTicket,
   getPublicStationDetails,
   getReservationStatus,
   getStationQueue,
   leaveQueue,
+  loadStoredCheckInSession,
   reserveQueueSlot,
+  saveStoredCheckInSession,
   startStationCheckIn,
   startChapaCheckout,
   verifyChapaPayment
@@ -65,6 +68,7 @@ function normalizeTicketPayload(ticket) {
     ticketId: String(ticket.ticketId || ticket.reservationId || ""),
     reservationCode: String(ticket.reservationCode || ""),
     status: String(ticket.status || ""),
+    checkInStatus: String(ticket.checkInStatus || ""),
     position,
     etaMinutes: Number(ticket.etaMinutes ?? Math.max(0, position * 3)),
     fuelType: String(ticket.fuelType || ""),
@@ -248,6 +252,7 @@ export default function StationDetails({ navigation, route }) {
   const pollRef = useRef(null);
   const copyTimerRef = useRef(null);
   const queueTurnAlertKeyRef = useRef("");
+  const previousTicketIdRef = useRef("");
 
   const stationId = useMemo(
     () => String(station?.stationId || station?._id || station?.id || "").trim(),
@@ -446,6 +451,44 @@ export default function StationDetails({ navigation, route }) {
     ["waiting", "called"].includes(String(myTicket?.status || "").toLowerCase());
 
   useEffect(() => {
+    const nextTicketId = String(myTicket?.ticketId || "").trim();
+    const previousTicketId = previousTicketIdRef.current;
+    previousTicketIdRef.current = nextTicketId;
+
+    if (previousTicketId && previousTicketId !== nextTicketId) {
+      void clearStoredCheckInSession(previousTicketId);
+    }
+  }, [myTicket?.ticketId]);
+
+  useEffect(() => {
+    const ticketId = String(myTicket?.ticketId || "").trim();
+    const checkInStatus = String(myTicket?.checkInStatus || "").trim().toLowerCase();
+
+    if (!ticketId) {
+      setCheckInSession(null);
+      return;
+    }
+
+    if (checkInStatus === "verified") {
+      void clearStoredCheckInSession(ticketId);
+      setCheckInSession(null);
+      return;
+    }
+
+    let active = true;
+
+    (async () => {
+      const storedSession = await loadStoredCheckInSession(ticketId);
+      if (!active) return;
+      setCheckInSession(storedSession);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [myTicket?.checkInStatus, myTicket?.ticketId]);
+
+  useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
@@ -639,6 +682,7 @@ export default function StationDetails({ navigation, route }) {
               ticketId: String(status.reservationId),
               reservationCode: String(status.reservationCode || ""),
               status: status.status,
+              checkInStatus: String(status.checkInStatus || ""),
               position: status.position,
               etaMinutes: Number(status.position || 0) * 3,
               fuelType: status.fuelType,
@@ -834,6 +878,8 @@ export default function StationDetails({ navigation, route }) {
         );
         return;
       }
+      await clearStoredCheckInSession(String(ticketId));
+      setCheckInSession(null);
       setMyTicket(null);
       setReservationId("");
       setReservationCode("");
@@ -876,7 +922,16 @@ export default function StationDetails({ navigation, route }) {
         lon: position.coords.longitude,
         accuracy: position.coords.accuracy
       });
-      setCheckInSession(session);
+      const storedSession = await saveStoredCheckInSession(session);
+      setCheckInSession(storedSession || session);
+      setMyTicket((current) =>
+        current
+          ? {
+              ...current,
+              checkInStatus: String(session?.checkInStatus || current.checkInStatus || ""),
+            }
+          : current
+      );
       setCheckInStatusText(t.startCheckInBtn);
     } catch (error) {
       logReservationError("startCheckInNow", error);

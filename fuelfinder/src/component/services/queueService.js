@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import api from "./api";
 import {
   buildOfflineCacheKey,
@@ -7,6 +8,40 @@ import {
   requestWithOfflineCache,
   writeCachedOfflineData,
 } from "./offlineService";
+
+const CHECKIN_SESSION_STORAGE_KEY_PREFIX = "ff_checkin_session_v1:";
+
+function buildCheckInSessionStorageKey(ticketId) {
+  const normalizedTicketId = String(ticketId || "").trim();
+  return normalizedTicketId ? `${CHECKIN_SESSION_STORAGE_KEY_PREFIX}${normalizedTicketId}` : "";
+}
+
+function safeParseJson(rawValue, fallback = null) {
+  if (!rawValue) return fallback;
+  try {
+    return JSON.parse(rawValue);
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function normalizeStoredCheckInSession(session) {
+  const ticketId = String(session?.ticketId || session?.reservationId || "").trim();
+  const otpCode = String(session?.otpCode || "").trim();
+  const qrToken = String(session?.qrToken || "").trim();
+  if (!ticketId || (!otpCode && !qrToken)) {
+    return null;
+  }
+
+  return {
+    ticketId,
+    reservationCode: String(session?.reservationCode || "").trim(),
+    checkInStatus: String(session?.checkInStatus || "arrived").trim() || "arrived",
+    otpCode,
+    qrToken,
+    savedAt: session?.savedAt || new Date().toISOString(),
+  };
+}
 
 export async function reserveQueueSlot(payload) {
   try {
@@ -164,4 +199,33 @@ export async function startStationCheckIn(payload) {
 export async function verifyStationCheckIn(payload) {
   const { data } = await api.post("/queue/check-in/verify", payload);
   return data;
+}
+
+export async function loadStoredCheckInSession(ticketId) {
+  const storageKey = buildCheckInSessionStorageKey(ticketId);
+  if (!storageKey) return null;
+
+  const raw = await AsyncStorage.getItem(storageKey);
+  const parsed = safeParseJson(raw, null);
+  const normalized = normalizeStoredCheckInSession(parsed);
+  if (!normalized || normalized.ticketId !== String(ticketId || "").trim()) {
+    return null;
+  }
+
+  return normalized;
+}
+
+export async function saveStoredCheckInSession(session) {
+  const normalized = normalizeStoredCheckInSession(session);
+  if (!normalized) return null;
+
+  const storageKey = buildCheckInSessionStorageKey(normalized.ticketId);
+  await AsyncStorage.setItem(storageKey, JSON.stringify(normalized));
+  return normalized;
+}
+
+export async function clearStoredCheckInSession(ticketId) {
+  const storageKey = buildCheckInSessionStorageKey(ticketId);
+  if (!storageKey) return;
+  await AsyncStorage.removeItem(storageKey);
 }
