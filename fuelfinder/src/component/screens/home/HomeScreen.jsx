@@ -45,6 +45,14 @@ const LOCATION_REFRESH_THRESHOLD_DEGREES = 0.01;
 const FUEL_NEARBY_RADIUS_EXPANSION_STEPS = [25000, 50000];
 const AUTO_NEARBY_REFRESH_MIN_DISTANCE_METERS = 3000;
 const AUTO_NEARBY_REFRESH_MAX_DISTANCE_METERS = 15000;
+const CITY_NAME_ALIASES = new Map([
+  ["addis abeba", "addis ababa"],
+  ["awassa", "hawassa"],
+  ["asela", "asella"],
+  ["shashamane", "shashemene"],
+  ["shashamene", "shashemene"],
+  ["deberh berhan", "debre birhan"],
+]);
 const nearbyStationsMemoryCache = new Map();
 const nearbyStationsInflightRequests = new Map();
 const managerFuelSnapshotCache = new Map();
@@ -57,6 +65,72 @@ function normalizeStationType(value) {
     return stationType;
   }
   return "";
+}
+
+function normalizeCityMatchText(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return "";
+  return CITY_NAME_ALIASES.get(text) || text;
+}
+
+function collectCurrentCityCandidates(places = []) {
+  const seen = new Set();
+  const candidates = [];
+
+  (Array.isArray(places) ? places : []).forEach((place) => {
+    [
+      place?.city,
+      place?.district,
+      place?.subregion,
+      place?.region,
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .forEach((value) => {
+        const normalized = normalizeCityMatchText(value);
+        if (!normalized || seen.has(normalized)) return;
+        seen.add(normalized);
+        candidates.push(value);
+      });
+  });
+
+  return candidates;
+}
+
+function findExactCityMatch(cities = [], candidate) {
+  const normalizedCandidate = normalizeCityMatchText(candidate);
+  if (!normalizedCandidate) return null;
+
+  return (
+    (Array.isArray(cities) ? cities : []).find(
+      (city) => normalizeCityMatchText(city?.name) === normalizedCandidate
+    ) || null
+  );
+}
+
+async function resolveCurrentCityFromLocation(coords, stationType = "fuel") {
+  const latitude = Number(coords?.latitude);
+  const longitude = Number(coords?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  const places = await Location.reverseGeocodeAsync({
+    latitude,
+    longitude,
+  });
+  const candidateNames = collectCurrentCityCandidates(places);
+
+  for (const candidate of candidateNames) {
+    const { cities } = await fetchBrowseCities({
+      q: candidate,
+      limit: 8,
+      stationType,
+    });
+    const exactMatch = findExactCityMatch(cities, candidate);
+    if (exactMatch) return exactMatch;
+    if (cities.length === 1) return cities[0];
+  }
+
+  return null;
 }
 
 function getStationTypeForClient(station) {
@@ -594,7 +668,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
   );
   const isElectricHome = preferredStationType === "electric";
   const nearbyRadiusMeters = homeConfig?.nearbyRadiusMeters || (isElectricHome ? 250000 : 12000);
-  const defaultBrowseMode = homeConfig?.defaultBrowseMode || (isElectricHome ? "nationwide" : "nearby");
+  const defaultBrowseMode = homeConfig?.defaultBrowseMode || (isElectricHome ? "nationwide" : "city");
   const showTypeFilter = homeConfig?.showTypeFilter ?? !isElectricHome;
   const browseModeOptions = useMemo(
     () =>
@@ -726,6 +800,8 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
   const loadedRef = useRef(false);
   const handledRouteRequestRef = useRef("");
   const lastNearbyFetchCenterRef = useRef(null);
+  const currentCityLookupSignatureRef = useRef("");
+  const currentCityLookupInFlightRef = useRef(false);
 
   const [location, setLocation] = useState(null);
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
@@ -971,6 +1047,8 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
   useEffect(() => {
     loadedRef.current = false;
     lastNearbyFetchCenterRef.current = null;
+    currentCityLookupSignatureRef.current = "";
+    currentCityLookupInFlightRef.current = false;
     setFuelFilter("any");
     setBrowseMode(defaultBrowseMode);
     setSelectedCity(null);
@@ -1176,12 +1254,12 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
         return;
       }
 
-      const fallbackCity = cityOptions[0];
-      if (fallbackCity) {
+      if (!location && cityOptions[0]) {
+        const fallbackCity = cityOptions[0];
         await handleSelectCity(fallbackCity);
       }
     },
-    [cityOptions, handleSelectCity, loadCityStations, loadNationwideStations, loadNearbyStations, selectedCity]
+    [cityOptions, handleSelectCity, loadCityStations, loadNationwideStations, loadNearbyStations, location, selectedCity]
   );
 
   useEffect(() => {
@@ -1197,9 +1275,53 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
   }, [browseMode, loadNearbyStations, location]);
 
   useEffect(() => {
-    if (browseMode !== "city" || selectedCity || !cityOptions.length) return;
+    if (browseMode !== "city" || selectedCity || !cityOptions.length || location) return;
     void handleSelectCity(cityOptions[0]);
-  }, [browseMode, cityOptions, handleSelectCity, selectedCity]);
+  }, [browseMode, cityOptions, handleSelectCity, location, selectedCity]);
+
+  useEffect(() => {
+    if (browseMode !== "city" || selectedCity || !supportsCityBrowse || !location || isElectricHome) return;
+
+    const latitude = Number(location?.latitude);
+    const longitude = Number(location?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+    const signature = [
+      latitude.toFixed(2),
+      longitude.toFixed(2),
+      preferredStationType,
+    ].join(":");
+
+    if (
+      currentCityLookupSignatureRef.current === signature ||
+      currentCityLookupInFlightRef.current
+    ) {
+      return;
+    }
+
+    let active = true;
+    currentCityLookupInFlightRef.current = true;
+
+    (async () => {
+      try {
+        const matchedCity = await resolveCurrentCityFromLocation(location, preferredStationType);
+        if (!active || !matchedCity?.id) return;
+        currentCityLookupSignatureRef.current = signature;
+        await handleSelectCity(matchedCity);
+      } catch (_error) {
+        // Keep the city picker usable even if local reverse geocoding is unavailable.
+      } finally {
+        if (active) {
+          currentCityLookupInFlightRef.current = false;
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+      currentCityLookupInFlightRef.current = false;
+    };
+  }, [browseMode, handleSelectCity, isElectricHome, location, preferredStationType, selectedCity, supportsCityBrowse]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
