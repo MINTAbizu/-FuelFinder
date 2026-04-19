@@ -241,6 +241,63 @@ async function fetchNearbyFuelStations(
   }
 }
 
+function buildNearbyStationMergeKey(station) {
+  const identity = getStationIdentity(station);
+  if (identity) return `id:${identity}`;
+
+  const latitude = Number(station?.latitude);
+  const longitude = Number(station?.longitude);
+  const name = String(station?.name || "").trim().toLowerCase();
+  const address = String(station?.address || station?.rawAddress || "").trim().toLowerCase();
+
+  if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+    return `coord:${latitude.toFixed(5)}:${longitude.toFixed(5)}:${name}`;
+  }
+
+  if (name || address) {
+    return `text:${name}:${address}`;
+  }
+
+  return "";
+}
+
+function mergeNearbyStations(currentStations = [], nextStations = []) {
+  const stationsByKey = new Map();
+  const insertionOrder = [];
+
+  const appendStations = (stations) => {
+    (Array.isArray(stations) ? stations : []).forEach((station) => {
+      const key = buildNearbyStationMergeKey(station);
+      if (!key) return;
+      if (!stationsByKey.has(key)) {
+        insertionOrder.push(key);
+      }
+      stationsByKey.set(key, station);
+    });
+  };
+
+  appendStations(currentStations);
+  appendStations(nextStations);
+
+  return insertionOrder
+    .map((key) => stationsByKey.get(key))
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftDistance = Number(left?.distanceMeters);
+      const rightDistance = Number(right?.distanceMeters);
+      const leftHasDistance = Number.isFinite(leftDistance);
+      const rightHasDistance = Number.isFinite(rightDistance);
+
+      if (leftHasDistance && rightHasDistance) {
+        return leftDistance - rightDistance;
+      }
+      if (leftHasDistance) return -1;
+      if (rightHasDistance) return 1;
+
+      return String(left?.name || "").localeCompare(String(right?.name || ""));
+    });
+}
+
 function buildNearbyRadiusPlan(radiusMeters = 12000, stationType = "fuel") {
   const baseRadius = Math.max(1000, Math.round(Number(radiusMeters) || 12000));
   if (normalizeStationType(stationType) === "electric") {
@@ -259,7 +316,7 @@ async function fetchNearbyFuelStationsWithRadiusFallback(
   { forceRefresh = false, stationType = "fuel" } = {}
 ) {
   const searchRadii = buildNearbyRadiusPlan(radiusMeters, stationType);
-  let lastStations = [];
+  let mergedStations = [];
   let lastRadius = searchRadii[0] || radiusMeters;
 
   for (const candidateRadius of searchRadii) {
@@ -267,15 +324,12 @@ async function fetchNearbyFuelStationsWithRadiusFallback(
       forceRefresh,
       stationType,
     });
-    lastStations = Array.isArray(nextStations) ? nextStations : [];
+    mergedStations = mergeNearbyStations(mergedStations, nextStations);
     lastRadius = candidateRadius;
-    if (lastStations.length) {
-      break;
-    }
   }
 
   return {
-    stations: lastStations,
+    stations: mergedStations,
     radiusMeters: lastRadius,
   };
 }

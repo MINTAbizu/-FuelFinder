@@ -7,9 +7,23 @@ const slugify = require("./slugify");
 
 const REGION_CATEGORIES = new Set(["regional_state", "chartered_city"]);
 const WOREDA_CATEGORIES = new Set(["woreda", "subcity", "district", "special_district", "other"]);
+const CITY_NAME_ALIASES = new Map([
+  ["addis abeba", "Addis Ababa"],
+  ["awassa", "Hawassa"],
+  ["asela", "Asella"],
+  ["shashamane", "Shashemene"],
+  ["shashamene", "Shashemene"],
+  ["deberh berhan", "Debre Birhan"]
+]);
 
 function asText(value) {
   return String(value || "").trim();
+}
+
+function normalizeCityName(value) {
+  const text = asText(value);
+  if (!text) return "";
+  return CITY_NAME_ALIASES.get(text.toLowerCase()) || text;
 }
 
 function asObjectIdOrNull(value, fieldName) {
@@ -44,7 +58,7 @@ function normalizeLocationCategories(value) {
 function normalizeCitySeedEntry(value) {
   if (typeof value === "string") {
     return {
-      name: asText(value),
+      name: normalizeCityName(value),
       code: "",
       isActive: true,
       woredas: []
@@ -52,7 +66,7 @@ function normalizeCitySeedEntry(value) {
   }
 
   return {
-    name: asText(value?.name),
+    name: normalizeCityName(value?.name),
     code: asText(value?.code).toUpperCase(),
     isActive: value?.isActive !== undefined ? Boolean(value.isActive) : true,
     woredas: Array.isArray(value?.woredas) ? value.woredas : []
@@ -232,7 +246,7 @@ async function ensureCityByName(input = {}) {
     code,
     isActive = true
   } = input;
-  const normalizedName = asText(name);
+  const normalizedName = normalizeCityName(name);
   const normalizedRegionId = asObjectIdOrNull(regionId, "regionId");
   if (!normalizedName || !normalizedRegionId) {
     throw new Error("City name and regionId are required.");
