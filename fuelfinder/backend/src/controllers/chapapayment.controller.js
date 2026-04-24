@@ -6,6 +6,10 @@ const PaymentTransaction = require("../models/PaymentTransaction");
 const Station = require("../models/Station");
 const { getIO } = require("../socket");
 const { recordStationFuelSnapshot } = require("../utils/stationFuelHistory");
+const {
+  buildReservationCooldownPayload,
+  getReservationCooldownStatus
+} = require("../services/reservationCooldownService");
 
 function isObjectId(value) {
   return mongoose.Types.ObjectId.isValid(value);
@@ -252,6 +256,28 @@ async function finalizeSuccessfulPayment({ tx_ref, response }) {
     return { ok: false, status: 410, message: "Reservation payment window expired." };
   }
 
+  const station = await Station.findById(ticket.stationId)
+    .select("_id name reservationCooldownDays")
+    .lean();
+  if (!station) {
+    return { ok: false, status: 404, message: "Station not found for this reservation." };
+  }
+
+  const cooldown = await getReservationCooldownStatus({
+    userId: ticket.userId,
+    stationId: ticket.stationId,
+    reservationCooldownDays: station.reservationCooldownDays,
+    excludeReservationId: ticket._id
+  });
+  if (cooldown) {
+    return {
+      ok: false,
+      status: 409,
+      message: "Repeat reservation limit is active for this station.",
+      payload: buildReservationCooldownPayload(station, cooldown)
+    };
+  }
+
   const consume = await consumeStationFuel(ticket.stationId, ticket.fuelType, ticket.requestedLiters);
   if (!consume.ok) {
     return { ok: false, status: 409, message: "Not enough fuel left at this station for requested liters." };
@@ -337,6 +363,7 @@ exports.initialize = async (req, res) => {
 
     requireEnv("CHAPA_SECRET_KEY");
 
+    const userId = String(req.user?.id || "").trim();
     const reservationId = String(req.body.reservationId || req.body.ticketId || "").trim();
     const email = String(req.body.email || "").trim();
     const firstName = String(req.body.first_name || "").trim();
@@ -365,7 +392,9 @@ exports.initialize = async (req, res) => {
     if (req.user && String(ticket.userId) !== String(req.user.id)) {
       return res.status(403).json({ message: "Forbidden: reservation does not belong to this user." });
     }
-    const station = await Station.findById(ticket.stationId).select("_id chapaSubaccountId").lean();
+    const station = await Station.findById(ticket.stationId)
+      .select("_id name chapaSubaccountId reservationCooldownDays")
+      .lean();
     if (!station) {
       return res.status(404).json({ message: "Station not found for this reservation." });
     }
@@ -379,6 +408,16 @@ exports.initialize = async (req, res) => {
       ticket.status = "expired";
       await ticket.save();
       return res.status(410).json({ message: "Reservation payment window expired." });
+    }
+
+    const cooldown = await getReservationCooldownStatus({
+      userId,
+      stationId: ticket.stationId,
+      reservationCooldownDays: station.reservationCooldownDays,
+      excludeReservationId: ticket._id
+    });
+    if (cooldown) {
+      return res.status(409).json(buildReservationCooldownPayload(station, cooldown));
     }
 
     const baseAmount = Number(ticket.depositAmount > 0 ? ticket.depositAmount : ticket.estimatedAmount);
@@ -526,7 +565,7 @@ exports.verify = async (req, res) => {
     if (normalizedStatus === "success") {
       const finalize = await finalizeSuccessfulPayment({ tx_ref, response });
       if (!finalize.ok && finalize.status) {
-        return res.status(finalize.status).json({ message: finalize.message });
+        return res.status(finalize.status).json(finalize.payload || { message: finalize.message });
       }
       return res.json({
         ...response,
@@ -585,7 +624,7 @@ exports.callback = async (req, res) => {
 
     const finalize = await finalizeSuccessfulPayment({ tx_ref, response });
     if (!finalize.ok && finalize.status) {
-      return res.status(finalize.status).json({ message: finalize.message });
+      return res.status(finalize.status).json(finalize.payload || { message: finalize.message });
     }
 
     return res.json(finalize);
