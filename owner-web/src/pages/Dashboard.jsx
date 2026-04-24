@@ -124,6 +124,12 @@ function formatLiters(value) {
   return `${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} L`;
 }
 
+function formatReservationCooldownLabel(value) {
+  const days = Number(value);
+  if (!Number.isFinite(days) || days <= 0) return "No repeat wait";
+  return `${days} day${days === 1 ? "" : "s"}`;
+}
+
 function formatFuelTypeLabel(fuelType) {
   const normalized = String(fuelType || "").trim().toLowerCase();
   if (normalized === "gasoline") return "Gasoline";
@@ -158,6 +164,16 @@ function readOptionalFiniteNumber(value) {
   if (typeof value === "string" && !value.trim()) return null;
   const next = Number(value);
   return Number.isFinite(next) ? next : null;
+}
+
+function readReservationCooldownDays(value) {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === "string" && !value.trim()) return 0;
+  const next = Number(value);
+  if (!Number.isFinite(next) || next < 0 || !Number.isInteger(next)) {
+    throw new Error("Repeat reservation wait days must be a non-negative whole number.");
+  }
+  return next;
 }
 
 function csvEscape(value) {
@@ -199,6 +215,7 @@ function buildStationFormState(stationId, station) {
     otherPrice: formatFuelPriceInputValue(
       fuelPrices.other ?? station?.otherPrice ?? station?.other_price
     ),
+    reservationCooldownDays: String(Number(station?.reservationCooldownDays ?? 0)),
     chapaSubaccountId: String(station?.chapaSubaccountId || ""),
     paymentProviderName: String(paymentDetails.providerName || ""),
     paymentAccountName: String(paymentDetails.accountName || ""),
@@ -221,6 +238,7 @@ function buildCreateStationFormState(defaultOrganizationId = "") {
     gasolinePrice: "",
     dieselPrice: "",
     otherPrice: "",
+    reservationCooldownDays: "0",
     isActive: true,
     organizationId: String(defaultOrganizationId || ""),
     regionId: "",
@@ -3249,6 +3267,9 @@ export default function Dashboard() {
     try {
       const latitude = readOptionalFiniteNumber(createStationForm.latitude);
       const longitude = readOptionalFiniteNumber(createStationForm.longitude);
+      const reservationCooldownDays = readReservationCooldownDays(
+        createStationForm.reservationCooldownDays
+      );
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
         throw new Error("Latitude and longitude are required.");
       }
@@ -3262,6 +3283,7 @@ export default function Dashboard() {
         longitude,
         fuelStatus: String(createStationForm.fuelStatus || "partial").trim().toLowerCase(),
         fuelPrices: buildFuelPricesPayload(createStationForm),
+        reservationCooldownDays,
         isActive: Boolean(createStationForm.isActive),
         organizationId: String(createStationForm.organizationId || "").trim() || null,
         regionId: String(createStationForm.regionId || "").trim() || null,
@@ -3323,12 +3345,16 @@ export default function Dashboard() {
     setStationFormStatus("");
 
     try {
+      const reservationCooldownDays = readReservationCooldownDays(
+        stationForm.reservationCooldownDays
+      );
       const payload = {
         name: String(stationForm.name || "").trim(),
         address: String(stationForm.address || "").trim(),
         contact: String(stationForm.contact || "").trim(),
         stationType: String(stationForm.stationType || "fuel").trim().toLowerCase(),
         fuelPrices: buildFuelPricesPayload(stationForm),
+        reservationCooldownDays,
         ...(canEditChapaSubaccount
           ? {
               chapaSubaccountId: String(stationForm.chapaSubaccountId || "").trim()
