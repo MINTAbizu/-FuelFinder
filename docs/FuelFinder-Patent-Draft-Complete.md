@@ -1,5 +1,6 @@
 # FuelFinder Patent Document
-
+// mulugeta commercial  22 orial beatkrystan 
+//  oromial 
 ## 1. Administrative Information
 
 Name of innovator: `Mintsenot Bizuayehw`
@@ -117,13 +118,13 @@ Figure 1. Overall system architecture of the FuelFinder platform showing the cus
 
 Figure 2. Use-case diagram showing the interactions between customers, station staff, station owners or admins, super admins, and external providers.
 
-Figure 3. Authentication and account lifecycle flow showing registration, login, verification, password reset, biometric login, and token refresh behavior.
+Figure 3. Authentication and account lifecycle flow sheet showing session restoration, registration, login, verification, password reset, biometric login, and token refresh behavior.
 
 Figure 4. Data-flow diagram showing movement of user, station, queue, payment, and notification data through core backend processes and data stores.
 
 Figure 5. Payment orchestration flow showing Chapa and Telebirr payment paths and activation of a paid queue ticket.
 
-Figure 6. Queue-ticket state transition diagram showing the progression from pending payment to waiting, called, served, cancelled, or expired.
+Figure 6. Queue-ticket state-transition diagram showing progression among pending payment, waiting, called, served, cancelled, and expired states under payment, operator, cancellation, and timeout conditions.
 
 Figure 7. Station check-in and verification flow showing check-in initiation, geofence validation, OTP and QR generation, staff verification, and queue update emission.
 
@@ -255,11 +256,25 @@ This multi-role arrangement is significant because the innovation is not limited
 
 #### 8.3.3 Authentication and Identity Management
 
-As shown in Figure 3, the system begins at app launch and session restoration `301`. If stored tokens are available, the system attempts to restore the user session. If restoration fails, the user returns to login or registration selection `302`.
+As shown in Figure 3, the authentication portion of the innovation is preferably illustrated as a patent-style flow sheet in which app launch and session restoration process `301` begins when the mobile application is opened. In one embodiment, locally stored session data including an access token, a refresh token, and user-session metadata are inspected at process `301`. If valid session data are present, the backend attempts to rehydrate the session by retrieving profile data and, where needed, refreshing the token pair. If restoration succeeds, the user is returned directly to an authenticated application state. If restoration fails, expires, or is unavailable, control moves to login or registration selection `302`.
 
-New users may create an account through registration `303`, after which a phone verification process `304` is performed before the user enters the authenticated portion of the system. Existing users may authenticate through password login `305`, federated or Google sign-in `306`, or biometric login `307` where a device-specific secret has previously been registered. Two-factor verification `308` may also be required depending on account settings. A password-reset process `309` and token refresh process `310` maintain account recovery and session continuity.
+At selection process `302`, the user may choose an account-creation path or one of several sign-in paths. In a first path, account registration request `303` receives account information such as name, email address, phone number, and password. In one embodiment, the backend creates a customer account record and then initiates phone verification process `304`. Phone verification process `304` may include issuance of a temporary verification token, generation of a one-time passcode, transmission of the passcode by SMS or a similar messaging service, receipt of a user-entered code at the client, and verification of the code at the backend before an authenticated session is granted. In some embodiments, an email verification link may also be issued as part of the same registration lifecycle while phone verification remains the gating step for entry into the authenticated application state.
 
-This identity flow improves security and reliability in a system that handles queue positions, payment-linked tickets, and operational actions.
+In a second path, password login process `305` receives user credentials and submits them to the backend for account lookup and password validation. If the account has not yet completed phone verification, the system may redirect from password login process `305` to phone verification process `304` before issuing session credentials. If the account has completed phone verification but has two-factor protection enabled, the system may redirect from password login process `305` to two-factor verification process `308`. Otherwise, the backend issues an access token and refresh token and establishes the authenticated session.
+
+In a third path, Google or federated sign-in process `306` receives a federated identity token from an external identity provider and validates that token through a backend verification operation. In one embodiment, a matching local account is identified or a new local account record is created from the federated identity payload. If the resulting account still requires phone verification, control moves to phone verification process `304`. If the account has two-factor protection enabled, control moves to two-factor verification process `308`. If no additional verification is required, the system issues authenticated session credentials and transitions the user into the authenticated portion of the platform.
+
+In a fourth path, biometric login process `307` may be used after a device-specific biometric secret has previously been registered to the account. In one embodiment, the client retrieves a device identifier and stored biometric credential, prompts the device operating environment for biometric confirmation, and submits the resulting device identifier and secret to the backend. If the backend validates the registered biometric credential, the user session is restored without re-entry of the account password. This path is particularly useful for repeated access to a platform that manages reservations, payments, and time-sensitive queue actions.
+
+Two-factor verification process `308` may be triggered after password login process `305` or federated sign-in process `306` where the account is configured for an additional security factor. In one embodiment, process `308` generates a short-lived security code, transmits that code to a verified user phone number, receives the user-entered code through the client, validates the code at the backend, and, upon success, issues session credentials. If the code expires or the maximum number of attempts is exceeded, the system may require code reissuance before completion of authentication.
+
+Password-reset process `309` supports account recovery. In one embodiment, the user submits an email address associated with the account, the backend identifies a verified phone number for that account, generates a temporary reset verification token and one-time passcode, and transmits the passcode to the verified phone number. After successful verification of the passcode, the system permits submission of a replacement password and invalidates previous recovery data. This arrangement reduces unauthorized account takeover while preserving recoverability for legitimate users.
+
+Token refresh and session continuation process `310` maintains continuity of the authenticated session after initial login. In one embodiment, when a protected backend request fails due to expiration of the access token, the client submits the refresh token to obtain a replacement token pair without requiring full reauthentication. If refresh succeeds, the original protected request may be retried. If refresh fails, the local session is cleared and control returns to login or registration selection `302`. In this manner, process `310` improves continuity while still preserving revocation and expiration controls.
+
+In one embodiment, successful completion of processes `304`, `305`, `306`, `307`, or `308` may also lead to a post-authentication user-state decision, such as prompting a customer account to select a preferred station-discovery mode before the main application interface is shown. The authentication flow of Figure 3 therefore serves not only as a login mechanism, but also as a controlled entry gate into the broader station-discovery, queue-reservation, payment, and check-in functions of the platform.
+
+This identity flow improves security, recoverability, and operational reliability in a system that handles queue positions, payment-linked tickets, and station-side operational actions.
 
 #### 8.3.4 Station Discovery and Service Visibility
 
@@ -269,11 +284,19 @@ The station and location data store `411` maintains station coordinates, regiona
 
 #### 8.3.5 Queue Reservation and Queue-State Management
 
-As shown in Figures 4 and 6, a user who selects a station may reserve service or join a queue through queue-management process `406`. When a reservation is created, a queue ticket enters a pending-payment state `601`. Upon successful payment confirmation, the ticket transitions to a waiting state `602`, becoming an active place in the queue. When a station operator advances service, the ticket may move to a called state `603`. After service completion, it may move to served state `604`. If the user cancels or the system times out, the ticket may move to cancelled state `605` or expired state `606`.
+As shown in Figures 4 and 6, queue-management process `406` preferably operates according to a defined queue-ticket state model in which each ticket progresses through one of several controlled digital states. In one embodiment, creation of a reservation causes the queue ticket to enter pending-payment state `601`. State `601` is suitable for reservations that require a deposit or advance payment before the ticket becomes active in the service queue. Upon successful payment confirmation, the queue ticket transitions from pending-payment state `601` to waiting state `602`, thereby becoming an active place in the queue.
 
-The state machine is governed by defined timeout and transition rules. In one implementation supported by the current system, the pending-payment state is controlled by a payment window `607` of approximately ten minutes, the waiting state is controlled by a waiting window `608` of approximately one hundred twenty minutes, and the called state is controlled by an arrival or no-show window `609` of approximately five minutes. These values may be configured while preserving the same innovation concept.
+In another embodiment, the system may support a direct-join path in which a ticket is created directly in waiting state `602` without first entering pending-payment state `601`, for example where no advance deposit is required. Waiting state `602` represents an active but not yet called ticket having a queue position among other active waiting tickets. The queue position may be recalculated as tickets are added, cancelled, expired, or advanced.
 
-The queue-ticket data store `412` maintains reservation status, queue position, timing metadata, payment references, and check-in state information. This state-driven architecture reduces queue disorder and creates a consistent digital service flow.
+When a station operator advances service, the next eligible ticket in waiting state `602` may transition to called state `603`. In one embodiment, transition to called state `603` also records a called timestamp, resets call-notification metadata, and starts a limited response window for customer arrival. If a previously called ticket remains active when the operator advances the queue again, that earlier called ticket may be transitioned to served state `604` before the next waiting ticket is called.
+
+Served state `604` is a terminal fulfillment state indicating that the customer has completed the queue service cycle. Cancelled state `605` is a terminal termination state indicating voluntary or permitted exit from the queue. In one embodiment, cancellation may occur from pending-payment state `601`, waiting state `602`, or called state `603`. If a deposit has already been authorized, cancellation may further trigger a refund or reversal operation according to system policy. Expired state `606` is a terminal timeout state used where the customer does not complete the required action within the allowed time for the current active state.
+
+The state model of Figure 6 is governed by defined timeout and transition rules. In one implementation supported by the current system, pending-payment state `601` is controlled by a payment window rule `607` of approximately ten minutes. If the required payment is not completed within that window, the queue ticket transitions from pending-payment state `601` to expired state `606`. Waiting state `602` is controlled by a waiting window rule `608` of approximately one hundred twenty minutes, or another configured value, after which the queue ticket may transition to expired state `606` if not otherwise advanced or cancelled. Called state `603` is controlled by a called or no-show window rule `609` of approximately five minutes, after which the ticket may transition to expired state `606` if the customer does not arrive or complete the expected action within the call window.
+
+In one embodiment, expiration from called state `603` may also cause a payment-related consequence, such as deposit forfeiture, while expiration from pending-payment state `601` may simply terminate the reservation before activation. In another embodiment, cancellation of a ticket from waiting state `602` or called state `603` may also trigger restoration of reserved fuel quantity or similar station-capacity metadata so that station-side operational data remain synchronized with queue-state changes.
+
+The queue-ticket data store `412` maintains reservation status, queue position, timing metadata, payment references, payment-status metadata, and check-in state information associated with each queue ticket. This state-driven architecture reduces queue disorder, enables predictable automation, and creates a consistent digital service flow suitable for fuel-station and electric-charging coordination.
 
 #### 8.3.6 Digital Payment Integration
 
@@ -365,12 +388,12 @@ Figure 1. System architecture of a vehicle-energy station discovery and service-
 
 Figure 2. Use-case interactions among customer, station staff, station owner or admin, super admin, payment gateway, and location service according to one embodiment of the innovation.
 
-Figure 3. Authentication, verification, and session-lifecycle flow according to one embodiment of the innovation.
+Figure 3. Authentication, verification, and session-lifecycle flow sheet according to one embodiment of the innovation.
 
 Figure 4. Data-flow architecture for identity, station discovery, queue management, payment orchestration, and notification handling according to one embodiment of the innovation.
 
 Figure 5. Payment orchestration workflow for multiple payment providers and queue-ticket activation according to one embodiment of the innovation.
 
-Figure 6. Queue-ticket state transition model according to one embodiment of the innovation.
+Figure 6. Queue-ticket state-transition diagram according to one embodiment of the innovation.
 
 Figure 7. Geofenced station check-in and secure QR or OTP validation workflow according to one embodiment of the innovation.

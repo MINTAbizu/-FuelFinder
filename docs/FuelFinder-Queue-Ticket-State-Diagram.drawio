@@ -1,0 +1,110 @@
+<mxfile host="app.diagrams.net" modified="2026-04-21T00:00:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="fuelFinderQueueState" name="FuelFinder Queue Ticket State Diagram">
+    <mxGraphModel dx="1800" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="system" value="Queue Ticket State Transition Diagram" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;fillColor=#ffffff;strokeColor=#000000;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="40" width="1920" height="1080" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="s601" value="601&#xa;Pending Payment" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;fillColor=#ffffff;strokeColor=#000000;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="190" y="250" width="210" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="s602" value="602&#xa;Waiting" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;fillColor=#ffffff;strokeColor=#000000;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="250" width="210" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="s603" value="603&#xa;Called" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=2;fillColor=#ffffff;strokeColor=#000000;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="930" y="250" width="210" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="s604" value="604&#xa;Served" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=3;fillColor=#ffffff;strokeColor=#000000;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="180" width="210" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="s605" value="605&#xa;Cancelled" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=3;fillColor=#ffffff;strokeColor=#000000;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="320" width="210" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="s606" value="606&#xa;Expired" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=3;fillColor=#ffffff;strokeColor=#000000;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="460" width="210" height="90" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n607" value="607&#xa;Payment window&#xa;approximately 10 minutes" style="shape=note;whiteSpace=wrap;html=1;strokeWidth=2;fillColor=#ffffff;strokeColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="160" y="660" width="250" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="n608" value="608&#xa;Waiting window&#xa;approximately 120 minutes&#xa;or configured value" style="shape=note;whiteSpace=wrap;html=1;strokeWidth=2;fillColor=#ffffff;strokeColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="540" y="660" width="250" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="n609" value="609&#xa;Called or no-show window&#xa;approximately 5 minutes" style="shape=note;whiteSpace=wrap;html=1;strokeWidth=2;fillColor=#ffffff;strokeColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="920" y="660" width="250" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="note_flow" value="In one embodiment, direct queue join may create state 602 without passing through state 601." style="shape=note;whiteSpace=wrap;html=1;strokeWidth=2;fillColor=#ffffff;strokeColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="520" y="100" width="300" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="note_forfeit" value="In one embodiment, expiration from state 603 may also cause deposit forfeiture." style="shape=note;whiteSpace=wrap;html=1;strokeWidth=2;fillColor=#ffffff;strokeColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="660" width="320" height="90" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e1" value="payment confirmed" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#000000;" edge="1" parent="1" source="s601" target="s602">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e2" value="staff calls next ticket" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#000000;" edge="1" parent="1" source="s602" target="s603">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e3" value="service completed" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#000000;" edge="1" parent="1" source="s603" target="s604">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e4" value="cancel" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#000000;" edge="1" parent="1" source="s601" target="s605">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="300" y="365"/>
+              <mxPoint x="300" y="365"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="cancel" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#000000;" edge="1" parent="1" source="s602" target="s605">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e6" value="cancel" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#000000;" edge="1" parent="1" source="s603" target="s605">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e7" value="payment timeout" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#000000;dashed=1;" edge="1" parent="1" source="s601" target="s606">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="300" y="505"/>
+              <mxPoint x="1250" y="505"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="waiting timeout" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#000000;dashed=1;" edge="1" parent="1" source="s602" target="s606">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="665" y="535"/>
+              <mxPoint x="1250" y="535"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="called timeout or no-show" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#000000;dashed=1;" edge="1" parent="1" source="s603" target="s606">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1035" y="565"/>
+              <mxPoint x="1250" y="565"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e10" value="associated with state 601" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=open;endFill=0;strokeColor=#000000;dashed=1;" edge="1" parent="1" source="n607" target="s601">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e11" value="associated with state 602" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=open;endFill=0;strokeColor=#000000;dashed=1;" edge="1" parent="1" source="n608" target="s602">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e12" value="associated with state 603" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=open;endFill=0;strokeColor=#000000;dashed=1;" edge="1" parent="1" source="n609" target="s603">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
