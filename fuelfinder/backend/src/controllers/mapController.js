@@ -52,6 +52,14 @@ function parseNumber(value) {
   return Number.isFinite(num) ? num : null;
 }
 
+function parseBooleanQuery(value, defaultValue = false) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return defaultValue;
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return defaultValue;
+}
+
 function normalizeDirectoryLimit(value, fallback = DEFAULT_DIRECTORY_LIMIT) {
   const parsed = parseNumber(value);
   if (parsed === null || parsed <= 0) {
@@ -1310,6 +1318,7 @@ exports.listDirectoryStations = async (req, res) => {
     const q = String(req.query.q || "").trim();
     const regionId = String(req.query.regionId || "").trim();
     const cityId = String(req.query.cityId || "").trim();
+    const strictCity = parseBooleanQuery(req.query.strictCity, false);
     const limit = normalizeDirectoryLimit(req.query.limit, DEFAULT_DIRECTORY_STATION_LIMIT);
     const stationTypeParam = req.query.stationType;
     const stationType = normalizeStationType(stationTypeParam);
@@ -1345,7 +1354,7 @@ exports.listDirectoryStations = async (req, res) => {
 
     let stations = await queryDirectoryStations(matchQuery, limit);
 
-    if (cityId && !stations.length) {
+    if (cityId && !stations.length && !strictCity) {
       const city = await City.findById(cityId).select("_id name").lean();
       const fallbackTerms = buildCityFallbackTerms(city?.name);
       if (fallbackTerms.length) {

@@ -80,6 +80,7 @@ export async function fetchDirectoryStations(params = {}) {
     q: String(params?.q || "").trim(),
     limit: Number(params?.limit || 120),
     stationType: normalizeStationType(params?.stationType),
+    strictCity: params?.strictCity === true,
   };
 
   const result = await fetchWithOfflineListCache({
@@ -94,6 +95,7 @@ export async function fetchDirectoryStations(params = {}) {
           q: normalizedParams.q || undefined,
           limit: normalizedParams.limit,
           stationType: normalizedParams.stationType,
+          strictCity: normalizedParams.strictCity || undefined,
         },
       });
 

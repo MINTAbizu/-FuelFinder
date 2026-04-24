@@ -667,6 +667,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     [homeConfig?.stationType, route?.params?.stationType]
   );
   const isElectricHome = preferredStationType === "electric";
+  const lockToCurrentCity = homeConfig?.lockToCurrentCity ?? !isElectricHome;
   const nearbyRadiusMeters = homeConfig?.nearbyRadiusMeters || (isElectricHome ? 250000 : 12000);
   const defaultBrowseMode = homeConfig?.defaultBrowseMode || (isElectricHome ? "nationwide" : "city");
   const showTypeFilter = homeConfig?.showTypeFilter ?? !isElectricHome;
@@ -684,7 +685,14 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
               label: "Nearby chargers",
             },
           ]
-        : [
+        : lockToCurrentCity
+          ? [
+              {
+                id: "city",
+                label: t("browseCurrentCityLabel", { defaultValue: "My city" }),
+              },
+            ]
+          : [
             {
               id: "nearby",
               label: t("browseNearbyLabel", { defaultValue: "Nearby" }),
@@ -694,7 +702,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
               label: t("browseCityLabel", { defaultValue: "Browse by city" }),
             },
           ]),
-    [homeConfig?.browseModeOptions, isElectricHome, t]
+    [homeConfig?.browseModeOptions, isElectricHome, lockToCurrentCity, t]
   );
   const supportsCityBrowse = browseModeOptions.some((option) => option.id === "city");
   const screenCopy = useMemo(
@@ -854,6 +862,10 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
         setCityOptions([]);
         return;
       }
+      if (lockToCurrentCity) {
+        setCityOptions([]);
+        return;
+      }
       setCityOptionsLoading(true);
       try {
         const { cities: nextCities } = await fetchBrowseCities({
@@ -868,7 +880,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
         setCityOptionsLoading(false);
       }
     },
-    [preferredStationType, supportsCityBrowse]
+    [lockToCurrentCity, preferredStationType, supportsCityBrowse]
   );
 
   const loadCityStations = useCallback(
@@ -886,6 +898,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
           cityId,
           limit: 220,
           stationType: preferredStationType,
+          strictCity: true,
         });
         setStations(nextStations);
         setOfflineStationsNotice(fromCache ? buildOfflineStationsNotice(t, isElectricHome) : "");
@@ -925,9 +938,13 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
 
         if (!nextStations.length) {
           setStationsError(
-            t("cityStationsEmpty", {
-              defaultValue: "No stations are assigned to this city yet."
-            })
+            lockToCurrentCity
+              ? t("currentCityStationsEmpty", {
+                  defaultValue: "No stations are linked to your current city yet."
+                })
+              : t("cityStationsEmpty", {
+                  defaultValue: "No stations are assigned to this city yet."
+                })
           );
         }
       } catch (error) {
@@ -944,7 +961,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
         setLoadingStations(false);
       }
     },
-    [isElectricHome, preferredStationType, t]
+    [isElectricHome, lockToCurrentCity, preferredStationType, t]
   );
 
   const loadNationwideStations = useCallback(
@@ -1020,6 +1037,12 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
   useEffect(() => {
     let active = true;
 
+    if (defaultBrowseMode !== "nearby" || lockToCurrentCity) {
+      return () => {
+        active = false;
+      };
+    }
+
     (async () => {
       const cached = await readCachedNearbyStations(preferredStationType);
       if (!active || !cached?.stations?.length) return;
@@ -1038,7 +1061,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     return () => {
       active = false;
     };
-  }, [preferredStationType]);
+  }, [defaultBrowseMode, lockToCurrentCity, preferredStationType]);
 
   useEffect(() => {
     void loadBrowseCities(deferredCityQuery);
@@ -1063,7 +1086,8 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== "granted") {
           if (mounted) setHasLocationPermission(false);
-          if (mounted) setBrowseMode(supportsCityBrowse ? "city" : defaultBrowseMode);
+          if (mounted) setBrowseMode(defaultBrowseMode);
+          if (mounted && lockToCurrentCity) setStations([]);
           if (mounted) setLocationError(t("homeScreen.location.denied"));
           return;
         }
@@ -1133,7 +1157,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
       watcherRef.current?.remove?.();
       watcherRef.current = null;
     };
-  }, [defaultBrowseMode, nearbyRadiusMeters, supportsCityBrowse, t]);
+  }, [defaultBrowseMode, lockToCurrentCity, nearbyRadiusMeters, supportsCityBrowse, t]);
 
   const loadNearbyStations = useCallback(async ({ forceRefresh = false } = {}) => {
     const basePoint = location;
@@ -1254,12 +1278,12 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
         return;
       }
 
-      if (!location && cityOptions[0]) {
+      if (!lockToCurrentCity && !location && cityOptions[0]) {
         const fallbackCity = cityOptions[0];
         await handleSelectCity(fallbackCity);
       }
     },
-    [cityOptions, handleSelectCity, loadCityStations, loadNationwideStations, loadNearbyStations, location, selectedCity]
+    [cityOptions, handleSelectCity, loadCityStations, loadNationwideStations, loadNearbyStations, location, lockToCurrentCity, selectedCity]
   );
 
   useEffect(() => {
@@ -1275,12 +1299,14 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
   }, [browseMode, loadNearbyStations, location]);
 
   useEffect(() => {
+    if (lockToCurrentCity) return;
     if (browseMode !== "city" || selectedCity || !cityOptions.length || location) return;
     void handleSelectCity(cityOptions[0]);
-  }, [browseMode, cityOptions, handleSelectCity, location, selectedCity]);
+  }, [browseMode, cityOptions, handleSelectCity, location, lockToCurrentCity, selectedCity]);
 
   useEffect(() => {
-    if (browseMode !== "city" || selectedCity || !supportsCityBrowse || !location || isElectricHome) return;
+    if (browseMode !== "city" || !supportsCityBrowse || !location || isElectricHome) return;
+    if (!lockToCurrentCity && selectedCity) return;
 
     const latitude = Number(location?.latitude);
     const longitude = Number(location?.longitude);
@@ -1305,11 +1331,34 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     (async () => {
       try {
         const matchedCity = await resolveCurrentCityFromLocation(location, preferredStationType);
-        if (!active || !matchedCity?.id) return;
+        if (!active) return;
+        if (!matchedCity?.id) {
+          currentCityLookupSignatureRef.current = signature;
+          if (lockToCurrentCity) {
+            setSelectedCity(null);
+            setStations([]);
+            setStationsError(
+              t("currentCityResolveFail", {
+                defaultValue: "We could not detect your current city yet. Move a little or refresh location."
+              })
+            );
+          }
+          return;
+        }
         currentCityLookupSignatureRef.current = signature;
+        if (String(selectedCity?.id || "") === String(matchedCity.id || "")) {
+          return;
+        }
         await handleSelectCity(matchedCity);
       } catch (_error) {
-        // Keep the city picker usable even if local reverse geocoding is unavailable.
+        if (active && lockToCurrentCity && !selectedCity?.id) {
+          setStations([]);
+          setStationsError(
+            t("currentCityResolveFail", {
+              defaultValue: "We could not detect your current city yet. Move a little or refresh location."
+            })
+          );
+        }
       } finally {
         if (active) {
           currentCityLookupInFlightRef.current = false;
@@ -1321,7 +1370,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
       active = false;
       currentCityLookupInFlightRef.current = false;
     };
-  }, [browseMode, handleSelectCity, isElectricHome, location, preferredStationType, selectedCity, supportsCityBrowse]);
+  }, [browseMode, handleSelectCity, isElectricHome, location, lockToCurrentCity, preferredStationType, selectedCity, supportsCityBrowse, t]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1809,12 +1858,14 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
 
             {browseMode === "city" ? (
               <>
-                <TextInput
-                  value={cityQuery}
-                  onChangeText={setCityQuery}
-                  placeholder={screenCopy.citySearchPlaceholder}
-                  style={styles.search}
-                />
+                {!lockToCurrentCity ? (
+                  <TextInput
+                    value={cityQuery}
+                    onChangeText={setCityQuery}
+                    placeholder={screenCopy.citySearchPlaceholder}
+                    style={styles.search}
+                  />
+                ) : null}
                 {selectedCity ? (
                   <Text style={styles.count}>
                     {selectedCity.name}
@@ -1823,13 +1874,19 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
                     {Number(selectedCity.stationCount || 0)}{" "}
                     {screenCopy.cityStationsLabel}
                   </Text>
+                ) : lockToCurrentCity ? (
+                  <Text style={styles.notice}>
+                    {hasLocationPermission
+                      ? t("currentCityLoading", { defaultValue: "Detecting your current city..." })
+                      : t("homeScreen.location.denied")}
+                  </Text>
                 ) : null}
-                {cityOptionsLoading && !cityOptions.length ? (
+                {!lockToCurrentCity && cityOptionsLoading && !cityOptions.length ? (
                   <Text style={styles.notice}>
                     {t("cityOptionsLoading", { defaultValue: "Loading available cities..." })}
                   </Text>
                 ) : null}
-                {cityOptions.length ? (
+                {!lockToCurrentCity && cityOptions.length ? (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
                     {cityOptions.map((city) => {
                       const isActive = String(selectedCity?.id || "") === String(city?.id || "");
