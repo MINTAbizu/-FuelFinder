@@ -401,6 +401,142 @@ async function resolveDirectoryLocationFromGeocode(geo) {
   };
 }
 
+async function findRegionByLooseName(name) {
+  const slug = normalizeCitySearchSlug(name);
+  if (!slug) return null;
+  return Region.findOne({ slug })
+    .select("_id name slug code")
+    .lean();
+}
+
+async function findCityByLooseName(name, regionId = "") {
+  const slug = normalizeCitySearchSlug(name);
+  if (!slug) return null;
+
+  const query = { slug };
+  if (regionId) {
+    query.regionId = regionId;
+  }
+
+  const matches = await City.find(query)
+    .select("_id name slug code regionId")
+    .sort({ name: 1 })
+    .limit(2)
+    .lean();
+
+  return matches.length === 1 ? matches[0] : null;
+}
+
+async function resolveDirectoryLocationFromStationSeed(station = {}) {
+  const regionName = normalizePlaceName(station?.regionName);
+  const cityName = normalizePlaceName(station?.cityName);
+  const woredaName = normalizePlaceName(station?.woredaName || station?.woreda);
+
+  if (regionName && cityName) {
+    return resolveDirectoryLocationFromGeocode({ regionName, cityName, woredaName });
+  }
+
+  if (cityName) {
+    const matchedCity = await findCityByLooseName(cityName);
+    if (matchedCity) {
+      let woredaId = null;
+      let resolvedWoredaName = woredaName;
+      const matchedRegionId = String(matchedCity.regionId || "");
+
+      if (woredaName && matchedRegionId) {
+        const woreda = await ensureWoredaByName({
+          name: woredaName,
+          regionId: matchedRegionId,
+          cityId: matchedCity._id,
+          category: inferWoredaCategory(woredaName)
+        });
+        woredaId = String(woreda._id);
+        resolvedWoredaName = woreda.name;
+      }
+
+      return {
+        regionId: matchedRegionId || null,
+        cityId: String(matchedCity._id),
+        woredaId,
+        woredaName: resolvedWoredaName
+      };
+    }
+  }
+
+  if (regionName) {
+    const matchedRegion = await findRegionByLooseName(regionName);
+    if (matchedRegion) {
+      return {
+        regionId: String(matchedRegion._id),
+        cityId: null,
+        woredaId: null,
+        woredaName
+      };
+    }
+  }
+
+  return {
+    regionId: null,
+    cityId: null,
+    woredaId: null,
+    woredaName
+  };
+}
+
+async function resolveLiveStationSyncContext(station = {}, lat, lon) {
+  const fallbackAddress = asLocationText(station?.address);
+  let nextAddress = fallbackAddress;
+  let nextSubcity = normalizePlaceName(station?.subcity);
+  let nextWoreda = normalizePlaceName(station?.woreda);
+  let location = await resolveDirectoryLocationFromStationSeed({
+    regionName: station?.regionName,
+    cityName: station?.cityName,
+    woredaName: nextWoreda
+  });
+
+  const needsGeocode =
+    Number.isFinite(lat) &&
+    Number.isFinite(lon) &&
+    (!location?.cityId || !location?.regionId || isPlaceholderAddress(nextAddress) || !nextSubcity || !nextWoreda);
+
+  if (needsGeocode) {
+    try {
+      const geo = await reverseGeocodeStationLocation(lat, lon);
+      if (geo && (!geo.countryCode || geo.countryCode === "ET")) {
+        const geocodedLocation = await resolveDirectoryLocationFromGeocode(geo);
+        location = {
+          regionId: location?.regionId || geocodedLocation.regionId,
+          cityId: location?.cityId || geocodedLocation.cityId,
+          woredaId: location?.woredaId || geocodedLocation.woredaId,
+          woredaName: location?.woredaName || geocodedLocation.woredaName
+        };
+
+        if (isPlaceholderAddress(nextAddress)) {
+          nextAddress = asLocationText(geo.address) || nextAddress;
+        }
+        if (!nextSubcity) {
+          nextSubcity = normalizePlaceName(geo.subcity);
+        }
+        if (!nextWoreda) {
+          nextWoreda = normalizePlaceName(geocodedLocation.woredaName || geo.woredaName);
+        }
+      }
+    } catch (_error) {
+      // Keep live station sync resilient even if reverse geocoding is unavailable.
+    }
+  }
+
+  return {
+    address: nextAddress || "Address not listed",
+    subcity: nextSubcity,
+    woreda: nextWoreda || normalizePlaceName(location?.woredaName),
+    regionId: location?.regionId || null,
+    cityId: location?.cityId || null,
+    woredaId: location?.woredaId || null,
+    locationCategories: normalizeLocationCategories(station?.locationCategories)
+  };
+}
+
 function buildStationAddressPatchFromGeocode(station, geo, location = {}) {
   const patch = {};
   const nextAddress = asLocationText(geo?.address);
@@ -616,21 +752,24 @@ function buildClientStationPayload(doc, fallback = {}, directory = {}) {
   };
 }
 
-function buildStationInsertPayload(station, sourceId, lat, lon) {
-  const incomingAddress = String(station?.address || "").trim();
-  const nextLocationCategories = Array.isArray(station?.locationCategories)
-    ? station.locationCategories
-    : [];
+function buildStationInsertPayload(station, sourceId, lat, lon, context = {}) {
+  const incomingAddress = String(context?.address || station?.address || "").trim();
+  const nextLocationCategories = Array.isArray(context?.locationCategories)
+    ? context.locationCategories
+    : (Array.isArray(station?.locationCategories) ? station.locationCategories : []);
 
   return {
     name: String(station?.name || "Fuel Station").trim(),
     address: incomingAddress || "Address not listed",
     contact: String(station?.contact || "").trim(),
-    subcity: String(station?.subcity || "").trim(),
-    woreda: String(station?.woreda || "").trim(),
+    regionId: context?.regionId || null,
+    cityId: context?.cityId || null,
+    woredaId: context?.woredaId || null,
+    subcity: String(context?.subcity || station?.subcity || "").trim(),
+    woreda: String(context?.woreda || station?.woreda || "").trim(),
     landmark: String(station?.landmark || "").trim(),
     locationCategories: nextLocationCategories,
-    stationType: "fuel",
+    stationType: normalizeStationType(station?.stationType) || "fuel",
     externalSource: "osm",
     externalSourceId: sourceId,
     fuelStatus: "partial",
@@ -639,17 +778,17 @@ function buildStationInsertPayload(station, sourceId, lat, lon) {
   };
 }
 
-function buildStationSyncPatch(doc, station, sourceId, lat, lon) {
+function buildStationSyncPatch(doc, station, sourceId, lat, lon, context = {}) {
   const patch = {};
   const nextName = String(station?.name || doc?.name || "Fuel Station").trim();
   const nextContact = String(station?.contact || doc?.contact || "").trim();
-  const incomingAddress = String(station?.address || "").trim();
-  const nextSubcity = String(station?.subcity || "").trim();
-  const nextWoreda = String(station?.woreda || "").trim();
+  const incomingAddress = String(context?.address || station?.address || "").trim();
+  const nextSubcity = String(context?.subcity || station?.subcity || "").trim();
+  const nextWoreda = String(context?.woreda || station?.woreda || "").trim();
   const nextLandmark = String(station?.landmark || "").trim();
-  const nextLocationCategories = Array.isArray(station?.locationCategories)
-    ? station.locationCategories
-    : [];
+  const nextLocationCategories = Array.isArray(context?.locationCategories)
+    ? context.locationCategories
+    : (Array.isArray(station?.locationCategories) ? station.locationCategories : []);
   const currentAddress = String(doc?.address || "").trim();
   const currentCoords = Array.isArray(doc?.location?.coordinates) ? doc.location.coordinates : [];
   const currentLon = Number(currentCoords[0]);
@@ -677,6 +816,18 @@ function buildStationSyncPatch(doc, station, sourceId, lat, lon) {
 
   if (nextContact !== String(doc?.contact || "").trim()) {
     patch.contact = nextContact;
+  }
+
+  if (context?.regionId && String(doc?.regionId || "") !== context.regionId) {
+    patch.regionId = context.regionId;
+  }
+
+  if (context?.cityId && String(doc?.cityId || "") !== context.cityId) {
+    patch.cityId = context.cityId;
+  }
+
+  if (context?.woredaId && String(doc?.woredaId || "") !== context.woredaId) {
+    patch.woredaId = context.woredaId;
   }
 
   if (nextSubcity && nextSubcity !== String(doc?.subcity || "").trim()) {
@@ -741,6 +892,28 @@ async function attachBackendStationIds(stations) {
   const docsBySourceId = new Map(
     existingDocs.map((doc) => [String(doc?.externalSourceId || "").trim(), doc])
   );
+  const stationContexts = new Map();
+
+  for (const { station, sourceId, lat, lon } of normalizedStations) {
+    if (!sourceId || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    if (stationContexts.has(sourceId)) continue;
+
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const context = await resolveLiveStationSyncContext(station, lat, lon);
+      stationContexts.set(sourceId, context);
+    } catch (_error) {
+      stationContexts.set(sourceId, {
+        address: asLocationText(station?.address) || "Address not listed",
+        subcity: normalizePlaceName(station?.subcity),
+        woreda: normalizePlaceName(station?.woreda),
+        regionId: null,
+        cityId: null,
+        woredaId: null,
+        locationCategories: normalizeLocationCategories(station?.locationCategories)
+      });
+    }
+  }
 
   const createOperations = [];
   const missingSourceIds = [];
@@ -753,6 +926,7 @@ async function attachBackendStationIds(stations) {
 
     missingSourceIdSet.add(sourceId);
     missingSourceIds.push(sourceId);
+    const context = stationContexts.get(sourceId) || {};
     createOperations.push({
       updateOne: {
         filter: {
@@ -760,7 +934,7 @@ async function attachBackendStationIds(stations) {
           externalSourceId: sourceId
         },
         update: {
-          $setOnInsert: buildStationInsertPayload(station, sourceId, lat, lon)
+          $setOnInsert: buildStationInsertPayload(station, sourceId, lat, lon, context)
         },
         upsert: true
       }
@@ -794,8 +968,9 @@ async function attachBackendStationIds(stations) {
 
     const doc = docsBySourceId.get(sourceId);
     if (!doc) return;
+    const context = stationContexts.get(sourceId) || {};
 
-    const patch = buildStationSyncPatch(doc, station, sourceId, lat, lon);
+    const patch = buildStationSyncPatch(doc, station, sourceId, lat, lon, context);
     if (!patch) return;
 
     updateOperations.push({
@@ -814,11 +989,13 @@ async function attachBackendStationIds(stations) {
 
   return normalizedStations.map(({ station, sourceId, lat, lon }) => {
     const doc = docsBySourceId.get(sourceId);
+    const context = stationContexts.get(sourceId) || {};
     if (!doc) {
       return buildClientStationPayload(
         {},
         {
           ...station,
+          ...context,
           latitude: Number.isFinite(lat) ? lat : station?.latitude,
           longitude: Number.isFinite(lon) ? lon : station?.longitude
         }
@@ -827,6 +1004,7 @@ async function attachBackendStationIds(stations) {
 
     return buildClientStationPayload(doc, {
       ...station,
+      ...context,
       latitude: lat,
       longitude: lon
     });
@@ -1238,3 +1416,5 @@ exports.getDrivingRoute = async (req, res) => {
     return res.status(500).json({ message: "Failed to load driving route." });
   }
 };
+
+exports._attachBackendStationIds = attachBackendStationIds;
