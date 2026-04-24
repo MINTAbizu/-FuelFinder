@@ -226,6 +226,28 @@ export default function StationDetails({ navigation, route }) {
     [t.fuelDiesel, t.fuelGasoline, t.fuelOther]
   );
   const { station } = route.params || {};
+  const buildReservationCooldownMessage = useCallback(
+    (payload) => {
+      const days = Number(payload?.reservationCooldownDays || 0);
+      const nextEligibleAt = formatDateTime(payload?.nextEligibleAt);
+      if (days > 0 && nextEligibleAt !== "-") {
+        return tr("stationDetails.reservationCooldownBlockedMessage", {
+          defaultValue:
+            "This station lets each user pay once every {{days}} day(s). You can pay again on {{when}}.",
+          days,
+          when: nextEligibleAt,
+        });
+      }
+      if (days > 0) {
+        return tr("stationDetails.reservationCooldownBlockedDaysOnly", {
+          defaultValue: "This station lets each user pay once every {{days}} day(s).",
+          days,
+        });
+      }
+      return String(payload?.message || t.failedStartPayment);
+    },
+    [t.failedStartPayment, tr]
+  );
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -411,6 +433,9 @@ export default function StationDetails({ navigation, route }) {
       }),
       fuelStatus,
       fuelInventory,
+      reservationCooldownDays: Number(
+        stationMeta?.reservationCooldownDays ?? station?.reservationCooldownDays ?? 0
+      ),
       queueLength: queue,
       waitTime: getWaitEstimate(queue),
       reports: Array.isArray(station?.reports) ? station.reports : [],
@@ -821,13 +846,20 @@ export default function StationDetails({ navigation, route }) {
       await pollReservation(nextReservationId, true);
     } catch (error) {
       logReservationError("reserveAndInitiateChapa", error);
-      setPaymentPhase("failed");
-      const detail = error?.response?.data?.detail;
-      setMessage(detail || error?.response?.data?.message || error?.message || t.failedStartPayment);
+      const payload = error?.response?.data || {};
+      if (payload?.reason === "reservation_cooldown_active") {
+        setPaymentPhase("restricted");
+        setMessage(buildReservationCooldownMessage(payload));
+      } else {
+        setPaymentPhase("failed");
+        const detail = payload?.detail;
+        setMessage(detail || payload?.message || error?.message || t.failedStartPayment);
+      }
     } finally {
       setLoading(false);
     }
   }, [
+    buildReservationCooldownMessage,
     fuelType,
     isFuelEmpty,
     isFuelLimited,
@@ -854,13 +886,26 @@ export default function StationDetails({ navigation, route }) {
           await verifyChapaPayment(txRef);
         } catch (verifyError) {
           logReservationError("verifyChapaPayment", verifyError);
+          const payload = verifyError?.response?.data || {};
+          if (payload?.reason === "reservation_cooldown_active") {
+            setPaymentPhase("restricted");
+            setMessage(buildReservationCooldownMessage(payload));
+            return;
+          }
         }
       }
       await pollReservation(reservationId, true);
     } finally {
       setLoading(false);
     }
-  }, [pollReservation, reservationId, t.missingReservationBody, t.missingReservationTitle, txRef]);
+  }, [
+    buildReservationCooldownMessage,
+    pollReservation,
+    reservationId,
+    t.missingReservationBody,
+    t.missingReservationTitle,
+    txRef,
+  ]);
 
   const leaveMyQueue = useCallback(async () => {
     const ticketId = myTicket?.ticketId;
@@ -1130,6 +1175,15 @@ export default function StationDetails({ navigation, route }) {
             <Text style={styles.noticeText}>{t.paymentDetailsMissing}</Text>
           )}
         </View>
+        {detail.reservationCooldownDays > 0 ? (
+          <Text style={styles.noticeText}>
+            {tr("stationDetails.reservationCooldownNotice", {
+              defaultValue:
+                "Each user can pay once every {{days}} day(s) at this station.",
+              days: detail.reservationCooldownDays,
+            })}
+          </Text>
+        ) : null}
 
         <View style={styles.buttonGrid}>
           <Pressable

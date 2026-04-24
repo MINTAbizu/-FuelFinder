@@ -5740,6 +5740,23 @@ export default function Dashboard() {
                           />
                         </label>
                         <label>
+                          Repeat reservation wait (days)
+                          <input
+                            type="number"
+                            step="1"
+                            min="0"
+                            value={createStationForm.reservationCooldownDays}
+                            onChange={(event) =>
+                              setCreateStationForm((prev) => ({
+                                ...prev,
+                                reservationCooldownDays: event.target.value
+                              }))
+                            }
+                            placeholder="0"
+                          />
+                          <small>0 means no wait. Paid users must wait this many days before paying again.</small>
+                        </label>
+                        <label>
                           Station status
                           <select
                             value={createStationForm.isActive ? "open" : "inactive"}
@@ -6110,6 +6127,23 @@ export default function Dashboard() {
                               placeholder="90.00"
                             />
                           </label>
+                          <label>
+                            Repeat reservation wait (days)
+                            <input
+                              type="number"
+                              step="1"
+                              min="0"
+                              value={stationForm.reservationCooldownDays}
+                              onChange={(event) => {
+                                setStationFormDirty(true);
+                                setStationForm((prev) =>
+                                  prev ? { ...prev, reservationCooldownDays: event.target.value } : prev
+                                );
+                              }}
+                              placeholder="0"
+                            />
+                            <small>0 means no wait. Paid users must wait this many days before paying again.</small>
+                          </label>
                           {canEditChapaSubaccount ? (
                             <label>
                               Chapa subaccount ID
@@ -6247,6 +6281,12 @@ export default function Dashboard() {
                       <div>
                         <strong>Chapa subaccount ID</strong>
                         <span>{station?.chapaSubaccountId || "Not set"}</span>
+                      </div>
+                    </div>
+                    <div className="list-item">
+                      <div>
+                        <strong>Repeat reservation wait</strong>
+                        <span>{formatReservationCooldownLabel(station?.reservationCooldownDays)}</span>
                       </div>
                     </div>
                     <div className="list-item">
