@@ -13,6 +13,10 @@ const {
   verifyTelebirrWebhookSignature
 } = require("../services/telebirr");
 const {
+  buildReservationCooldownPayload,
+  getReservationCooldownStatus
+} = require("../services/reservationCooldownService");
+const {
   getAssignedStationIds,
   hasAssignedStationAccess,
   isAssignedStationOnlyRole
@@ -512,6 +516,24 @@ async function activatePaidTicket(ticket, paymentReference, paymentSessionId) {
     return ticket;
   }
 
+  const station = await Station.findById(ticket.stationId)
+    .select("_id name reservationCooldownDays")
+    .lean();
+  if (station) {
+    const cooldown = await getReservationCooldownStatus({
+      userId: ticket.userId,
+      stationId: ticket.stationId,
+      reservationCooldownDays: station.reservationCooldownDays,
+      excludeReservationId: ticket._id
+    });
+    if (cooldown) {
+      const error = new Error("reservation_cooldown_active");
+      error.status = 409;
+      error.payload = buildReservationCooldownPayload(station, cooldown);
+      throw error;
+    }
+  }
+
   const consume = await consumeStationFuel(ticket.stationId, ticket.fuelType, ticket.requestedLiters);
   if (!consume.ok) {
     throw new Error("insufficient_fuel_stock");
@@ -563,7 +585,7 @@ exports.reserveQueueSlot = async (req, res) => {
     }
 
     const station = await Station.findById(stationId)
-      .select("_id isActive fuelPrices")
+      .select("_id name isActive fuelPrices reservationCooldownDays")
       .lean();
     if (!station) {
       return res.status(404).json({ message: "Station not found." });
@@ -593,6 +615,15 @@ exports.reserveQueueSlot = async (req, res) => {
         status: existing.status,
         position: existing.position
       });
+    }
+
+    const cooldown = await getReservationCooldownStatus({
+      userId,
+      stationId,
+      reservationCooldownDays: station.reservationCooldownDays
+    });
+    if (cooldown) {
+      return res.status(409).json(buildReservationCooldownPayload(station, cooldown));
     }
 
     const depositAmount = RESERVATION_BAND_DEPOSITS[requestedBand];
@@ -786,6 +817,11 @@ exports.confirmReservationPayment = async (req, res) => {
     try {
       await activatePaidTicket(ticket, paymentRef, ticket.paymentSessionId);
     } catch (err) {
+      if (String(err?.message || "") === "reservation_cooldown_active") {
+        return res.status(Number(err?.status || 409)).json(
+          err?.payload || { message: "Repeat reservation limit is active for this station." }
+        );
+      }
       if (String(err?.message || "") === "insufficient_fuel_stock") {
         return res.status(409).json({ message: "Not enough fuel left at this station for requested liters." });
       }
@@ -846,6 +882,23 @@ exports.startTelebirrCheckout = async (req, res) => {
       ticket.status = "expired";
       await ticket.save();
       return res.status(410).json({ message: "Reservation payment window expired." });
+    }
+
+    const station = await Station.findById(ticket.stationId)
+      .select("_id name reservationCooldownDays")
+      .lean();
+    if (!station) {
+      return res.status(404).json({ message: "Station not found for this reservation." });
+    }
+
+    const cooldown = await getReservationCooldownStatus({
+      userId,
+      stationId: ticket.stationId,
+      reservationCooldownDays: station.reservationCooldownDays,
+      excludeReservationId: ticket._id
+    });
+    if (cooldown) {
+      return res.status(409).json(buildReservationCooldownPayload(station, cooldown));
     }
 
     const checkout = await createTelebirrCheckout({
@@ -936,6 +989,11 @@ exports.handleTelebirrWebhook = async (req, res) => {
       try {
         await activatePaidTicket(ticket, paymentReference, paymentSessionId);
       } catch (err) {
+        if (String(err?.message || "") === "reservation_cooldown_active") {
+          return res.status(Number(err?.status || 409)).json(
+            err?.payload || { ok: false, message: "Repeat reservation limit is active for this station." }
+          );
+        }
         if (String(err?.message || "") === "insufficient_fuel_stock") {
           return res.status(409).json({ ok: false, message: "Insufficient station fuel stock." });
         }

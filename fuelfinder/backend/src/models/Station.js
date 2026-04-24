@@ -49,6 +49,7 @@ const stationSchema = new mongoose.Schema(
       instructions: { type: String, trim: true, default: "" }
     },
     chapaSubaccountId: { type: String, trim: true, default: "" },
+    reservationCooldownDays: { type: Number, default: 0, min: 0 },
     isActive: { type: Boolean, default: true },
     location: {
       type: {

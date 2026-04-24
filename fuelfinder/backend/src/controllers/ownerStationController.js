@@ -15,6 +15,9 @@ const {
   normalizeStationType
 } = require("../utils/stationType");
 const {
+  normalizeReservationCooldownDays
+} = require("../utils/stationReservationPolicy");
+const {
   getAssignedStationIds,
   isAssignedStationOnlyRole
 } = require("../utils/stationScope");
@@ -70,6 +73,7 @@ function buildStationResponse(station) {
     paymentDetails: normalizePaymentDetails(station.paymentDetails),
     ...buildFuelPricesResponse(station.fuelPrices),
     chapaSubaccountId: station.chapaSubaccountId || "",
+    reservationCooldownDays: Number(station.reservationCooldownDays || 0),
     isActive: Boolean(station.isActive),
     organizationId: station.organizationId ? String(station.organizationId) : null,
     regionId: station.regionId ? String(station.regionId) : null,
@@ -232,6 +236,11 @@ exports.updateMyStation = async (req, res) => {
     if (req.body.isActive !== undefined) {
       station.isActive = Boolean(req.body.isActive);
     }
+    if (req.body.reservationCooldownDays !== undefined) {
+      station.reservationCooldownDays = normalizeReservationCooldownDays(
+        req.body.reservationCooldownDays
+      );
+    }
 
     await station.save();
 
@@ -240,6 +249,9 @@ exports.updateMyStation = async (req, res) => {
       station: buildStationResponse(station)
     });
   } catch (_error) {
+    if (_error instanceof Error && _error.message.includes("reservationCooldownDays")) {
+      return res.status(400).json({ message: _error.message });
+    }
     return res.status(500).json({ message: "Failed to update station." });
   }
 };

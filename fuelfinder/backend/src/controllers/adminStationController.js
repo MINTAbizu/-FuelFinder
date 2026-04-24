@@ -18,6 +18,9 @@ const {
   getStationTypeForResponse,
   normalizeStationType
 } = require("../utils/stationType");
+const {
+  normalizeReservationCooldownDays
+} = require("../utils/stationReservationPolicy");
 
 const STATION_POPULATE = [
   { path: "regionId", select: "name slug code category countryCode isActive" },
@@ -182,6 +185,7 @@ function buildStationResponse(station) {
     paymentDetails: normalizePaymentDetails(station.paymentDetails),
     ...buildFuelPricesResponse(station.fuelPrices),
     chapaSubaccountId: station.chapaSubaccountId || "",
+    reservationCooldownDays: Number(station.reservationCooldownDays || 0),
     isActive: Boolean(station.isActive),
     organizationId: station.organizationId ? String(station.organizationId) : null,
     regionId: region ? region.id : extractId(station.regionId),
@@ -369,6 +373,9 @@ exports.importLiveStation = async (req, res) => {
     const locationCategories = normalizeLocationCategories(req.body.locationCategories);
     const paymentDetails = pickPaymentDetailsPayload(req.body);
     const fuelPrices = pickFuelPricesPayload(req.body);
+    const reservationCooldownDays = req.body.reservationCooldownDays !== undefined
+      ? normalizeReservationCooldownDays(req.body.reservationCooldownDays)
+      : null;
     let organizationId = asObjectIdOrNull(req.body.organizationId, "organizationId");
     const requestedRegionId = asObjectIdOrNull(req.body.regionId, "regionId");
     const requestedCityId = asObjectIdOrNull(req.body.cityId, "cityId");
@@ -462,6 +469,9 @@ exports.importLiveStation = async (req, res) => {
       if ((!station.paymentDetails || !Object.values(station.paymentDetails || {}).some(Boolean)) && paymentDetails) {
         station.paymentDetails = normalizePaymentDetails(paymentDetails);
       }
+      if (reservationCooldownDays !== null) {
+        station.reservationCooldownDays = reservationCooldownDays;
+      }
 
       await station.save();
       const stationDoc = await loadStationForResponse(station._id);
@@ -478,6 +488,7 @@ exports.importLiveStation = async (req, res) => {
       stationType,
       ...(fuelPrices ? { fuelPrices: normalizeFuelPrices(fuelPrices) } : {}),
       ...(paymentDetails ? { paymentDetails: normalizePaymentDetails(paymentDetails) } : {}),
+      ...(reservationCooldownDays !== null ? { reservationCooldownDays } : {}),
       fuelStatus,
       isActive: req.body.isActive !== undefined ? Boolean(req.body.isActive) : true,
       organizationId,
@@ -516,6 +527,9 @@ exports.importLiveStation = async (req, res) => {
     if (err instanceof Error && err.message.includes("does not belong")) {
       return res.status(400).json({ message: err.message });
     }
+    if (err instanceof Error && err.message.includes("reservationCooldownDays")) {
+      return res.status(400).json({ message: err.message });
+    }
     if (err?.code === 11000) {
       return res.status(409).json({ message: "This live station is already saved in the station directory." });
     }
@@ -534,6 +548,9 @@ exports.createStation = async (req, res) => {
     const longitude = asNumber(req.body.longitude, "longitude");
     const paymentDetails = pickPaymentDetailsPayload(req.body);
     const fuelPrices = pickFuelPricesPayload(req.body);
+    const reservationCooldownDays = normalizeReservationCooldownDays(
+      req.body.reservationCooldownDays
+    );
     let organizationId = asObjectIdOrNull(req.body.organizationId, "organizationId");
     const requestedRegionId = asObjectIdOrNull(req.body.regionId, "regionId");
     const requestedCityId = asObjectIdOrNull(req.body.cityId, "cityId");
@@ -581,6 +598,7 @@ exports.createStation = async (req, res) => {
       ...(fuelPrices ? { fuelPrices: normalizeFuelPrices(fuelPrices) } : {}),
       ...(paymentDetails ? { paymentDetails: normalizePaymentDetails(paymentDetails) } : {}),
       chapaSubaccountId: asText(req.body.chapaSubaccountId),
+      reservationCooldownDays,
       fuelStatus,
       isActive: req.body.isActive !== undefined ? Boolean(req.body.isActive) : true,
       organizationId,
@@ -612,6 +630,9 @@ exports.createStation = async (req, res) => {
       return res.status(400).json({ message: err.message });
     }
     if (err instanceof Error && err.message.includes("does not belong")) {
+      return res.status(400).json({ message: err.message });
+    }
+    if (err instanceof Error && err.message.includes("reservationCooldownDays")) {
       return res.status(400).json({ message: err.message });
     }
     return res.status(500).json({ message: "Failed to create station." });
@@ -742,6 +763,11 @@ exports.updateStation = async (req, res) => {
     if (req.body.isActive !== undefined) {
       station.isActive = Boolean(req.body.isActive);
     }
+    if (req.body.reservationCooldownDays !== undefined) {
+      station.reservationCooldownDays = normalizeReservationCooldownDays(
+        req.body.reservationCooldownDays
+      );
+    }
     if (req.body.latitude !== undefined || req.body.longitude !== undefined) {
       const currentCoords = Array.isArray(station.location?.coordinates)
         ? station.location.coordinates
@@ -779,6 +805,9 @@ exports.updateStation = async (req, res) => {
       return res.status(400).json({ message: err.message });
     }
     if (err instanceof Error && err.message.includes("does not belong")) {
+      return res.status(400).json({ message: err.message });
+    }
+    if (err instanceof Error && err.message.includes("reservationCooldownDays")) {
       return res.status(400).json({ message: err.message });
     }
     return res.status(500).json({ message: "Failed to update station." });

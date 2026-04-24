@@ -25,7 +25,7 @@ const {
 } = require("../utils/locationDirectory");
 
 const STATION_SYNC_SELECT =
-  "_id name address contact stationType externalSource externalSourceId fuelStatus fuelInventory fuelPrices paymentDetails isActive location regionId cityId woredaId subcity woreda landmark locationCategories";
+  "_id name address contact stationType externalSource externalSourceId fuelStatus fuelInventory fuelPrices paymentDetails reservationCooldownDays isActive location regionId cityId woredaId subcity woreda landmark locationCategories";
 const NEARBY_RESPONSE_CACHE_TTL_MS = 1000 * 45;
 const MAX_NEARBY_RESPONSE_CACHE_ENTRIES = 120;
 const DEFAULT_NEARBY_RADIUS_METERS = 12000;
@@ -732,6 +732,9 @@ function buildClientStationPayload(doc, fallback = {}, directory = {}) {
     },
     supportedFuels: deriveSupportedFuels(doc, fallback),
     paymentDetails: normalizePaymentDetails(doc?.paymentDetails || fallback?.paymentDetails),
+    reservationCooldownDays: Number(
+      doc?.reservationCooldownDays ?? fallback?.reservationCooldownDays ?? 0
+    ),
     ...publicFuelPrices,
     regionId: doc?.regionId ? String(doc.regionId) : null,
     region: buildRegionDirectoryPayload(regionRecord),
