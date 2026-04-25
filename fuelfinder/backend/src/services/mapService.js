@@ -1,6 +1,8 @@
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter"
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://lz4.overpass-api.de/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter"
 ];
 
 const ROUTE_ENDPOINTS = [
@@ -23,6 +25,11 @@ const DEFAULT_GEOCODER_USER_AGENT = String(
     "fuelfinder-map-service/1.0 (contact: admin@fuelfinder.local)"
 ).trim();
 const DEFAULT_GEOCODER_EMAIL = String(process.env.GEOCODER_EMAIL || "").trim();
+const DEFAULT_OVERPASS_USER_AGENT = String(
+  process.env.OVERPASS_USER_AGENT ||
+    process.env.GEOCODER_USER_AGENT ||
+    "fuelfinder-overpass/1.0 (contact: admin@fuelfinder.local)"
+).trim();
 
 const nearbyStationsCache = new Map();
 const routeCache = new Map();
@@ -55,6 +62,10 @@ function setCacheEntry(cache, key, value, ttlMs) {
   }
 
   return value;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildNearbyCacheKey(lat, lon, radiusMeters) {
@@ -356,10 +367,24 @@ out center tags;
       try {
         const response = await fetch(endpoint, {
           method: "POST",
-          headers: { "Content-Type": "text/plain" },
+          headers: {
+            "Content-Type": "text/plain",
+            Accept: "application/json",
+            "User-Agent": DEFAULT_OVERPASS_USER_AGENT
+          },
           body: query
         });
-        if (!response.ok) throw new Error(`Overpass request failed: ${response.status}`);
+        if (!response.ok) {
+          if (response.status === 429) {
+            const retryAfterSeconds = Number(response.headers.get("retry-after") || 0);
+            if (retryAfterSeconds > 0) {
+              await sleep(Math.min(retryAfterSeconds, 5) * 1000);
+            } else {
+              await sleep(1200);
+            }
+          }
+          throw new Error(`Overpass request failed: ${response.status}`);
+        }
 
         const data = await response.json();
         const elements = Array.isArray(data?.elements) ? data.elements : [];
