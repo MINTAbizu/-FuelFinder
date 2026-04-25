@@ -4,6 +4,7 @@ const {
   fetchDrivingRoute,
   reverseGeocodeStationLocation
 } = require("../services/mapService");
+const { syncBundledStationsForCity } = require("../services/curatedCityStationService");
 const Station = require("../models/Station");
 const QueueTicket = require("../models/QueueTicket");
 const City = require("../models/City");
@@ -1209,7 +1210,9 @@ async function loadCityDirectoryPayloadById(cityId, stationType = "") {
   return buildCityDirectoryPayload(city, stats[0] || {}, region);
 }
 
-async function resolveCurrentDirectoryCity(lat, lon, stationType = "") {
+async function resolveCurrentDirectoryCity(lat, lon, stationType = "", options = {}) {
+  const preferLive = options?.preferLive === true;
+  const radius = normalizeNearbyRadius(options?.radius);
   let matchedCity = null;
   let source = "";
 
@@ -1237,7 +1240,13 @@ async function resolveCurrentDirectoryCity(lat, lon, stationType = "") {
 
   if (!matchedCity?._id) {
     try {
-      const nearbyStations = await loadNearbyStations(lat, lon, DEFAULT_NEARBY_RADIUS_METERS, stationType);
+      const nearbyStations = await loadNearbyStations(
+        lat,
+        lon,
+        radius,
+        stationType,
+        { preferLive }
+      );
       const rankedCities = new Map();
 
       (Array.isArray(nearbyStations) ? nearbyStations : []).forEach((station) => {
@@ -1343,6 +1352,51 @@ async function loadNearbyStations(lat, lon, radius, stationType = "", options = 
   return hydratedStations.length ? hydratedStations : bootstrappedStations;
 }
 
+async function loadCurrentCityStationsBundle(lat, lon, stationType = "", options = {}) {
+  const limit = normalizeDirectoryLimit(options?.limit, DEFAULT_DIRECTORY_STATION_LIMIT);
+  const radius = normalizeNearbyRadius(options?.radius);
+  const preferLive =
+    options?.preferLive === true && normalizeStationType(stationType) !== "electric";
+
+  if (preferLive) {
+    await loadNearbyStations(lat, lon, radius, stationType, { preferLive: true });
+  }
+
+  const resolved = await resolveCurrentDirectoryCity(lat, lon, stationType, {
+    preferLive,
+    radius
+  });
+  if (!resolved?.city?.id) {
+    return {
+      city: null,
+      source: resolved?.source || "",
+      stations: []
+    };
+  }
+
+  if (normalizeStationType(stationType) !== "electric") {
+    try {
+      await syncBundledStationsForCity(resolved.city);
+    } catch (_error) {
+      // Keep current-city station responses available even if bundled sync fails.
+    }
+  }
+
+  const refreshedCity = await loadCityDirectoryPayloadById(resolved.city.id, stationType);
+  const matchQuery = {
+    isActive: true,
+    cityId: new mongoose.Types.ObjectId(String(resolved.city.id))
+  };
+  applyStationTypeFilter(matchQuery, stationType);
+
+  const stations = await queryDirectoryStations(matchQuery, limit);
+  return {
+    city: refreshedCity || resolved.city,
+    source: resolved.source,
+    stations
+  };
+}
+
 exports.getNearbyFuelStations = async (req, res) => {
   try {
     const lat = parseNumber(req.query.lat);
@@ -1393,6 +1447,43 @@ exports.resolveCurrentCity = async (req, res) => {
     });
   } catch (_error) {
     return res.status(500).json({ message: "Failed to resolve the current city." });
+  }
+};
+
+exports.getCurrentCityStations = async (req, res) => {
+  try {
+    const lat = parseNumber(req.query.lat);
+    const lon = parseNumber(req.query.lon);
+    const radius = normalizeNearbyRadius(req.query.radius);
+    const limit = normalizeDirectoryLimit(req.query.limit, DEFAULT_DIRECTORY_STATION_LIMIT);
+    const stationTypeParam = req.query.stationType;
+    const stationType = normalizeStationType(stationTypeParam);
+    const preferLive = parseBooleanQuery(
+      req.query.preferLive,
+      normalizeStationType(stationType) !== "electric"
+    );
+
+    if (lat === null || lon === null) {
+      return res.status(400).json({ message: "lat and lon are required numeric query params." });
+    }
+    if (stationTypeParam !== undefined && stationTypeParam !== null && !stationType) {
+      return res.status(400).json({ message: "stationType must be one of: fuel, electric." });
+    }
+
+    const result = await loadCurrentCityStationsBundle(lat, lon, stationType, {
+      preferLive,
+      radius,
+      limit
+    });
+
+    return res.json({
+      city: result?.city || null,
+      source: result?.source || "",
+      stations: Array.isArray(result?.stations) ? result.stations : [],
+      total: Array.isArray(result?.stations) ? result.stations.length : 0
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to load current city stations." });
   }
 };
 
