@@ -1,0 +1,68 @@
+{
+  "stations": [
+    {
+      "name": "OILIBIYA - Asella",
+      "address": "St.Mary OILIBYA Gas Station",
+      "latitude": 7.9483645,
+      "longitude": 39.1354923,
+      "regionName": "Oromia",
+      "regionCategory": "regional_state",
+      "cityName": "Asella",
+      "subcity": "St.Mary",
+      "landmark": "St. Mary",
+      "locationCategories": ["fuel-station", "manual-curated", "asella-city"],
+      "fuelStatus": "empty",
+      "isActive": true,
+      "externalSource": "osm",
+      "externalSourceId": "node-4527754098"
+    },
+    {
+      "name": "TOTAL - Asella",
+      "address": "Menahriya Total Fuel Station",
+      "latitude": 7.9615449,
+      "longitude": 39.1324769,
+      "regionName": "Oromia",
+      "regionCategory": "regional_state",
+      "cityName": "Asella",
+      "subcity": "Menahriya",
+      "landmark": "Menahriya",
+      "locationCategories": ["fuel-station", "manual-curated", "asella-city"],
+      "fuelStatus": "full",
+      "isActive": true,
+      "externalSource": "osm",
+      "externalSourceId": "node-4527928605"
+    },
+    {
+      "name": "NOC - Asella",
+      "address": "Asella NOC Gas Station",
+      "latitude": 7.93685,
+      "longitude": 39.14725,
+      "regionName": "Oromia",
+      "regionCategory": "regional_state",
+      "cityName": "Asella",
+      "subcity": "Assasa Road",
+      "landmark": "Assasa Road",
+      "locationCategories": ["fuel-station", "manual-curated", "asella-city"],
+      "fuelStatus": "empty",
+      "isActive": true,
+      "externalSource": "manual-curated",
+      "externalSourceId": "asella-noc-manual-001"
+    },
+    {
+      "name": "JR - Assasa",
+      "address": "Assasa JFM Gas Station",
+      "latitude": 7.93575,
+      "longitude": 39.1491,
+      "regionName": "Oromia",
+      "regionCategory": "regional_state",
+      "cityName": "Asella",
+      "subcity": "Assasa Road",
+      "landmark": "Assasa Road",
+      "locationCategories": ["fuel-station", "manual-curated", "asella-city"],
+      "fuelStatus": "empty",
+      "isActive": true,
+      "externalSource": "manual-curated",
+      "externalSourceId": "asella-jr-assasa-manual-001"
+    }
+  ]
+}

@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "locations:seed": "node scripts/seed-ethiopia-locations.js",
     "stations:import": "node scripts/import-stations.js",
+    "stations:import-asella": "node scripts/import-stations.js --file=./examples/asella-curated-stations.import.json",
     "stations:export-osm": "node scripts/export-ethiopia-osm-stations.js",
     "telebirr:flow": "node scripts/telebirr-flow.js",
     "stations:merge": "node scripts/merge-stations.js",
