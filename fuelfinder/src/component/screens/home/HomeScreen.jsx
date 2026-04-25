@@ -252,7 +252,16 @@ function getStationTypeForClient(station) {
   return normalizeStationType(station?.stationType) || "fuel";
 }
 
-function buildNearbyStationsCacheKey(basePoint, radiusMeters = 12000, stationType = "") {
+function normalizeNearbySourceMode(value) {
+  return String(value || "").trim().toLowerCase() === "live-map" ? "live-map" : "standard";
+}
+
+function buildNearbyStationsCacheKey(
+  basePoint,
+  radiusMeters = 12000,
+  stationType = "",
+  sourceMode = "standard"
+) {
   const lat = Number(basePoint?.latitude);
   const lon = Number(basePoint?.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return "";
@@ -262,6 +271,7 @@ function buildNearbyStationsCacheKey(basePoint, radiusMeters = 12000, stationTyp
     lon.toFixed(3),
     Math.round(Number(radiusMeters) || 0),
     normalizeStationType(stationType) || "fuel",
+    normalizeNearbySourceMode(sourceMode),
   ].join(":");
 }
 
@@ -301,7 +311,7 @@ function setNearbyStationsInMemory(cacheKey, stations) {
 
 async function readCachedNearbyStations(
   stationType = "",
-  { maxAgeMs = HOME_STATIONS_CACHE_FRESH_TTL_MS } = {}
+  { maxAgeMs = HOME_STATIONS_CACHE_FRESH_TTL_MS, sourceMode = "standard" } = {}
 ) {
   try {
     const raw = await AsyncStorage.getItem(HOME_STATIONS_CACHE_KEY);
@@ -318,6 +328,9 @@ async function readCachedNearbyStations(
     if ((normalizeStationType(parsed.stationType) || "fuel") !== (normalizeStationType(stationType) || "fuel")) {
       return null;
     }
+    if (normalizeNearbySourceMode(parsed.sourceMode) !== normalizeNearbySourceMode(sourceMode)) {
+      return null;
+    }
     if (hasWeakStationAddresses(parsed.stations)) {
       return null;
     }
@@ -332,8 +345,14 @@ async function readCachedNearbyStations(
   }
 }
 
-async function saveCachedNearbyStations(basePoint, stations, radiusMeters = 12000, stationType = "") {
-  const cacheKey = buildNearbyStationsCacheKey(basePoint, radiusMeters, stationType);
+async function saveCachedNearbyStations(
+  basePoint,
+  stations,
+  radiusMeters = 12000,
+  stationType = "",
+  sourceMode = "standard"
+) {
+  const cacheKey = buildNearbyStationsCacheKey(basePoint, radiusMeters, stationType, sourceMode);
   if (!cacheKey || !Array.isArray(stations)) return;
 
   setNearbyStationsInMemory(cacheKey, stations);
@@ -350,6 +369,7 @@ async function saveCachedNearbyStations(basePoint, stations, radiusMeters = 1200
         },
         radiusMeters,
         stationType: normalizeStationType(stationType) || "fuel",
+        sourceMode: normalizeNearbySourceMode(sourceMode),
         stations,
       })
     );
@@ -388,13 +408,14 @@ function hasMovedFarEnoughForNearbyRefresh(previousPoint, nextPoint, radiusMeter
 async function fetchNearbyFuelStations(
   basePoint,
   radiusMeters = 12000,
-  { forceRefresh = false, stationType = "fuel" } = {}
+  { forceRefresh = false, stationType = "fuel", preferLive = false } = {}
 ) {
   const lat = Number(basePoint?.latitude);
   const lon = Number(basePoint?.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
 
-  const cacheKey = buildNearbyStationsCacheKey(basePoint, radiusMeters, stationType);
+  const sourceMode = preferLive ? "live-map" : "standard";
+  const cacheKey = buildNearbyStationsCacheKey(basePoint, radiusMeters, stationType, sourceMode);
   if (!forceRefresh) {
     const cachedStations = getNearbyStationsFromMemory(cacheKey);
     if (cachedStations) {
@@ -413,6 +434,7 @@ async function fetchNearbyFuelStations(
         lon,
         radius: radiusMeters,
         stationType: normalizeStationType(stationType) || "fuel",
+        preferLive: preferLive || undefined,
       }
     })
     .then(({ data }) => {
@@ -502,7 +524,7 @@ function buildNearbyRadiusPlan(radiusMeters = 12000, stationType = "fuel") {
 async function fetchNearbyFuelStationsWithRadiusFallback(
   basePoint,
   radiusMeters = 12000,
-  { forceRefresh = false, stationType = "fuel" } = {}
+  { forceRefresh = false, stationType = "fuel", preferLive = false } = {}
 ) {
   const searchRadii = buildNearbyRadiusPlan(radiusMeters, stationType);
   let mergedStations = [];
@@ -512,6 +534,7 @@ async function fetchNearbyFuelStationsWithRadiusFallback(
     const nextStations = await fetchNearbyFuelStations(basePoint, candidateRadius, {
       forceRefresh,
       stationType,
+      preferLive,
     });
     mergedStations = mergeNearbyStations(mergedStations, nextStations);
     lastRadius = candidateRadius;
@@ -782,9 +805,17 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     [homeConfig?.stationType, route?.params?.stationType]
   );
   const isElectricHome = preferredStationType === "electric";
-  const lockToCurrentCity = homeConfig?.lockToCurrentCity ?? !isElectricHome;
+  const useLiveMapBrowse = homeConfig?.useLiveMapBrowse ?? !isElectricHome;
+  const lockToCurrentCity =
+    homeConfig?.lockToCurrentCity ?? (isElectricHome ? false : !useLiveMapBrowse);
   const nearbyRadiusMeters = homeConfig?.nearbyRadiusMeters || (isElectricHome ? 250000 : 12000);
-  const defaultBrowseMode = homeConfig?.defaultBrowseMode || (isElectricHome ? "nationwide" : "city");
+  const defaultBrowseMode =
+    homeConfig?.defaultBrowseMode ||
+    (isElectricHome ? "nationwide" : (useLiveMapBrowse ? "nearby" : "city"));
+  const nearbySourceMode = useMemo(
+    () => (useLiveMapBrowse ? "live-map" : "standard"),
+    [useLiveMapBrowse]
+  );
   const showTypeFilter = homeConfig?.showTypeFilter ?? !isElectricHome;
   const browseModeOptions = useMemo(
     () =>
@@ -800,6 +831,13 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
               label: "Nearby chargers",
             },
           ]
+        : useLiveMapBrowse
+          ? [
+              {
+                id: "nearby",
+                label: t("browseLiveMapLabel", { defaultValue: "Live map" }),
+              },
+            ]
         : lockToCurrentCity
           ? [
               {
@@ -817,7 +855,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
               label: t("browseCityLabel", { defaultValue: "Browse by city" }),
             },
           ]),
-    [homeConfig?.browseModeOptions, isElectricHome, lockToCurrentCity, t]
+    [homeConfig?.browseModeOptions, isElectricHome, lockToCurrentCity, t, useLiveMapBrowse]
   );
   const supportsCityBrowse = browseModeOptions.some((option) => option.id === "city");
   const screenCopy = useMemo(
@@ -1175,7 +1213,9 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     }
 
     (async () => {
-      const cached = await readCachedNearbyStations(preferredStationType);
+      const cached = await readCachedNearbyStations(preferredStationType, {
+        sourceMode: nearbySourceMode,
+      });
       if (!active || !cached?.stations?.length) return;
 
       setStations((current) => (current.length ? current : cached.stations));
@@ -1192,7 +1232,8 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     return () => {
       active = false;
     };
-  }, [defaultBrowseMode, lockToCurrentCity, preferredStationType]);
+  }, [defaultBrowseMode, lockToCurrentCity, nearbySourceMode, preferredStationType]);
+
 
   useEffect(() => {
     void loadBrowseCities(deferredCityQuery);
@@ -1347,6 +1388,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     if (!basePoint) {
       const cached = await readCachedNearbyStations(preferredStationType, {
         maxAgeMs: HOME_STATIONS_CACHE_OFFLINE_TTL_MS,
+        sourceMode: nearbySourceMode,
       });
       if (cached?.stations?.length) {
         setStations(cached.stations);
@@ -1368,6 +1410,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
         await fetchNearbyFuelStationsWithRadiusFallback(basePoint, nearbyRadiusMeters, {
           forceRefresh,
           stationType: preferredStationType,
+          preferLive: useLiveMapBrowse,
         });
       lastNearbyFetchCenterRef.current = {
         latitude: Number(basePoint?.latitude || 0),
@@ -1375,10 +1418,17 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
       };
       setStations(next);
       setOfflineStationsNotice("");
-      void saveCachedNearbyStations(basePoint, next, resolvedRadiusMeters, preferredStationType);
+      void saveCachedNearbyStations(
+        basePoint,
+        next,
+        resolvedRadiusMeters,
+        preferredStationType,
+        nearbySourceMode
+      );
     } catch (error) {
       const cached = await readCachedNearbyStations(preferredStationType, {
         maxAgeMs: HOME_STATIONS_CACHE_OFFLINE_TTL_MS,
+        sourceMode: nearbySourceMode,
       });
       if (cached?.stations?.length) {
         setStations(cached.stations);
@@ -1401,7 +1451,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     } finally {
       setLoadingStations(false);
     }
-  }, [isElectricHome, location, nearbyRadiusMeters, preferredStationType, t]);
+  }, [isElectricHome, location, nearbyRadiusMeters, nearbySourceMode, preferredStationType, t, useLiveMapBrowse]);
 
   useFocusEffect(
     useCallback(() => {
