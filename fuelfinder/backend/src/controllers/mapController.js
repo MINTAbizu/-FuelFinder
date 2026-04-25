@@ -101,12 +101,13 @@ function normalizeNearbyRadius(value) {
   return Math.min(Math.round(parsed), MAX_NEARBY_RADIUS_METERS);
 }
 
-function buildNearbyResponseCacheKey(lat, lon, radius, stationType = "") {
+function buildNearbyResponseCacheKey(lat, lon, radius, stationType = "", preferLive = false) {
   return [
     Number(lat).toFixed(3),
     Number(lon).toFixed(3),
     Math.round(Number(radius) || 0),
-    normalizeStationType(stationType) || "all"
+    normalizeStationType(stationType) || "all",
+    preferLive ? "live" : "db"
   ].join(":");
 }
 
@@ -1299,7 +1300,8 @@ async function bootstrapNearbyStationsFromExternal(lat, lon, radius, stationType
   return attachBackendStationIds(stations);
 }
 
-async function loadNearbyStations(lat, lon, radius, stationType = "") {
+async function loadNearbyStations(lat, lon, radius, stationType = "", options = {}) {
+  const preferLive = options?.preferLive === true;
   const localStations = await queryNearbyStationsFromDatabase(
     lat,
     lon,
@@ -1307,6 +1309,25 @@ async function loadNearbyStations(lat, lon, radius, stationType = "") {
     MAX_NEARBY_RESULTS,
     stationType
   );
+
+  if (preferLive) {
+    const bootstrappedStations = await bootstrapNearbyStationsFromExternal(lat, lon, radius, stationType);
+    const hydratedStations = await queryNearbyStationsFromDatabase(
+      lat,
+      lon,
+      radius,
+      MAX_NEARBY_RESULTS,
+      stationType
+    );
+    if (hydratedStations.length) {
+      return hydratedStations;
+    }
+    if (bootstrappedStations.length) {
+      return bootstrappedStations;
+    }
+    return localStations;
+  }
+
   if (localStations.length) {
     return localStations;
   }
@@ -1327,6 +1348,7 @@ exports.getNearbyFuelStations = async (req, res) => {
     const lat = parseNumber(req.query.lat);
     const lon = parseNumber(req.query.lon);
     const radius = normalizeNearbyRadius(req.query.radius);
+    const preferLive = parseBooleanQuery(req.query.preferLive, false);
     const stationTypeParam = req.query.stationType;
     const stationType = normalizeStationType(stationTypeParam);
     if (lat === null || lon === null) {
@@ -1336,13 +1358,13 @@ exports.getNearbyFuelStations = async (req, res) => {
       return res.status(400).json({ message: "stationType must be one of: fuel, electric." });
     }
 
-    const cacheKey = buildNearbyResponseCacheKey(lat, lon, radius, stationType);
+    const cacheKey = buildNearbyResponseCacheKey(lat, lon, radius, stationType, preferLive);
     const cachedStations = getCachedNearbyResponse(cacheKey);
     if (cachedStations) {
       return res.json({ stations: cachedStations });
     }
 
-    const stations = await loadNearbyStations(lat, lon, radius, stationType);
+    const stations = await loadNearbyStations(lat, lon, radius, stationType, { preferLive });
     setCachedNearbyResponse(cacheKey, stations);
     return res.json({ stations });
   } catch (error) {
