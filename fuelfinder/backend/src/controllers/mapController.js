@@ -21,7 +21,8 @@ const {
   asLocationText,
   ensureRegionByName,
   ensureCityByName,
-  ensureWoredaByName
+  ensureWoredaByName,
+  normalizeLocationCategories
 } = require("../utils/locationDirectory");
 
 const STATION_SYNC_SELECT =
