@@ -805,7 +805,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     [homeConfig?.stationType, route?.params?.stationType]
   );
   const isElectricHome = preferredStationType === "electric";
-  const useLiveMapBrowse = homeConfig?.useLiveMapBrowse ?? !isElectricHome;
+  const useLiveMapBrowse = homeConfig?.useLiveMapBrowse ?? false;
   const lockToCurrentCity =
     homeConfig?.lockToCurrentCity ?? (isElectricHome ? false : !useLiveMapBrowse);
   const nearbyRadiusMeters = homeConfig?.nearbyRadiusMeters || (isElectricHome ? 250000 : 12000);
