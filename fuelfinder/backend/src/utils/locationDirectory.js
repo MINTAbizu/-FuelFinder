@@ -7,6 +7,20 @@ const slugify = require("./slugify");
 
 const REGION_CATEGORIES = new Set(["regional_state", "chartered_city"]);
 const WOREDA_CATEGORIES = new Set(["woreda", "subcity", "district", "special_district", "other"]);
+const REGION_NAME_ALIASES = new Map([
+  ["addis ababa city", "Addis Ababa"],
+  ["addis ababa city administration", "Addis Ababa"],
+  ["dire dawa city", "Dire Dawa"],
+  ["dire dawa city administration", "Dire Dawa"],
+  ["oromia region", "Oromia"],
+  ["amhara region", "Amhara"],
+  ["afar region", "Afar"],
+  ["harari region", "Harari"],
+  ["sidama region", "Sidama"],
+  ["somali region", "Somali"],
+  ["tigray region", "Tigray"],
+  ["gambella region", "Gambella"]
+]);
 const CITY_NAME_ALIASES = new Map([
   ["addis abeba", "Addis Ababa"],
   ["awassa", "Hawassa"],
@@ -18,6 +32,25 @@ const CITY_NAME_ALIASES = new Map([
 
 function asText(value) {
   return String(value || "").trim();
+}
+
+function normalizeRegionName(value) {
+  const text = asText(value);
+  if (!text) return "";
+
+  const directAlias = REGION_NAME_ALIASES.get(text.toLowerCase());
+  if (directAlias) {
+    return directAlias;
+  }
+
+  const stripped = text
+    .replace(/\bregional state\b$/i, "")
+    .replace(/\bregion\b$/i, "")
+    .replace(/\bstate\b$/i, "")
+    .trim()
+    .replace(/\s+/g, " ");
+
+  return REGION_NAME_ALIASES.get(stripped.toLowerCase()) || stripped;
 }
 
 function normalizeCityName(value) {
@@ -182,7 +215,7 @@ async function resolveStationLocation({ regionId, cityId, woredaId }) {
 }
 
 async function ensureRegionByName(name, options = {}) {
-  const normalizedName = asText(name);
+  const normalizedName = normalizeRegionName(name);
   if (!normalizedName) {
     throw new Error("Region name is required.");
   }
@@ -397,9 +430,10 @@ async function seedEthiopiaLocationDirectory(options = {}) {
   };
 
   for (const regionEntry of seedEntries) {
-    const slug = slugify(regionEntry.name);
+    const regionName = normalizeRegionName(regionEntry.name);
+    const slug = slugify(regionName);
     const nextRegion = {
-      name: asText(regionEntry.name),
+      name: regionName,
       slug,
       code: asText(regionEntry.code).toUpperCase(),
       category: normalizeRegionCategory(regionEntry.category),
@@ -564,6 +598,8 @@ module.exports = {
   asLocationText: asText,
   asLocationObjectIdOrNull: asObjectIdOrNull,
   normalizeLocationCategories,
+  normalizeRegionName,
+  normalizeCityName,
   normalizeRegionCategory,
   normalizeWoredaCategory,
   resolveStationLocation,
