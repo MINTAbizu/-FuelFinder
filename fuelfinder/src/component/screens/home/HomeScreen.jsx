@@ -41,6 +41,10 @@ const HOME_STATIONS_CACHE_FRESH_TTL_MS = 1000 * 60 * 10;
 const HOME_STATIONS_CACHE_OFFLINE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const HOME_STATIONS_MEMORY_TTL_MS = 1000 * 45;
 const HOME_MANAGER_FUEL_TTL_MS = 1000 * 15;
+const HOME_LAST_KNOWN_QUERY_MAX_AGE_MS = 1000 * 60 * 3;
+const HOME_LAST_KNOWN_CENTER_MAX_AGE_MS = 1000 * 60 * 15;
+const HOME_CURRENT_LOCATION_TIMEOUT_MS = 12000;
+const HOME_LOCATION_RETRY_TIMEOUT_MS = 7000;
 const LOCATION_REFRESH_THRESHOLD_DEGREES = 0.01;
 const FUEL_NEARBY_RADIUS_EXPANSION_STEPS = [25000, 50000];
 const AUTO_NEARBY_REFRESH_MIN_DISTANCE_METERS = 3000;
@@ -108,29 +112,125 @@ function findExactCityMatch(cities = [], candidate) {
   );
 }
 
+function normalizeCoordsSnapshot(coords) {
+  const latitude = Number(coords?.latitude);
+  const longitude = Number(coords?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  return {
+    latitude,
+    longitude,
+  };
+}
+
+function getPositionTimestampMs(position) {
+  const timestamp = Number(position?.timestamp || 0);
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0;
+}
+
+function isPositionFreshEnough(position, maxAgeMs = HOME_LAST_KNOWN_QUERY_MAX_AGE_MS) {
+  const timestamp = getPositionTimestampMs(position);
+  if (!timestamp) return false;
+  return Date.now() - timestamp <= maxAgeMs;
+}
+
+async function getCurrentPositionWithTimeout(options = {}, timeoutMs = HOME_CURRENT_LOCATION_TIMEOUT_MS) {
+  return Promise.race([
+    Location.getCurrentPositionAsync(options),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("Location request timed out.")), timeoutMs);
+    }),
+  ]);
+}
+
+async function getBestAvailableCurrentPosition() {
+  try {
+    return await getCurrentPositionWithTimeout(
+      { accuracy: Location.Accuracy.High },
+      HOME_CURRENT_LOCATION_TIMEOUT_MS
+    );
+  } catch (_error) {
+    return getCurrentPositionWithTimeout(
+      { accuracy: Location.Accuracy.Balanced },
+      HOME_LOCATION_RETRY_TIMEOUT_MS
+    );
+  }
+}
+
+async function resolveCurrentCityFromNearbyStations(coords, stationType = "fuel") {
+  const stations = await fetchNearbyFuelStations(coords, 12000, {
+    forceRefresh: true,
+    stationType,
+  });
+
+  const rankedCities = new Map();
+  (Array.isArray(stations) ? stations : []).forEach((station) => {
+    const cityId = String(station?.city?.id || station?.cityId || "").trim();
+    const cityName = String(station?.city?.name || "").trim();
+    const key = cityId || normalizeCityMatchText(cityName);
+    if (!key) return;
+
+    const current = rankedCities.get(key) || {
+      score: 0,
+      city: station?.city || null,
+      cityName,
+    };
+    current.score += 1;
+    if (!current.city && station?.city) {
+      current.city = station.city;
+    }
+    if (!current.cityName && cityName) {
+      current.cityName = cityName;
+    }
+    rankedCities.set(key, current);
+  });
+
+  const topMatch = Array.from(rankedCities.values()).sort((a, b) => b.score - a.score)[0] || null;
+  if (!topMatch) return null;
+  if (topMatch.city?.id) return topMatch.city;
+  if (!topMatch.cityName) return null;
+
+  const { cities } = await fetchBrowseCities({
+    q: topMatch.cityName,
+    limit: 8,
+    stationType,
+  });
+  const exactMatch = findExactCityMatch(cities, topMatch.cityName);
+  if (exactMatch) return exactMatch;
+  return cities.length === 1 ? cities[0] : null;
+}
+
 async function resolveCurrentCityFromLocation(coords, stationType = "fuel") {
   const latitude = Number(coords?.latitude);
   const longitude = Number(coords?.longitude);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
 
-  const places = await Location.reverseGeocodeAsync({
-    latitude,
-    longitude,
-  });
-  const candidateNames = collectCurrentCityCandidates(places);
-
-  for (const candidate of candidateNames) {
-    const { cities } = await fetchBrowseCities({
-      q: candidate,
-      limit: 8,
-      stationType,
+  try {
+    const places = await Location.reverseGeocodeAsync({
+      latitude,
+      longitude,
     });
-    const exactMatch = findExactCityMatch(cities, candidate);
-    if (exactMatch) return exactMatch;
-    if (cities.length === 1) return cities[0];
+    const candidateNames = collectCurrentCityCandidates(places);
+
+    for (const candidate of candidateNames) {
+      const { cities } = await fetchBrowseCities({
+        q: candidate,
+        limit: 8,
+        stationType,
+      });
+      const exactMatch = findExactCityMatch(cities, candidate);
+      if (exactMatch) return exactMatch;
+      if (cities.length === 1) return cities[0];
+    }
+  } catch (_error) {
+    // Fall back to nearby station inference below when device reverse geocoding is unavailable.
   }
 
-  return null;
+  try {
+    return await resolveCurrentCityFromNearbyStations({ latitude, longitude }, stationType);
+  } catch (_error) {
+    return null;
+  }
 }
 
 function getStationTypeForClient(station) {
@@ -1034,6 +1134,22 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     [loadCityStations]
   );
 
+  const applyLocationSnapshot = useCallback((coords, { updateLocation = true } = {}) => {
+    const nextCoords = normalizeCoordsSnapshot(coords);
+    if (!nextCoords) return false;
+
+    loadedRef.current = false;
+    setLocationError("");
+    if (updateLocation) {
+      setLocation(nextCoords);
+    }
+    setMapCenter({
+      latitude: nextCoords.latitude,
+      longitude: nextCoords.longitude,
+    });
+    return true;
+  }, []);
+
   useEffect(() => {
     let active = true;
 
@@ -1081,9 +1197,15 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
 
   useEffect(() => {
     let mounted = true;
+    let permissionGranted = false;
     (async () => {
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
+        let permission = await Location.getForegroundPermissionsAsync();
+        let status = permission.status;
+        if (status !== "granted") {
+          permission = await Location.requestForegroundPermissionsAsync();
+          status = permission.status;
+        }
         if (status !== "granted") {
           if (mounted) setHasLocationPermission(false);
           if (mounted) setBrowseMode(defaultBrowseMode);
@@ -1092,45 +1214,83 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
           return;
         }
 
+        permissionGranted = true;
         if (mounted) setHasLocationPermission(true);
-        const lastKnown = await Location.getLastKnownPositionAsync({
-          maxAge: 1000 * 60 * 15,
-          requiredAccuracy: 250,
-        });
+        if (mounted) setLocationError("");
+
+        let lastKnown = null;
+        try {
+          lastKnown = await Location.getLastKnownPositionAsync({
+            maxAge: HOME_LAST_KNOWN_CENTER_MAX_AGE_MS,
+            requiredAccuracy: 250,
+          });
+        } catch (_error) {
+          lastKnown = null;
+        }
+        const hasFreshLastKnown = isPositionFreshEnough(lastKnown, HOME_LAST_KNOWN_QUERY_MAX_AGE_MS);
         if (mounted && lastKnown?.coords) {
-          loadedRef.current = false;
-          setLocation(lastKnown.coords);
-          setMapCenter({
-            latitude: Number(lastKnown.coords.latitude || DEFAULT_REGION.latitude),
-            longitude: Number(lastKnown.coords.longitude || DEFAULT_REGION.longitude),
+          applyLocationSnapshot(lastKnown.coords, {
+            updateLocation: hasFreshLastKnown,
           });
         }
 
-        const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        if (mounted) {
-          const shouldRefreshFromCurrent =
-            !lastKnown?.coords ||
-            Math.abs(Number(lastKnown.coords.latitude || 0) - Number(current.coords.latitude || 0)) >
-              LOCATION_REFRESH_THRESHOLD_DEGREES ||
-            Math.abs(Number(lastKnown.coords.longitude || 0) - Number(current.coords.longitude || 0)) >
-              LOCATION_REFRESH_THRESHOLD_DEGREES;
-
-          if (shouldRefreshFromCurrent) {
-            loadedRef.current = false;
+        let servicesEnabled = true;
+        try {
+          servicesEnabled = await Location.hasServicesEnabledAsync();
+        } catch (_error) {
+          servicesEnabled = true;
+        }
+        if (!servicesEnabled && Platform.OS === "android") {
+          try {
+            await Location.enableNetworkProviderAsync();
+            servicesEnabled = await Location.hasServicesEnabledAsync();
+          } catch (_error) {
+            // Keep going and fall back to last known position if the user declines.
           }
+        }
 
-          setLocation(current.coords);
-          setMapCenter({
-            latitude: Number(current.coords.latitude || DEFAULT_REGION.latitude),
-            longitude: Number(current.coords.longitude || DEFAULT_REGION.longitude),
-          });
+        let current = null;
+        if (servicesEnabled) {
+          try {
+            current = await getBestAvailableCurrentPosition();
+          } catch (_error) {
+            current = null;
+          }
+        }
+
+        if (mounted && current?.coords) {
+          applyLocationSnapshot(current.coords);
+        } else if (mounted) {
+          if (!servicesEnabled) {
+            if (lockToCurrentCity && !hasFreshLastKnown) {
+              setSelectedCity(null);
+              setStations([]);
+            }
+            setLocationError(
+              t("homeScreen.location.servicesDisabled", {
+                defaultValue: "Turn on location services to show stations around you."
+              })
+            );
+          } else if (hasFreshLastKnown) {
+            setLocationError(
+              t("homeScreen.location.recent", {
+                defaultValue: "Using a recent location while we wait for a fresh GPS fix."
+              })
+            );
+          } else {
+            if (lockToCurrentCity) {
+              setSelectedCity(null);
+              setStations([]);
+            }
+            setLocationError(t("homeScreen.location.fail"));
+          }
         }
 
         watcherRef.current = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.Balanced, timeInterval: 8000, distanceInterval: 30 },
+          { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 15 },
           (pos) => {
             if (!mounted) return;
-            const nextCoords = pos?.coords || null;
+            const nextCoords = normalizeCoordsSnapshot(pos?.coords);
             if (
               nextCoords &&
               hasMovedFarEnoughForNearbyRefresh(
@@ -1141,13 +1301,21 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
             ) {
               loadedRef.current = false;
             }
-            setLocation(nextCoords);
+            applyLocationSnapshot(nextCoords);
           }
         );
       } catch (_error) {
         if (mounted) {
-          setHasLocationPermission(false);
-          setLocationError(t("homeScreen.location.fail"));
+          setHasLocationPermission(permissionGranted);
+          if (lockToCurrentCity && !location) {
+            setSelectedCity(null);
+            setStations([]);
+          }
+          setLocationError(
+            permissionGranted
+              ? t("homeScreen.location.fail")
+              : t("homeScreen.location.denied")
+          );
         }
       }
     })();
@@ -1157,7 +1325,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
       watcherRef.current?.remove?.();
       watcherRef.current = null;
     };
-  }, [defaultBrowseMode, lockToCurrentCity, nearbyRadiusMeters, supportsCityBrowse, t]);
+  }, [applyLocationSnapshot, defaultBrowseMode, lockToCurrentCity, nearbyRadiusMeters, t]);
 
   const loadNearbyStations = useCallback(async ({ forceRefresh = false } = {}) => {
     const basePoint = location;
@@ -1230,8 +1398,16 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
           const { status } = await Location.getForegroundPermissionsAsync();
           if (!active || status !== "granted") return;
 
-          const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          const nextCoords = current?.coords || null;
+          let current = null;
+          try {
+            current = await getBestAvailableCurrentPosition();
+          } catch (_error) {
+            current = await Location.getLastKnownPositionAsync({
+              maxAge: HOME_LAST_KNOWN_QUERY_MAX_AGE_MS,
+              requiredAccuracy: 250,
+            });
+          }
+          const nextCoords = normalizeCoordsSnapshot(current?.coords);
           if (!active || !nextCoords) return;
 
           if (
@@ -1244,7 +1420,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
             loadedRef.current = false;
           }
 
-          setLocation(nextCoords);
+          applyLocationSnapshot(nextCoords);
         } catch (_error) {
           // Keep the current list if location refresh on focus fails.
         }
@@ -1253,7 +1429,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
       return () => {
         active = false;
       };
-    }, [nearbyRadiusMeters, refreshSavedStations])
+    }, [applyLocationSnapshot, nearbyRadiusMeters, refreshSavedStations])
   );
 
   const handleBrowseModeChange = useCallback(
