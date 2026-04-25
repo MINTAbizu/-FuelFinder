@@ -107,6 +107,21 @@ Example admin station payload:
 Import stations from JSON:
 `npm run stations:import -- --file=./stations.json`
 
+Production Asella import:
+1. Make sure the backend code containing `examples/asella-curated-stations.import.json` is deployed to your production backend service.
+2. Open the production backend shell and run:
+   `npm run stations:import-asella`
+3. Verify the production MongoDB city count:
+   `npm run stations:verify-city -- --city=Asela --region=Oromia`
+4. Verify the public API response after import:
+   `curl https://fuelfinder-2.onrender.com/api/map/stations?q=Asela&stationType=fuel&limit=20`
+
+Expected city result after import:
+- `OILIBIYA - Asella`
+- `TOTAL - Asella`
+- `NOC - Asella`
+- `JR - Assasa`
+
 If you want every Ethiopia region, city, woreda, and station in the root admin page:
 1. Prepare a full hierarchy JSON file using `examples/ethiopia-locations.import.template.json`
 2. Seed it with:

@@ -16,6 +16,7 @@
     "stations:backfill-location": "node scripts/backfill-station-locations.js",
     "stations:backfill-location-text": "node scripts/backfill-station-location-text.js",
     "stations:sync-live-city": "node scripts/sync-live-city-stations.js",
+    "stations:verify-city": "node scripts/verify-city-stations.js",
     "directory:repair-city": "node scripts/repair-city-directory.js",
     "owner:bootstrap": "node scripts/bootstrap-owner.js"
   },
