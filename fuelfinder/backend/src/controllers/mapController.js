@@ -22,7 +22,8 @@ const {
   ensureRegionByName,
   ensureCityByName,
   ensureWoredaByName,
-  normalizeLocationCategories
+  normalizeLocationCategories,
+  normalizeRegionName
 } = require("../utils/locationDirectory");
 
 const STATION_SYNC_SELECT =
@@ -411,7 +412,7 @@ async function resolveDirectoryLocationFromGeocode(geo) {
 }
 
 async function findRegionByLooseName(name) {
-  const slug = normalizeCitySearchSlug(name);
+  const slug = slugify(normalizeRegionName(name));
   if (!slug) return null;
   return Region.findOne({ slug })
     .select("_id name slug code")
@@ -1167,6 +1168,129 @@ async function queryDirectoryStations(matchQuery, limit = DEFAULT_DIRECTORY_STAT
   );
 }
 
+async function loadCityDirectoryPayloadById(cityId, stationType = "") {
+  if (!cityId || !mongoose.isValidObjectId(cityId)) {
+    return null;
+  }
+
+  const city = await City.findById(cityId)
+    .select("_id name slug code regionId")
+    .lean();
+  if (!city) {
+    return null;
+  }
+
+  const match = {
+    isActive: true,
+    cityId: city._id
+  };
+  applyStationTypeFilter(match, stationType);
+
+  const [stats, region] = await Promise.all([
+    Station.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: "$cityId",
+          stationCount: { $sum: 1 },
+          longitude: { $avg: { $arrayElemAt: ["$location.coordinates", 0] } },
+          latitude: { $avg: { $arrayElemAt: ["$location.coordinates", 1] } }
+        }
+      }
+    ]),
+    city.regionId
+      ? Region.findById(city.regionId)
+          .select("_id name slug code")
+          .lean()
+      : null
+  ]);
+
+  return buildCityDirectoryPayload(city, stats[0] || {}, region);
+}
+
+async function resolveCurrentDirectoryCity(lat, lon, stationType = "") {
+  let matchedCity = null;
+  let source = "";
+
+  try {
+    const geo = await reverseGeocodeStationLocation(lat, lon);
+    if (geo && (!geo.countryCode || geo.countryCode === "ET")) {
+      const regionName = normalizeRegionName(normalizePlaceName(geo?.regionName));
+      const cityName = normalizePlaceName(geo?.cityName);
+      const matchedRegion = regionName ? await findRegionByLooseName(regionName) : null;
+
+      if (cityName) {
+        matchedCity = await findCityByLooseName(cityName, String(matchedRegion?._id || ""));
+        if (!matchedCity) {
+          matchedCity = await findCityByLooseName(cityName);
+        }
+      }
+
+      if (matchedCity?._id) {
+        source = "reverse-geocode";
+      }
+    }
+  } catch (_error) {
+    // Fall back to nearby-station inference below.
+  }
+
+  if (!matchedCity?._id) {
+    try {
+      const nearbyStations = await loadNearbyStations(lat, lon, DEFAULT_NEARBY_RADIUS_METERS, stationType);
+      const rankedCities = new Map();
+
+      (Array.isArray(nearbyStations) ? nearbyStations : []).forEach((station) => {
+        const cityId = String(station?.cityId || station?.city?.id || "").trim();
+        const cityName = String(station?.city?.name || "").trim();
+        const key = cityId || normalizeCitySearchSlug(cityName);
+        if (!key) return;
+
+        const current = rankedCities.get(key) || {
+          cityId,
+          cityName,
+          score: 0
+        };
+        const distanceMeters = Number(station?.distanceMeters);
+        current.score += Number.isFinite(distanceMeters)
+          ? Math.max(1, 50000 - Math.min(distanceMeters, 50000))
+          : 1;
+        rankedCities.set(key, current);
+      });
+
+      const topCity = Array.from(rankedCities.values())
+        .sort((left, right) => right.score - left.score)[0] || null;
+
+      if (topCity?.cityId && mongoose.isValidObjectId(topCity.cityId)) {
+        matchedCity = await City.findById(topCity.cityId)
+          .select("_id name slug code regionId")
+          .lean();
+      }
+      if (!matchedCity && topCity?.cityName) {
+        matchedCity = await findCityByLooseName(topCity.cityName);
+      }
+      if (matchedCity?._id) {
+        source = "nearby";
+      }
+    } catch (_error) {
+      matchedCity = null;
+    }
+  }
+
+  if (!matchedCity?._id) {
+    return null;
+  }
+
+  const city = await loadCityDirectoryPayloadById(matchedCity._id, stationType);
+  if (!city?.id) {
+    return null;
+  }
+
+  return {
+    city,
+    source
+  };
+}
+
 async function bootstrapNearbyStationsFromExternal(lat, lon, radius, stationType = "") {
   if (normalizeStationType(stationType) === "electric") {
     return [];
@@ -1223,6 +1347,30 @@ exports.getNearbyFuelStations = async (req, res) => {
     return res.json({ stations });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load nearby fuel stations." });
+  }
+};
+
+exports.resolveCurrentCity = async (req, res) => {
+  try {
+    const lat = parseNumber(req.query.lat);
+    const lon = parseNumber(req.query.lon);
+    const stationTypeParam = req.query.stationType;
+    const stationType = normalizeStationType(stationTypeParam);
+
+    if (lat === null || lon === null) {
+      return res.status(400).json({ message: "lat and lon are required numeric query params." });
+    }
+    if (stationTypeParam !== undefined && stationTypeParam !== null && !stationType) {
+      return res.status(400).json({ message: "stationType must be one of: fuel, electric." });
+    }
+
+    const result = await resolveCurrentDirectoryCity(lat, lon, stationType);
+    return res.json({
+      city: result?.city || null,
+      source: result?.source || ""
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Failed to resolve the current city." });
   }
 };
 

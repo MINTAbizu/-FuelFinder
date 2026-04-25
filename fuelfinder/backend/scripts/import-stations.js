@@ -13,6 +13,7 @@ const {
   ensureCityByName,
   ensureWoredaByName,
   normalizeLocationCategories,
+  normalizeRegionName,
   resolveStationLocation
 } = require("../src/utils/locationDirectory");
 const { normalizeStationType } = require("../src/utils/stationType");
@@ -94,7 +95,7 @@ function normalizeImportedPlaceName(value) {
 }
 
 async function findRegionByLooseName(name) {
-  const normalized = normalizeImportedPlaceName(name);
+  const normalized = normalizeRegionName(normalizeImportedPlaceName(name));
   const slug = slugify(normalized);
   if (!slug) return null;
   return Region.findOne({ slug }).lean();

@@ -5,6 +5,7 @@ const promotionController = require("../controllers/promotionController");
 const router = express.Router();
 
 router.get("/cities", mapController.listDirectoryCities);
+router.get("/current-city", mapController.resolveCurrentCity);
 router.get("/nearby-fuel", mapController.getNearbyFuelStations);
 router.get("/promotions", promotionController.listPublicPromotions);
 router.get("/stations", mapController.listDirectoryStations);

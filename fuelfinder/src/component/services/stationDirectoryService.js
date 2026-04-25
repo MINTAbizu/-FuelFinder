@@ -73,6 +73,34 @@ export async function fetchBrowseCities(params = {}) {
   };
 }
 
+export async function fetchCurrentDirectoryCity(params = {}) {
+  const normalizedParams = {
+    lat: Number(params?.lat),
+    lon: Number(params?.lon),
+    stationType: normalizeStationType(params?.stationType),
+  };
+
+  if (!Number.isFinite(normalizedParams.lat) || !Number.isFinite(normalizedParams.lon)) {
+    return {
+      city: null,
+      source: "",
+    };
+  }
+
+  const { data } = await api.get("/map/current-city", {
+    params: {
+      lat: normalizedParams.lat,
+      lon: normalizedParams.lon,
+      stationType: normalizedParams.stationType,
+    },
+  });
+
+  return {
+    city: data?.city && typeof data.city === "object" ? data.city : null,
+    source: String(data?.source || ""),
+  };
+}
+
 export async function fetchDirectoryStations(params = {}) {
   const normalizedParams = {
     cityId: String(params?.cityId || "").trim(),

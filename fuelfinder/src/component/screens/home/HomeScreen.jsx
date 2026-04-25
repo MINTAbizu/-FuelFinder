@@ -24,7 +24,11 @@ import { useLanguage } from "../../context/LanguageContext";
 import api from "../../services/api";
 import { loadSavedStations, toggleSavedStation } from "../../services/accountStorage";
 import { isNetworkError } from "../../services/offlineService";
-import { fetchBrowseCities, fetchDirectoryStations } from "../../services/stationDirectoryService";
+import {
+  fetchBrowseCities,
+  fetchCurrentDirectoryCity,
+  fetchDirectoryStations,
+} from "../../services/stationDirectoryService";
 import PromotionCarousel from "./PromotionCarousel";
 
 const DEFAULT_REGION = {
@@ -204,6 +208,17 @@ async function resolveCurrentCityFromLocation(coords, stationType = "fuel") {
   const latitude = Number(coords?.latitude);
   const longitude = Number(coords?.longitude);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  try {
+    const { city } = await fetchCurrentDirectoryCity({
+      lat: latitude,
+      lon: longitude,
+      stationType,
+    });
+    if (city?.id) return city;
+  } catch (_error) {
+    // Fall back to device geocoding below when the backend resolver is unavailable.
+  }
 
   try {
     const places = await Location.reverseGeocodeAsync({
