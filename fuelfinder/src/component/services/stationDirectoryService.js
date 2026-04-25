@@ -101,6 +101,40 @@ export async function fetchCurrentDirectoryCity(params = {}) {
   };
 }
 
+export async function fetchCurrentCityStations(params = {}) {
+  const normalizedParams = {
+    lat: Number(params?.lat),
+    lon: Number(params?.lon),
+    limit: Number(params?.limit || 220),
+    stationType: normalizeStationType(params?.stationType),
+    preferLive: params?.preferLive !== false,
+  };
+
+  if (!Number.isFinite(normalizedParams.lat) || !Number.isFinite(normalizedParams.lon)) {
+    return {
+      city: null,
+      source: "",
+      stations: [],
+    };
+  }
+
+  const { data } = await api.get("/map/current-city-stations", {
+    params: {
+      lat: normalizedParams.lat,
+      lon: normalizedParams.lon,
+      limit: normalizedParams.limit,
+      stationType: normalizedParams.stationType,
+      preferLive: normalizedParams.preferLive || undefined,
+    },
+  });
+
+  return {
+    city: data?.city && typeof data.city === "object" ? data.city : null,
+    source: String(data?.source || ""),
+    stations: Array.isArray(data?.stations) ? data.stations : [],
+  };
+}
+
 export async function fetchDirectoryStations(params = {}) {
   const normalizedParams = {
     cityId: String(params?.cityId || "").trim(),
