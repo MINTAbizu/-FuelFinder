@@ -315,9 +315,16 @@ export function AuthProvider({ children }) {
   }, [applySession, clearSession, getSessionVersion, hasSessionVersion, persistSession, replaceUser]);
 
   const signUp = useCallback(
-    async ({ name, email, phone, password }) => {
+    async ({ name, email, phone, password, vehicleRegistrationType, plateNumber }) => {
       const expectedVersion = getSessionVersion();
-      const data = await registerUser({ name, email, phone, password });
+      const data = await registerUser({
+        name,
+        email,
+        phone,
+        password,
+        vehicleRegistrationType,
+        plateNumber,
+      });
       if (data?.verificationRequired || data?.twoFactorRequired) {
         return data;
       }

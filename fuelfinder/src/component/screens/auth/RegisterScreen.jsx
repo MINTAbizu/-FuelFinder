@@ -37,6 +37,8 @@ const { language, changeLanguage, supportedLanguages, t } = useLanguage();
 const [name,setName]=useState("");
 const [email,setEmail]=useState("");
 const [phone,setPhone]=useState("");
+const [vehicleRegistrationType,setVehicleRegistrationType]=useState("");
+const [plateNumber,setPlateNumber]=useState("");
 const [password,setPassword]=useState("");
 
 const [secure,setSecure]=useState(true);
@@ -47,6 +49,13 @@ const [googleLoading,setGoogleLoading]=useState(false);
 
 const [languageMenuOpen,setLanguageMenuOpen]=useState(false);
 const [languageQuery,setLanguageQuery]=useState("");
+
+const vehicleTypeOptions = useMemo(()=>[
+{ value:"taxi", label:t("auth.register.vehicleTypes.taxi") },
+{ value:"taxi_automobile", label:t("auth.register.vehicleTypes.taxiAutomobile") },
+{ value:"private", label:t("auth.register.vehicleTypes.private") },
+{ value:"government", label:t("auth.register.vehicleTypes.government") }
+], [t]);
 
 /* GOOGLE CONFIG */
 
@@ -140,7 +149,7 @@ const onRegister = async()=>{
 
 setError("");
 
-if(!name || !email || !phone || !password){
+if(!name || !email || !phone || !vehicleRegistrationType || !plateNumber || !password){
 
  setError(t("auth.register.requiredError"));
 return;
@@ -156,6 +165,8 @@ setLoading(true);
   name:name.trim(),
   email:email.trim(),
   phone:phone.trim(),
+  vehicleRegistrationType,
+  plateNumber:plateNumber.trim(),
   password
   });
 
@@ -381,6 +392,44 @@ setLanguageMenuOpen(false);
  onChangeText={setPhone}
  style={styles.input}
  />
+
+ <Text style={styles.label}>
+ {t("auth.register.vehicleRegistrationType")}
+ </Text>
+
+ <View style={styles.vehicleTypeGrid}>
+ {vehicleTypeOptions.map(option=>(
+ <Pressable
+ key={option.value}
+ style={[
+ styles.vehicleTypeBtn,
+ vehicleRegistrationType===option.value && styles.vehicleTypeBtnActive
+ ]}
+ onPress={()=>setVehicleRegistrationType(option.value)}
+ >
+ <Text
+ style={[
+ styles.vehicleTypeText,
+ vehicleRegistrationType===option.value && styles.vehicleTypeTextActive
+ ]}
+ >
+ {option.label}
+ </Text>
+ </Pressable>
+ ))}
+ </View>
+
+ <Text style={styles.label}>
+ {t("auth.register.plateNumber")}
+ </Text>
+
+ <TextInput
+ placeholder={t("auth.register.plateNumber")}
+ value={plateNumber}
+ onChangeText={setPlateNumber}
+ style={styles.input}
+ autoCapitalize="characters"
+ />
  
  <Text style={styles.label}>
  {t("auth.register.password")}
@@ -543,6 +592,31 @@ cardSubtitle:{color:"#777",marginBottom:20},
 
 label:{fontSize:13,color:"#777"},
 input:{borderBottomWidth:1,borderBottomColor:"#ddd",marginBottom:15},
+
+vehicleTypeGrid:{
+flexDirection:"row",
+flexWrap:"wrap",
+gap:8,
+marginTop:8,
+marginBottom:15
+},
+
+vehicleTypeBtn:{
+borderWidth:1,
+borderColor:"#CBD5E1",
+borderRadius:18,
+paddingVertical:9,
+paddingHorizontal:12,
+backgroundColor:"#F8FAFC"
+},
+
+vehicleTypeBtnActive:{
+borderColor:"#0F766E",
+backgroundColor:"#CCFBF1"
+},
+
+vehicleTypeText:{fontSize:12,fontWeight:"800",color:"#334155"},
+vehicleTypeTextActive:{color:"#0F766E"},
 
 passwordRow:{
 flexDirection:"row",

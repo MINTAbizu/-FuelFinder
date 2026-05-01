@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FuelFinder Full Business Model</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #5f6b85;
+      --line: #d9dfeb;
+      --accent: #1463ff;
+      --accent-2: #10a37f;
+      --bg: #f5f7fb;
+      --card: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.55;
+    }
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 16px auto;
+      background: var(--card);
+      padding: 22mm 18mm;
+      box-shadow: 0 8px 30px rgba(18, 31, 53, 0.08);
+    }
+    h1, h2, h3, h4 { margin: 0 0 10px; line-height: 1.25; }
+    h1 { font-size: 28px; color: var(--ink); }
+    h2 {
+      font-size: 20px;
+      margin-top: 28px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid var(--line);
+    }
+    h3 { font-size: 16px; margin-top: 16px; color: var(--accent); }
+    p { margin: 8px 0 12px; }
+    ul { margin: 8px 0 12px 20px; padding: 0; }
+    li { margin: 4px 0; }
+    .cover {
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 20px;
+    }
+    .subtle { color: var(--muted); }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfcff;
+    }
+    .metric .label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .metric .value {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--ink);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 16px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 9px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #eef3ff;
+      color: var(--ink);
+    }
+    .note {
+      border-left: 4px solid var(--accent-2);
+      padding: 10px 12px;
+      background: #f2fcf8;
+      margin: 12px 0 16px;
+    }
+    .section-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fff;
+      margin: 10px 0 14px;
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .small { font-size: 13px; color: var(--muted); }
+    .footer {
+      margin-top: 28px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    @media print {
+      body { background: #fff; }
+      .page {
+        width: auto;
+        min-height: auto;
+        margin: 0;
+        box-shadow: none;
+        padding: 14mm;
+      }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="cover">
+      <h1>FuelFinder Full Business Model</h1>
+      <p class="subtle">Production-level business model document for funding, incubation, partnership, and executive review.</p>
+      <p><strong>Project:</strong> FuelFinder</p>
+      <p><strong>Prepared for:</strong> Investors, banks, incubators, grant committees, and strategic partners</p>
+      <p><strong>Date:</strong> April 27, 2026</p>
+      <p><strong>Prepared by:</strong> Mintsenot Bizuayehw</p>
+
+      <div class="summary-grid">
+        <div class="metric">
+          <div class="label">Business Type</div>
+          <div class="value">Mobility Tech Platform</div>
+        </div>
+        <div class="metric">
+          <div class="label">Core Market</div>
+          <div class="value">Fuel and EV Access</div>
+        </div>
+        <div class="metric">
+          <div class="label">Primary Revenue</div>
+          <div class="value">Station Subscriptions</div>
+        </div>
+        <div class="metric">
+          <div class="label">Secondary Revenue</div>
+          <div class="value">Transaction and B2B Fees</div>
+        </div>
+      </div>
+    </div>
+
+    <h2>1. Executive Summary</h2>
+    <p>FuelFinder is a digital coordination platform that helps users discover nearby fuel stations and EV charging stations, review station conditions, reserve queue access, activate service through payment, receive real-time alerts, and complete secure station check-in. It also gives station operators a dashboard for queue control, stock visibility, pricing updates, and customer-flow management.</p>
+    <p>The business is built around a clear operational pain point: users and stations currently operate in a high-friction environment with poor information visibility, manual queue handling, wasted travel, and disconnected payment and access workflows. FuelFinder converts that disorder into a structured digital service model.</p>
+    <div class="note">
+      <strong>Core thesis:</strong> FuelFinder is not just a map or reservation app. It is an operational layer between drivers, stations, payment systems, and queue management.
+    </div>
+
+    <h2>2. Company Overview</h2>
+    <div class="two-col">
+      <div class="section-card">
+        <h3>Vision</h3>
+        <p>To become the leading digital coordination platform for fuel and vehicle-energy access in Ethiopia and later across regional African markets.</p>
+      </div>
+      <div class="section-card">
+        <h3>Mission</h3>
+        <p>To reduce wasted time, uncertainty, congestion, and operational inefficiency by digitizing how users and stations coordinate access to fuel and EV charging services.</p>
+      </div>
+    </div>
+    <div class="section-card">
+      <h3>Current Product Footprint</h3>
+      <ul>
+        <li>Customer mobile app</li>
+        <li>Backend API and realtime queue engine</li>
+        <li>Owner and admin dashboard</li>
+        <li>Support for local payment pathways and Ethiopia-specific location structures</li>
+      </ul>
+    </div>
+
+    <h2>3. Problem Definition</h2>
+    <p>Fuel and charging access in many urban markets is inefficient because users lack trustworthy, timely, and actionable information before they travel. Station operations are also burdened by manual queue handling, repeated customer inquiries, and weak digital coordination.</p>
+    <ul>
+      <li>Drivers travel without knowing where fuel is available</li>
+      <li>Queues are long, manual, and difficult to predict</li>
+      <li>Users waste fuel and time moving between stations</li>
+      <li>Station operators lack a connected demand-management tool</li>
+      <li>EV charging access introduces similar uncertainty around readiness and availability</li>
+    </ul>
+
+    <h2>4. Solution Overview</h2>
+    <p>FuelFinder provides one connected workflow that covers the major stages of station access:</p>
+    <ul>
+      <li>Nearby station discovery</li>
+      <li>Station detail visibility</li>
+      <li>Queue reservation</li>
+      <li>Payment-linked reservation activation</li>
+      <li>Real-time alerts and turn notifications</li>
+      <li>Secure arrival check-in</li>
+      <li>Station-side operations management</li>
+    </ul>
+
+    <h2>5. Product Components</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Component</th>
+          <th>Primary Users</th>
+          <th>Function</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Mobile App</td>
+          <td>Drivers, vehicle owners, EV users</td>
+          <td>Discovery, reservation, payment, alerts, transaction history, check-in</td>
+        </tr>
+        <tr>
+          <td>Backend Coordination Engine</td>
+          <td>System-wide</td>
+          <td>Authentication, queue logic, station data, payments, realtime events, notifications</td>
+        </tr>
+        <tr>
+          <td>Owner Dashboard</td>
+          <td>Station owners, operators, admins</td>
+          <td>Queue control, stock visibility, pricing, staff management, operational reporting</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>6. Market Opportunity</h2>
+    <h3>Primary Market</h3>
+    <p>Fuel station users and station operators in Ethiopia, especially in cities where fuel access pressure and queue inefficiency are common.</p>
+    <h3>Secondary Market</h3>
+    <ul>
+      <li>EV charging operators and EV drivers</li>
+      <li>Taxi and ride-hailing drivers</li>
+      <li>Delivery and logistics companies</li>
+      <li>Fleet operators and managed transport services</li>
+    </ul>
+    <h3>Why the Opportunity Is Strong</h3>
+    <ul>
+      <li>Daily, repeated pain point</li>
+      <li>High frequency use case</li>
+      <li>Increasing smartphone and digital-payment adoption</li>
+      <li>Strong B2C and B2B monetization potential</li>
+      <li>Natural extension into EV charging coordination</li>
+    </ul>
+
+    <h2>7. Customer Segments</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Segment</th>
+          <th>Need</th>
+          <th>Value Provided by FuelFinder</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Private drivers</td>
+          <td>Find fuel faster, reduce wasted trips</td>
+          <td>Discovery, queue insight, alerts, reservation</td>
+        </tr>
+        <tr>
+          <td>Taxi and ride-hailing drivers</td>
+          <td>Reduce downtime and improve route efficiency</td>
+          <td>Faster service access and better planning</td>
+        </tr>
+        <tr>
+          <td>Fuel stations</td>
+          <td>Manage demand and customer flow</td>
+          <td>Queue tools, dashboard, price and stock updates</td>
+        </tr>
+        <tr>
+          <td>EV charging operators</td>
+          <td>Coordinate charging access and readiness visibility</td>
+          <td>Same platform logic adapted for charging use</td>
+        </tr>
+        <tr>
+          <td>Fleet operators</td>
+          <td>Operational predictability and reporting</td>
+          <td>Access coordination and contract-based services</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>8. Value Proposition</h2>
+    <div class="two-col">
+      <div class="section-card">
+        <h3>For Users</h3>
+        <ul>
+          <li>Know before you go</li>
+          <li>Reduce time wasted searching for fuel or charging</li>
+          <li>Reserve access more intelligently</li>
+          <li>Receive trusted real-time updates</li>
+        </ul>
+      </div>
+      <div class="section-card">
+        <h3>For Stations</h3>
+        <ul>
+          <li>Digitize station operations</li>
+          <li>Reduce queue disorder</li>
+          <li>Improve customer flow and transparency</li>
+          <li>Track payments and activity more clearly</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2>9. Business Model Structure</h2>
+    <p>FuelFinder operates as a hybrid platform with B2B SaaS at the center and transaction-based monetization layered around it.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Revenue Stream</th>
+          <th>Description</th>
+          <th>Priority</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Station subscriptions</td>
+          <td>Monthly fee for dashboard access and station management tools</td>
+          <td>Primary</td>
+        </tr>
+        <tr>
+          <td>Transaction fees</td>
+          <td>Small fee on completed queue reservations or payment-linked events</td>
+          <td>Secondary</td>
+        </tr>
+        <tr>
+          <td>Promoted listings</td>
+          <td>Priority visibility and in-app promotion for participating stations</td>
+          <td>Secondary</td>
+        </tr>
+        <tr>
+          <td>Fleet contracts</td>
+          <td>B2B service access and reporting contracts</td>
+          <td>Growth</td>
+        </tr>
+        <tr>
+          <td>Analytics services</td>
+          <td>Aggregated operational insights for enterprise use</td>
+          <td>Future</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>10. Business Model Canvas</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Block</th>
+          <th>FuelFinder Model</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Customer Segments</td>
+          <td>Drivers, fuel stations, EV charging operators, fleets, logistics firms</td>
+        </tr>
+        <tr>
+          <td>Value Propositions</td>
+          <td>Trusted station access, queue control, payment-linked activation, operational visibility</td>
+        </tr>
+        <tr>
+          <td>Channels</td>
+          <td>Mobile app, direct sales, partnerships, digital campaigns, station-led promotion</td>
+        </tr>
+        <tr>
+          <td>Customer Relationships</td>
+          <td>Self-service app usage, onboarding support, B2B account management</td>
+        </tr>
+        <tr>
+          <td>Revenue Streams</td>
+          <td>Subscriptions, transaction fees, promotions, fleet contracts, analytics</td>
+        </tr>
+        <tr>
+          <td>Key Resources</td>
+          <td>Software platform, engineering team, station network, payment integrations, location data</td>
+        </tr>
+        <tr>
+          <td>Key Activities</td>
+          <td>Product development, station onboarding, support, partnerships, system operations</td>
+        </tr>
+        <tr>
+          <td>Key Partnerships</td>
+          <td>Fuel stations, charging operators, payment providers, mobility partners</td>
+        </tr>
+        <tr>
+          <td>Cost Structure</td>
+          <td>Engineering, hosting, sales, onboarding, support, compliance, marketing</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>11. Pricing Strategy</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Offering</th>
+          <th>Indicative Pricing</th>
+          <th>Rationale</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Basic station subscription</td>
+          <td>ETB 4,000 / month</td>
+          <td>Accessible entry point for single stations</td>
+        </tr>
+        <tr>
+          <td>Professional station subscription</td>
+          <td>ETB 9,000 / month</td>
+          <td>Higher operational feature set</td>
+        </tr>
+        <tr>
+          <td>Enterprise / chain pricing</td>
+          <td>Custom</td>
+          <td>For multi-station operators and negotiated support</td>
+        </tr>
+        <tr>
+          <td>Transaction fee</td>
+          <td>ETB 8 average per event</td>
+          <td>Revenue aligned with usage</td>
+        </tr>
+        <tr>
+          <td>Promoted listing</td>
+          <td>ETB 3,000 / month</td>
+          <td>Marketing visibility for stations</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>12. Go-to-Market Strategy</h2>
+    <h3>Phase 1: Pilot</h3>
+    <ul>
+      <li>Start in one city or concentrated operating area</li>
+      <li>Onboard anchor stations</li>
+      <li>Validate queue, payment, and dashboard usage</li>
+      <li>Collect station and user feedback</li>
+    </ul>
+    <h3>Phase 2: Local Expansion</h3>
+    <ul>
+      <li>Add more stations and surrounding cities</li>
+      <li>Strengthen user acquisition and station-led promotion</li>
+      <li>Introduce more structured subscription packages</li>
+    </ul>
+    <h3>Phase 3: Scale</h3>
+    <ul>
+      <li>Expand into multi-city coverage</li>
+      <li>Grow fleet and enterprise products</li>
+      <li>Expand EV charging support and strategic partnerships</li>
+    </ul>
+
+    <h2>13. Marketing and Sales Strategy</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Channel</th>
+          <th>Use</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Social media campaigns</td>
+          <td>User awareness and launch visibility</td>
+        </tr>
+        <tr>
+          <td>Station partnerships</td>
+          <td>Customer acquisition through station promotion</td>
+        </tr>
+        <tr>
+          <td>Driver communities</td>
+          <td>Adoption among high-frequency users</td>
+        </tr>
+        <tr>
+          <td>Direct sales</td>
+          <td>Onboard stations, chains, and fleet clients</td>
+        </tr>
+        <tr>
+          <td>Competitions and innovation showcases</td>
+          <td>Credibility and network building</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>14. Operations Model</h2>
+    <p>FuelFinder requires a lean but disciplined operations structure that supports software delivery and field execution.</p>
+    <ul>
+      <li>Platform maintenance and uptime management</li>
+      <li>Station onboarding and training</li>
+      <li>User support and issue resolution</li>
+      <li>Payment support coordination</li>
+      <li>Location and station data management</li>
+      <li>Business development and partner management</li>
+    </ul>
+
+    <h2>15. Team Structure</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Core Responsibility</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Founder / CEO</td>
+          <td>Strategy, fundraising, partnerships, execution leadership</td>
+        </tr>
+        <tr>
+          <td>Product / Operations Lead</td>
+          <td>Roadmap, rollout execution, process design</td>
+        </tr>
+        <tr>
+          <td>Engineering Support</td>
+          <td>App, backend, dashboard, integrations</td>
+        </tr>
+        <tr>
+          <td>Sales / Partnerships</td>
+          <td>Station acquisition, B2B growth, field relationships</td>
+        </tr>
+        <tr>
+          <td>Support / Customer Success</td>
+          <td>User and station support, onboarding continuity</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>16. Financial Model Snapshot</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>Year 1</th>
+          <th>Year 2</th>
+          <th>Year 3</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Active subscribed stations</td>
+          <td>25</td>
+          <td>90</td>
+          <td>220</td>
+        </tr>
+        <tr>
+          <td>Monthly transaction volume</td>
+          <td>6,000</td>
+          <td>28,000</td>
+          <td>80,000</td>
+        </tr>
+        <tr>
+          <td>Total revenue (ETB)</td>
+          <td>3,006,000</td>
+          <td>11,878,000</td>
+          <td>30,640,000</td>
+        </tr>
+        <tr>
+          <td>Total operating expense (ETB)</td>
+          <td>4,800,000</td>
+          <td>7,700,000</td>
+          <td>11,530,000</td>
+        </tr>
+        <tr>
+          <td>Operating profit / loss (ETB)</td>
+          <td>(1,794,000)</td>
+          <td>4,178,000</td>
+          <td>19,110,000</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="small">These are planning assumptions and should be replaced with real operating numbers before formal external submission.</p>
+
+    <h2>17. Funding Requirement</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Use of Funds</th>
+          <th>Amount (ETB)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Product refinement and engineering</td><td>2,000,000</td></tr>
+        <tr><td>Infrastructure, hosting, tools, and security</td><td>700,000</td></tr>
+        <tr><td>Pilot onboarding and field deployment</td><td>1,200,000</td></tr>
+        <tr><td>Sales and marketing</td><td>1,400,000</td></tr>
+        <tr><td>Staff and operating support</td><td>2,100,000</td></tr>
+        <tr><td>Legal, compliance, and administration</td><td>450,000</td></tr>
+        <tr><td>Working capital reserve</td><td>650,000</td></tr>
+        <tr><th>Total</th><th>8,500,000</th></tr>
+      </tbody>
+    </table>
+
+    <h2>18. Risk Analysis</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Risk</th>
+          <th>Business Impact</th>
+          <th>Mitigation</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Slow station adoption</td>
+          <td>Delayed B2B revenue</td>
+          <td>Pilot with anchor stations and quantify operational benefits</td>
+        </tr>
+        <tr>
+          <td>Weak data trust</td>
+          <td>Lower user retention</td>
+          <td>Use curated stations and operator-confirmed updates</td>
+        </tr>
+        <tr>
+          <td>Payment integration friction</td>
+          <td>Lower transaction conversion</td>
+          <td>Support multiple providers and fallback confirmation flows</td>
+        </tr>
+        <tr>
+          <td>High acquisition cost</td>
+          <td>Pressure on margins</td>
+          <td>Use partner-led distribution and phased market entry</td>
+        </tr>
+        <tr>
+          <td>Early funding constraints</td>
+          <td>Slower rollout</td>
+          <td>Prioritize high-value features and control operating burn</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>19. Milestones</h2>
+    <ul>
+      <li>Complete commercialization-ready product polish</li>
+      <li>Secure pilot station partnerships</li>
+      <li>Validate live queue and payment workflows</li>
+      <li>Launch initial subscription revenue</li>
+      <li>Expand to multiple city zones</li>
+      <li>Introduce fleet and enterprise offerings</li>
+      <li>Build EV charging coordination as a second growth line</li>
+    </ul>
+
+    <h2>20. Conclusion</h2>
+    <p>FuelFinder has the structure of a serious platform business: a real and repeated customer problem, a clear software-enabled operational solution, recurring revenue potential, B2B and B2C growth pathways, and a strong local starting point with regional expansion potential.</p>
+    <p>Its business model is strongest when centered on station subscriptions, supported by transaction fees, and extended through fleet and promotional services. With disciplined rollout and product refinement, FuelFinder can grow from a strong technical project into a scalable commercial platform.</p>
+
+    <div class="footer">
+      FuelFinder Full Business Model • Print this page to PDF from your browser for a clean export.
+    </div>
+  </div>
+</body>
+</html>
