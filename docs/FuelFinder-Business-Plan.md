@@ -1,5 +1,5 @@
 # FuelFinder Business Plan
-
+in ethiopia  the  goverment and  company   driver  if they want to fill up fuel   from fuel  station   they use   copon (book it look like how many letter  it fillup  and it have related information   )   and  it fillup without immidately pay  the price   but at the  end of month the  finace officer of the govt  and  compnay  they pay for that station the total price of  fuel  so how can i implement  this future  for this  customer app and station manager  dashboard to controlle 
 ## 1. Executive Summary
 
 FuelFinder is a digital platform designed to improve access to fuel stations and electric charging stations by combining station discovery, queue reservation, payment-linked activation, real-time alerts, and station-side operations management in one connected system.

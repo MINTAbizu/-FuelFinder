@@ -218,10 +218,10 @@
         "private": "የግል",
         "government": "መንግስት"
       },
-      "plateNumber": "የሰሌዳ ቁጥር",
+      "plateNumber": "የሰሌዳ ቁጥር (5 አሃዝ)",
       "password": "የይለፍ ቃል",
       "passwordHint": "የይለፍ ቃል: 8+ ፊደል ከፊደል ልዩነት, ቁጥር እና ልዩ ምልክት ጋር።",
-      "requiredError": "ስም፣ ኢሜይል፣ ስልክ፣ የሰሌዳ አይነት፣ የሰሌዳ ቁጥር እና የይለፍ ቃል ያስፈልጋል።",
+      "requiredError": "ስም፣ ኢሜይል፣ ስልክ፣ የሰሌዳ አይነት፣ 5 አሃዝ የሰሌዳ ቁጥር እና የይለፍ ቃል ያስፈልጋል።",
       "cannotConnect": "Backend ጋር መገናኘት አልተቻለም",
       "button": "መለያ ፍጠር",
       "alreadyHave": "ቀድም ሲል መለያ አለዎት?",

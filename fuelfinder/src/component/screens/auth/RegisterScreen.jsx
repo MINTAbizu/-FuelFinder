@@ -50,6 +50,10 @@ const [googleLoading,setGoogleLoading]=useState(false);
 const [languageMenuOpen,setLanguageMenuOpen]=useState(false);
 const [languageQuery,setLanguageQuery]=useState("");
 
+const updatePlateNumber = (value)=>{
+setPlateNumber(String(value || "").replace(/\D/g, "").slice(0,5));
+};
+
 const vehicleTypeOptions = useMemo(()=>[
 { value:"taxi", label:t("auth.register.vehicleTypes.taxi") },
 { value:"taxi_automobile", label:t("auth.register.vehicleTypes.taxiAutomobile") },
@@ -149,7 +153,7 @@ const onRegister = async()=>{
 
 setError("");
 
-if(!name || !email || !phone || !vehicleRegistrationType || !plateNumber || !password){
+if(!name || !email || !phone || !vehicleRegistrationType || plateNumber.length !== 5 || !password){
 
  setError(t("auth.register.requiredError"));
 return;
@@ -426,9 +430,10 @@ setLanguageMenuOpen(false);
  <TextInput
  placeholder={t("auth.register.plateNumber")}
  value={plateNumber}
- onChangeText={setPlateNumber}
+ onChangeText={updatePlateNumber}
  style={styles.input}
- autoCapitalize="characters"
+ keyboardType="number-pad"
+ maxLength={5}
  />
  
  <Text style={styles.label}>

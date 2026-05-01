@@ -218,10 +218,10 @@
         "private": "Dhuunfaa",
         "government": "Mootummaa"
       },
-      "plateNumber": "Lakkoofsa gabatee",
+      "plateNumber": "Lakkoofsa gabatee (dijiitii 5)",
       "password": "Jecha Darbii",
       "passwordHint": "Jecha darbii: qubee 8+ fi qubee gurguddaa/xixiqqaa, lakkoofsa fi mallattoo addaa qabaachuu qaba.",
-      "requiredError": "Maqaa, imeelii, bilbila, gosa gabatee, lakkoofsa gabatee fi jechi darbii dirqama.",
+      "requiredError": "Maqaa, imeelii, bilbila, gosa gabatee, dijiitii gabatee 5 fi jechi darbii dirqama.",
       "cannotConnect": "Backend waliin walqunnamtiin hin danda'amne",
       "button": "Akkaawuntii Uumi",
       "alreadyHave": "Akaawuntii qabdaa?",
