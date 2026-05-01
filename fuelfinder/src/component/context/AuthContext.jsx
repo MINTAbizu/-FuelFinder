@@ -335,9 +335,9 @@ export function AuthProvider({ children }) {
   );
 
   const signIn = useCallback(
-    async ({ email, password }) => {
+    async ({ identifier, email, password }) => {
       const expectedVersion = getSessionVersion();
-      const data = await loginUser({ email, password });
+      const data = await loginUser({ identifier: identifier || email, password });
       if (data?.verificationRequired || data?.twoFactorRequired) {
         return data;
       }

@@ -180,7 +180,7 @@ setLoading(true);
 try{
 
 const result = await signIn({
-email:email.trim(),
+identifier:email.trim(),
 password
 });
 
