@@ -50,7 +50,7 @@ const CUSTOMER_VEHICLE_TYPES = new Set(["taxi", "taxi_automobile", "private", "g
 exports.validateRegister = (req, res, next) => {
   const name = normalize(req.body.name);
   const phone = normalizePhone(req.body.phone);
-  const email = normalizeEmail(req.body.email);
+  const email = "";
   const password = String(req.body.password || "");
   const vehicleRegistrationType = normalizeVehicleRegistrationType(req.body.vehicleRegistrationType);
   const plateNumberKey = buildPlateNumberKey(req.body.plateNumber);
@@ -66,9 +66,6 @@ exports.validateRegister = (req, res, next) => {
   }
   if (!isValidPhone(phone)) {
     return sendValidationError(res, "Invalid phone number format.");
-  }
-  if (email && !isValidEmail(email)) {
-    return sendValidationError(res, "Invalid email format.");
   }
   if (!isStrongPassword(password)) {
     return sendValidationError(
