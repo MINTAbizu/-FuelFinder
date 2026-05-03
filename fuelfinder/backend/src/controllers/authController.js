@@ -673,10 +673,9 @@ exports.register = async (req, res) => {
   try {
     const name = String(req.body.name || "").trim();
     const phone = normalizePhone(req.body.phone);
-    const requestedEmail = normalizeEmail(req.body.email);
     const vehicleRegistrationType = String(req.body.vehicleRegistrationType || "").trim().toLowerCase();
     const plateNumberKey = buildPlateNumberKey(req.body.plateNumberKey || req.body.plateNumber);
-    const email = requestedEmail || buildLocalPlateEmail(plateNumberKey);
+    const email = buildLocalPlateEmail(plateNumberKey);
     const password = String(req.body.password || "");
     const role = String(req.body.role || "customer").trim().toLowerCase();
 
@@ -690,19 +689,12 @@ exports.register = async (req, res) => {
     if (existingPlate) {
       return res.status(409).json({ message: "Plate number already registered." });
     }
-    if (requestedEmail) {
-      const existingEmail = await User.exists({ email: requestedEmail });
-      if (existingEmail) {
-        return res.status(409).json({ message: "Email already registered." });
-      }
-    }
-
     const passwordHash = await bcrypt.hash(password, PASSWORD_SALT_ROUNDS);
     const user = await User.create({
       name,
       phone,
       email,
-      emailVerified: !requestedEmail,
+      emailVerified: true,
       vehicleRegistrationType,
       plateNumber: plateNumberKey,
       plateNumberKey,
