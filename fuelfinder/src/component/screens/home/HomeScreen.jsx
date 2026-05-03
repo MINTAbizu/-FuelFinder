@@ -808,7 +808,7 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
   const isElectricHome = preferredStationType === "electric";
   const useLiveMapBrowse = homeConfig?.useLiveMapBrowse ?? false;
   const lockToCurrentCity =
-    homeConfig?.lockToCurrentCity ?? (isElectricHome ? false : !useLiveMapBrowse);
+    homeConfig?.lockToCurrentCity ?? false;
   const nearbyRadiusMeters = homeConfig?.nearbyRadiusMeters || (isElectricHome ? 250000 : 12000);
   const defaultBrowseMode =
     homeConfig?.defaultBrowseMode ||
@@ -1266,6 +1266,60 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     },
     [loadCityStations]
   );
+
+  const handleCitySearchSubmit = useCallback(async () => {
+    if (lockToCurrentCity) return;
+
+    const query = cityQuery.trim();
+    setStationsError("");
+
+    let options = cityOptions;
+    if (query) {
+      try {
+        setCityOptionsLoading(true);
+        const { cities: nextCities } = await fetchBrowseCities({
+          q: query,
+          limit: 30,
+          stationType: preferredStationType,
+        });
+        options = nextCities;
+        setCityOptions(nextCities);
+      } catch (error) {
+        setStationsError(
+          isNetworkError(error)
+            ? buildOfflineStationsUnavailableMessage(t, isElectricHome)
+            : t("cityOptionsLoadFail", { defaultValue: "Failed to search cities." })
+        );
+        console.error("[Stations:handleCitySearchSubmit]", error?.response?.status, error?.response?.data, error?.message);
+        return;
+      } finally {
+        setCityOptionsLoading(false);
+      }
+    }
+
+    const exactMatch = findExactCityMatch(options, query);
+    const nextCity = exactMatch || options[0] || null;
+    if (!nextCity?.id) {
+      setSelectedCity(null);
+      setStations([]);
+      setStationsError(
+        t("cityOptionsEmpty", {
+          defaultValue: "No city with stations matched that name."
+        })
+      );
+      return;
+    }
+
+    await handleSelectCity(nextCity);
+  }, [
+    cityOptions,
+    cityQuery,
+    handleSelectCity,
+    isElectricHome,
+    lockToCurrentCity,
+    preferredStationType,
+    t
+  ]);
 
   const applyLocationSnapshot = useCallback((coords, { updateLocation = true } = {}) => {
     const nextCoords = normalizeCoordsSnapshot(coords);
@@ -2188,12 +2242,30 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
             {browseMode === "city" ? (
               <>
                 {!lockToCurrentCity ? (
-                  <TextInput
-                    value={cityQuery}
-                    onChangeText={setCityQuery}
-                    placeholder={screenCopy.citySearchPlaceholder}
-                    style={styles.search}
-                  />
+                  <View style={styles.citySearchRow}>
+                    <TextInput
+                      value={cityQuery}
+                      onChangeText={setCityQuery}
+                      onSubmitEditing={handleCitySearchSubmit}
+                      placeholder={screenCopy.citySearchPlaceholder}
+                      returnKeyType="search"
+                      style={styles.citySearchInput}
+                    />
+                    <Pressable
+                      style={[
+                        styles.citySearchButton,
+                        isElectricHome && styles.citySearchButtonElectric,
+                      ]}
+                      onPress={handleCitySearchSubmit}
+                      disabled={cityOptionsLoading}
+                    >
+                      {cityOptionsLoading ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Ionicons name="search-outline" size={18} color="#FFFFFF" />
+                      )}
+                    </Pressable>
+                  </View>
                 ) : null}
                 {selectedCity ? (
                   <Text style={styles.count}>
@@ -2213,6 +2285,11 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
                 {!lockToCurrentCity && cityOptionsLoading && !cityOptions.length ? (
                   <Text style={styles.notice}>
                     {t("cityOptionsLoading", { defaultValue: "Loading available cities..." })}
+                  </Text>
+                ) : null}
+                {!lockToCurrentCity && !cityOptionsLoading && cityQuery.trim() && !cityOptions.length ? (
+                  <Text style={styles.notice}>
+                    {t("cityOptionsEmpty", { defaultValue: "No city with stations matched that name." })}
                   </Text>
                 ) : null}
                 {!lockToCurrentCity && cityOptions.length ? (
@@ -2649,6 +2726,33 @@ const styles = StyleSheet.create({
     borderColor: "#E2E8F0",
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  citySearchRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  citySearchInput: {
+    flex: 1,
+    minHeight: 44,
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  citySearchButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0F766E",
+  },
+  citySearchButtonElectric: {
+    backgroundColor: "#0EA5E9",
   },
   section: { marginTop: 10, marginBottom: 6, color: "#0F172A", fontWeight: "800" },
   chips: { paddingBottom: 6 },
