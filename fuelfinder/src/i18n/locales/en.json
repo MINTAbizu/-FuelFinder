@@ -199,9 +199,9 @@
     "login": {
       "title": "Welcome Back",
       "subtitle": "Login to continue with FuelFinder",
-      "email": "Email or plate number",
+      "email": "Plate number",
       "password": "Password",
-      "requiredError": "Enter email or plate number and password.",
+      "requiredError": "Enter your 5-digit plate number and password.",
       "cannotConnect": "Cannot connect to backend",
       "button": "Login",
       "newHere": "New here?",

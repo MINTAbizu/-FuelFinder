@@ -26,7 +26,7 @@ import {
 } from "../../services/queueService";
 
 const getWaitEstimate = (queueLength) => Math.max(2, Number(queueLength || 0) * 3);
-const REQUESTED_BANDS = ["10-20", "20-40", "40+"];
+const DEFAULT_REQUESTED_BAND = "40+";
 const FUEL_TYPES = ["gasoline", "diesel", "other"];
 const CHAPA_PLATFORM_FEE_PER_LITER_DEFAULT_BIRR = 0.25;
 const DEFAULT_FUEL_PRICES = {
@@ -49,6 +49,22 @@ function logReservationError(scope, error) {
     message,
     data,
   });
+}
+
+function buildChapaCustomerEmail(user) {
+  const visibleEmail = String(user?.email || "").trim();
+  if (visibleEmail) return visibleEmail;
+
+  const plateKey = String(user?.plateNumber || user?.plateNumberKey || "")
+    .trim()
+    .replace(/\D/g, "");
+  if (plateKey) return `plate-${plateKey}@customer.fuelfinder.local`;
+
+  const userKey = String(user?.id || user?._id || "guest")
+    .trim()
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 48) || "guest";
+  return `customer-${userKey}@customer.fuelfinder.local`;
 }
 
 function formatSupportedFuels(supportedFuels, labels) {
@@ -196,9 +212,6 @@ export default function StationDetails({ navigation, route }) {
       leaveSavedOffline: tr("stationDetails.leaveSavedOffline", {
         defaultValue: "Leave-queue request saved offline. It will sync when you reconnect.",
       }),
-      emailRequired: tr("stationDetails.emailRequired", {
-        defaultValue: "Email is required for Chapa payment.",
-      }),
       checkoutUrlMissing: tr("stationDetails.checkoutUrlMissing", {
         defaultValue: "Chapa checkout URL not available.",
       }),
@@ -255,7 +268,6 @@ export default function StationDetails({ navigation, route }) {
     });
   }, [navigation, t.screenTitle]);
 
-  const [requestedBand, setRequestedBand] = useState("10-20");
   const [fuelType, setFuelType] = useState("gasoline");
   const [requestedLiters, setRequestedLiters] = useState("10");
   const [reservationId, setReservationId] = useState("");
@@ -789,7 +801,7 @@ export default function StationDetails({ navigation, route }) {
 
       const reserve = await reserveQueueSlot({
         stationId,
-        requestedBand,
+        requestedBand: DEFAULT_REQUESTED_BAND,
         fuelType,
         requestedLiters: litersValue,
         unitPrice: selectedUnitPrice,
@@ -813,10 +825,7 @@ export default function StationDetails({ navigation, route }) {
       setReservationCode(nextReservationCode);
       setPaymentPhase("initiating");
 
-      const userEmail = String(user?.email || "").trim();
-      if (!userEmail) {
-        throw new Error(t.emailRequired);
-      }
+      const userEmail = buildChapaCustomerEmail(user);
 
       const nameParts = String(user?.name || "Customer").trim().split(/\s+/).filter(Boolean);
       const firstName = nameParts[0] || "Customer";
@@ -866,7 +875,6 @@ export default function StationDetails({ navigation, route }) {
     litersValue,
     pollReservation,
     queueEnabled,
-    requestedBand,
     selectedUnitPrice,
     stationId,
     t,
@@ -1089,21 +1097,6 @@ export default function StationDetails({ navigation, route }) {
             {t.objectIdError}
           </Text>
         ) : null}
-
-        <Text style={styles.metaText}>{t.requestedBand}</Text>
-        <View style={styles.optionsRow}>
-          {REQUESTED_BANDS.map((band) => (
-            <Pressable
-              key={band}
-              style={[styles.optionButton, requestedBand === band && styles.optionButtonActive]}
-              onPress={() => setRequestedBand(band)}
-            >
-              <Text style={[styles.optionText, requestedBand === band && styles.optionTextActive]}>
-                {band}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
 
         <Text style={styles.metaText}>{t.fuelType}</Text>
         <View style={styles.optionsRow}>

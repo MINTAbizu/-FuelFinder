@@ -39,7 +39,7 @@ export default function LoginScreen({ navigation, route }) {
 const { signIn, signInWithGoogle, signInWithBiometric } = useAuth();
 const { language, changeLanguage, supportedLanguages, t } = useLanguage();
 
-const [email,setEmail]=useState("");
+const [plateNumber,setPlateNumber]=useState("");
 const [password,setPassword]=useState("");
 const [showPassword,setShowPassword]=useState(false);
 
@@ -53,10 +53,14 @@ const [languageMenuOpen,setLanguageMenuOpen]=useState(false);
 const [languageQuery,setLanguageQuery]=useState("");
 
 useEffect(()=>{
-if(route?.params?.email){
-setEmail(String(route.params.email || ""));
+if(route?.params?.plateNumber){
+setPlateNumber(String(route.params.plateNumber || "").replace(/\D/g, "").slice(0,5));
 }
-},[route?.params?.email]);
+},[route?.params?.plateNumber]);
+
+const updatePlateNumber = (value)=>{
+setPlateNumber(String(value || "").replace(/\D/g, "").slice(0,5));
+};
 
 useFocusEffect(
 useMemo(()=>()=>{
@@ -168,7 +172,7 @@ const onLogin = async()=>{
 
 setError("");
 
-if(!email.trim() || !password){
+if(plateNumber.length !== 5 || !password){
 
 setError(t("auth.login.requiredError"));
 return;
@@ -180,7 +184,7 @@ setLoading(true);
 try{
 
 const result = await signIn({
-identifier:email.trim(),
+identifier:plateNumber.trim(),
 password
 });
 
@@ -189,7 +193,7 @@ if(result?.verificationRequired){
 navigation.navigate("VerifyPhone",{
 verificationToken:result.verificationToken,
 phone:result?.user?.phone || "",
-email:email.trim()
+plateNumber:plateNumber.trim()
 });
 
 }
@@ -199,7 +203,7 @@ if(result?.twoFactorRequired){
 navigation.navigate("VerifyPhone",{
 verificationToken:result.verificationToken,
 phone:result?.user?.phone || "",
-email:email.trim(),
+plateNumber:plateNumber.trim(),
 flowType:"two_factor"
 });
 
@@ -439,9 +443,11 @@ setLanguageMenuOpen(false);
 
  <TextInput
  placeholder={t("auth.login.email")}
- value={email}
- onChangeText={setEmail}
+ value={plateNumber}
+ onChangeText={updatePlateNumber}
  style={styles.input}
+ keyboardType="number-pad"
+ maxLength={5}
  />
  
  <Text style={styles.label}>
@@ -470,7 +476,7 @@ color="#777"
 
 <Pressable
 style={styles.forgotBtn}
-onPress={()=>navigation.navigate("ForgotPassword",{ email })}
+onPress={()=>navigation.navigate("ForgotPassword")}
 >
 <Text style={styles.forgotText}>
 Forgot Password?

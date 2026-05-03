@@ -197,9 +197,9 @@
     "login": {
       "title": "እንኳን ደህና መጡ",
       "subtitle": "FuelFinder ለመቀጠል ይግቡ",
-      "email": "ኢሜይል ወይም የሰሌዳ ቁጥር",
+      "email": "የሰሌዳ ቁጥር",
       "password": "የይለፍ ቃል",
-      "requiredError": "ኢሜይል ወይም የሰሌዳ ቁጥር እና የይለፍ ቃል ያስገቡ።",
+      "requiredError": "5 አሃዝ የሰሌዳ ቁጥር እና የይለፍ ቃል ያስገቡ።",
       "cannotConnect": "Backend ጋር መገናኘት አልተቻለም",
       "button": "ግባ",
       "newHere": "አዲስ ነህ?",

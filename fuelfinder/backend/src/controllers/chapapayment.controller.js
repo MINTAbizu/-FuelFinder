@@ -36,6 +36,14 @@ function buildTxRef(reservationId) {
   return `FF-${suffix}-${Date.now()}`;
 }
 
+function buildFallbackCustomerEmail(userId) {
+  const safeUserId = String(userId || "guest")
+    .trim()
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 48) || "guest";
+  return `customer-${safeUserId}@customer.fuelfinder.local`;
+}
+
 const DEFAULT_PLATFORM_FEE_PER_LITER_BIRR = 0.25;
 
 function getPlatformFeePerLiterBirr() {
@@ -365,7 +373,7 @@ exports.initialize = async (req, res) => {
 
     const userId = String(req.user?.id || "").trim();
     const reservationId = String(req.body.reservationId || req.body.ticketId || "").trim();
-    const email = String(req.body.email || "").trim();
+    const email = String(req.body.email || req.user?.email || buildFallbackCustomerEmail(userId)).trim();
     const firstName = String(req.body.first_name || "").trim();
     const lastName = String(req.body.last_name || "").trim();
     const currency = String(req.body.currency || "ETB").trim().toUpperCase();
@@ -374,9 +382,6 @@ exports.initialize = async (req, res) => {
 
     if (!isObjectId(reservationId)) {
       return res.status(400).json({ message: "reservationId is required." });
-    }
-    if (!email) {
-      return res.status(400).json({ message: "email is required." });
     }
     if (!firstName || !lastName) {
       return res.status(400).json({ message: "first_name and last_name are required." });

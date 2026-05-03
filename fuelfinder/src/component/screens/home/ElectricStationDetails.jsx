@@ -40,6 +40,22 @@ function getStationIdentity(station) {
   return String(station?.stationId || station?._id || station?.id || "").trim();
 }
 
+function buildChapaCustomerEmail(user) {
+  const visibleEmail = String(user?.email || "").trim();
+  if (visibleEmail) return visibleEmail;
+
+  const plateKey = String(user?.plateNumber || user?.plateNumberKey || "")
+    .trim()
+    .replace(/\D/g, "");
+  if (plateKey) return `plate-${plateKey}@customer.fuelfinder.local`;
+
+  const userKey = String(user?.id || user?._id || "guest")
+    .trim()
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 48) || "guest";
+  return `customer-${userKey}@customer.fuelfinder.local`;
+}
+
 function normalizePaymentDetails(value) {
   const source = value && typeof value === "object" ? value : {};
   return {
@@ -898,14 +914,7 @@ export default function ElectricStationDetails({ navigation, route }) {
         return;
       }
 
-      const userEmail = String(user?.email || "").trim();
-      if (!userEmail) {
-        throw new Error(
-          t("stationDetails.emailRequired", {
-            defaultValue: "Email is required for Chapa payment.",
-          })
-        );
-      }
+      const userEmail = buildChapaCustomerEmail(user);
 
       const nameParts = String(user?.name || "Customer").trim().split(/\s+/).filter(Boolean);
       const firstName = nameParts[0] || "Customer";

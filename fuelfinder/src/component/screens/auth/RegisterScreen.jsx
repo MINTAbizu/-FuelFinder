@@ -268,6 +268,11 @@ setLanguageMenuOpen(false);
  placeholder={t("auth.register.phoneOptional")}
  value={phone}
  onChangeText={setPhone}
+ keyboardType="phone-pad"
+ textContentType="telephoneNumber"
+ autoComplete="tel"
+ autoCapitalize="none"
+ autoCorrect={false}
  style={styles.input}
  />
 

@@ -197,9 +197,9 @@
     "login": {
       "title": "Baga Nagaan Dhuftan",
       "subtitle": "FuelFinder itti fufuuf seenaa",
-      "email": "Imeelii yookaan lakkoofsa gabatee",
+      "email": "Lakkoofsa gabatee",
       "password": "Jecha Darbii",
-      "requiredError": "Imeelii yookaan lakkoofsa gabatee fi jecha darbii galchi.",
+      "requiredError": "Lakkoofsa gabatee dijiitii 5 fi jecha darbii galchi.",
       "cannotConnect": "Backend waliin walqunnamtiin hin danda'amne",
       "button": "Seeni",
       "newHere": "Haaraa asitti?",
