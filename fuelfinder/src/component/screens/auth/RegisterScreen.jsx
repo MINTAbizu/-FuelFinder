@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
 ActivityIndicator,
 KeyboardAvoidingView,
@@ -15,27 +15,17 @@ View
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import * as WebBrowser from "expo-web-browser";
-import * as Google from "expo-auth-session/providers/google";
-
-import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
-
 import { useAuth } from "../../context/AuthContext";
 import { useLanguage } from "../../context/LanguageContext";
 
 import { API_BASE_URL } from "../../services/api";
-import { buildGoogleAuthConfig } from "../../services/googleAuthConfig";
-import { firebaseAuth } from "../../services/firebase";
-
-WebBrowser.maybeCompleteAuthSession();
 
 export default function RegisterScreen({ navigation }) {
 
-const { signUp, signInWithGoogle } = useAuth();
+const { signUp } = useAuth();
 const { language, changeLanguage, supportedLanguages, t } = useLanguage();
 
 const [name,setName]=useState("");
-const [email,setEmail]=useState("");
 const [phone,setPhone]=useState("");
 const [vehicleRegistrationType,setVehicleRegistrationType]=useState("");
 const [plateNumber,setPlateNumber]=useState("");
@@ -45,7 +35,6 @@ const [secure,setSecure]=useState(true);
 
 const [error,setError]=useState("");
 const [loading,setLoading]=useState(false);
-const [googleLoading,setGoogleLoading]=useState(false);
 
 const [languageMenuOpen,setLanguageMenuOpen]=useState(false);
 const [languageQuery,setLanguageQuery]=useState("");
@@ -61,99 +50,13 @@ const vehicleTypeOptions = useMemo(()=>[
 { value:"government", label:t("auth.register.vehicleTypes.government") }
 ], [t]);
 
-/* GOOGLE CONFIG */
-
-const googleConfig = useMemo(()=>{
-return buildGoogleAuthConfig();
-
-},[]);
-
-const [request,response,promptAsync] =
-Google.useAuthRequest(googleConfig);
-
-/* GOOGLE LOGIN */
-
-useEffect(()=>{
-
-if(response?.type !== "success") return;
-
-const idToken = response.params?.id_token;
-
-if(!idToken){
-setError(t("auth.googleFailed"));
-return;
-}
-
-(async()=>{
-
-setGoogleLoading(true);
-setError("");
-
-  try{
- 
-  const credential =
-  GoogleAuthProvider.credential(idToken);
-
-const firebaseUser =
-await signInWithCredential(firebaseAuth,credential);
-
-  const firebaseIdToken =
-  await firebaseUser.user.getIdToken();
- 
-  const result =
-  await signInWithGoogle({ idToken:firebaseIdToken });
-
-  if(result?.verificationRequired){
-
-  if(!result?.verificationToken){
-  setError(t("somethingWentWrong"));
-  return;
-  }
-
-  navigation.navigate("VerifyPhone",{
-  verificationToken:result.verificationToken,
-  phone:result?.user?.phone || "",
-  email:result?.user?.email || ""
-  });
-
-  }
-
-  if(result?.twoFactorRequired){
-
-  navigation.navigate("VerifyPhone",{
-  verificationToken:result.verificationToken,
-  phone:result?.user?.phone || "",
-  email:result?.user?.email || "",
-  flowType:"two_factor"
-  });
-
-  }
- 
-  }catch(err){
-
-const backendMessage = err?.response?.data?.message;
-
-if(backendMessage){
-setError(backendMessage);
-}else{
- setError(`${t("auth.register.cannotConnect")} (${API_BASE_URL})`);
-}
-
-}finally{
-setGoogleLoading(false);
-}
-
-})();
-
-},[response]);
-
 /* REGISTER */
 
 const onRegister = async()=>{
 
 setError("");
 
-if(!name || !email || !phone || !vehicleRegistrationType || plateNumber.length !== 5 || !password){
+if(!name || !phone || !vehicleRegistrationType || plateNumber.length !== 5 || !password){
 
  setError(t("auth.register.requiredError"));
 return;
@@ -167,7 +70,6 @@ setLoading(true);
   const result =
   await signUp({
   name:name.trim(),
-  email:email.trim(),
   phone:phone.trim(),
   vehicleRegistrationType,
   plateNumber:plateNumber.trim(),
@@ -184,9 +86,7 @@ setLoading(true);
   navigation.navigate("VerifyPhone",{
   verificationToken:result.verificationToken,
   phone:result?.user?.phone || phone.trim(),
-  email:result?.user?.email || email.trim(),
-  emailVerificationSent: result?.emailVerificationSent,
-  emailVerificationMessage: result?.emailVerificationMessage || ""
+  plateNumber:result?.user?.plateNumber || plateNumber.trim()
   });
 
   }
@@ -204,21 +104,6 @@ setError(backendMessage);
 }finally{
 setLoading(false);
 }
-
-};
-
-/* GOOGLE BUTTON */
-
-const onGoogleRegister = async()=>{
-
-setError("");
-
-if(!request){
-setError(t("auth.googleNotReady"));
-return;
-}
-
-await promptAsync();
 
 };
 
@@ -376,17 +261,6 @@ setLanguageMenuOpen(false);
  />
  
  <Text style={styles.label}>
- {t("auth.register.email")}
- </Text>
-
- <TextInput
- placeholder={t("auth.register.email")}
- value={email}
- onChangeText={setEmail}
- style={styles.input}
- />
- 
- <Text style={styles.label}>
  {t("auth.register.phoneOptional")}
  </Text>
 
@@ -487,26 +361,6 @@ onPress={()=>navigation.navigate("Login")}
  {`${t("auth.register.alreadyHave")} ${t("auth.register.login")}`}
  </Text>
  </Pressable>
-
-<View style={styles.dividerRow}>
-<View style={styles.line}/>
-<Text style={styles.or}>or</Text>
-<View style={styles.line}/>
-</View>
-
-<Pressable
-style={styles.googleBtn}
-onPress={onGoogleRegister}
->
-
-{googleLoading
-? <ActivityIndicator/>
-: <Text style={styles.googleText}>
-{t("auth.google")}
-</Text>
-}
-
-</Pressable>
 
 </View>
 
@@ -655,25 +509,6 @@ marginBottom:15
 
 createText:{color:"#0F766E",fontWeight:"700"},
 
-dividerRow:{
-flexDirection:"row",
-alignItems:"center",
-marginBottom:20
-},
-
-line:{flex:1,height:1,backgroundColor:"#ddd"},
-or:{marginHorizontal:10,color:"#777"},
-
-googleBtn:{
-borderWidth:1,
-borderColor:"#E2E8F0",
-borderRadius:25,
-padding:14,
-alignItems:"center",
-backgroundColor:"#F8FAFC"
-},
-
-googleText:{fontWeight:"700"},
 error:{color:"red"}
 
 });

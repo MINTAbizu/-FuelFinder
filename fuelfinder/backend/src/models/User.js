@@ -1,5 +1,9 @@
 const mongoose = require("mongoose");
 
+function buildPlateNumberKey(value) {
+  return String(value || "").trim().replace(/\D/g, "");
+}
+
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -46,6 +50,13 @@ const userSchema = new mongoose.Schema(
     pendingEmailVerificationLastSentAt: { type: Date, default: null },
     authProvider: { type: String, enum: ["local", "google"], default: "local" },
     googleSub: { type: String, default: "" },
+    vehicleRegistrationType: {
+      type: String,
+      enum: ["", "taxi", "taxi_automobile", "private", "government"],
+      default: ""
+    },
+    plateNumber: { type: String, trim: true, default: "" },
+    plateNumberKey: { type: String, trim: true, default: "" },
     passwordHash: { type: String, required: true },
     refreshTokenHash: { type: String, default: "" },
     isBlocked: { type: Boolean, default: false },
@@ -67,9 +78,32 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+userSchema.pre("validate", function normalizeCustomerPlate(next) {
+  if ((this.role || "customer") === "customer") {
+    const plateNumberKey = buildPlateNumberKey(this.plateNumberKey || this.plateNumber);
+    this.plateNumber = plateNumberKey;
+    this.plateNumberKey = plateNumberKey;
+  } else {
+    this.plateNumber = "";
+    this.plateNumberKey = "";
+    this.vehicleRegistrationType = "";
+  }
+  next();
+});
+
 userSchema.index({ googleSub: 1 }, { sparse: true });
 userSchema.index({ "biometricDevices.deviceId": 1 }, { sparse: true });
 userSchema.index({ "pushTokens.token": 1 }, { sparse: true });
 userSchema.index({ pendingEmail: 1 }, { sparse: true });
+userSchema.index(
+  { plateNumberKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      role: "customer",
+      plateNumberKey: { $type: "string", $gt: "" }
+    }
+  }
+);
 
 module.exports = mongoose.model("User", userSchema);

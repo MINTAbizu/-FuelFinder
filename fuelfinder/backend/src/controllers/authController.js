@@ -32,18 +32,31 @@ const OTP_SMS_RESPONSE_WAIT_MS = Math.max(
   Number(process.env.OTP_SMS_RESPONSE_WAIT_MS || 1500)
 );
 const PUBLIC_USER_SELECT =
-  "_id name email emailVerified pendingEmail phone phoneVerified twoFactorEnabled authProvider isBlocked role preferredStationType organizationId cityIds stationIds branchIds createdAt";
+  "_id name email emailVerified pendingEmail phone phoneVerified twoFactorEnabled authProvider isBlocked role vehicleRegistrationType plateNumber plateNumberKey preferredStationType organizationId cityIds stationIds branchIds createdAt";
 const AUTH_FLOW_USER_SELECT = `${PUBLIC_USER_SELECT} passwordHash refreshTokenHash googleSub biometricDevices emailVerificationHash emailVerificationExpiresAt emailVerificationLastSentAt pendingEmailVerificationHash pendingEmailVerificationExpiresAt pendingEmailVerificationLastSentAt phoneVerificationHash phoneVerificationExpiresAt phoneVerificationAttempts phoneVerificationLastSentAt twoFactorOtpHash twoFactorOtpExpiresAt twoFactorOtpAttempts twoFactorOtpLastSentAt passwordResetHash passwordResetExpiresAt passwordResetAttempts passwordResetLastSentAt`;
 const REFRESH_USER_SELECT = `${PUBLIC_USER_SELECT} refreshTokenHash`;
 const BIOMETRIC_USER_SELECT = `${PUBLIC_USER_SELECT} biometricDevices`;
 const BCRYPT_HASH_PREFIX = /^\$2[abxy]\$\d{2}\$/;
+const LOCAL_PLATE_EMAIL_DOMAIN = "plate.fuelfinder.local";
 
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
 
+function buildPlateNumberKey(value) {
+  return String(value || "").trim().replace(/\D/g, "");
+}
+
 function normalizePhone(phone) {
   return String(phone || "").trim().replace(/[^\d+]/g, "");
+}
+
+function buildLocalPlateEmail(plateNumberKey) {
+  return `${buildPlateNumberKey(plateNumberKey)}@${LOCAL_PLATE_EMAIL_DOMAIN}`;
+}
+
+function isLocalPlateEmail(email) {
+  return normalizeEmail(email).endsWith(`@${LOCAL_PLATE_EMAIL_DOMAIN}`);
 }
 
 function normalizePushToken(value) {
@@ -57,9 +70,11 @@ function isValidExpoPushToken(value) {
 function buildAuthPayload(user) {
   return {
     sub: String(user._id),
-    email: user.email,
+    email: isLocalPlateEmail(user.email) ? "" : user.email,
     name: user.name,
     role: user.role || "customer",
+    vehicleRegistrationType: user.vehicleRegistrationType || "",
+    plateNumber: user.plateNumber || "",
     organizationId: user.organizationId ? String(user.organizationId) : "",
     authProvider: user.authProvider || "local"
   };
@@ -69,8 +84,8 @@ function buildUserResponse(user) {
   return {
     id: user._id,
     name: user.name,
-    email: user.email,
-    emailVerified: Boolean(user.emailVerified),
+    email: isLocalPlateEmail(user.email) ? "" : user.email,
+    emailVerified: isLocalPlateEmail(user.email) ? false : Boolean(user.emailVerified),
     pendingEmail: String(user.pendingEmail || ""),
     pendingEmailMasked: maskEmailForDisplay(user.pendingEmail || ""),
     phone: user.phone || "",
@@ -79,6 +94,8 @@ function buildUserResponse(user) {
     authProvider: user.authProvider || "local",
     isBlocked: Boolean(user.isBlocked),
     role: user.role || "customer",
+    vehicleRegistrationType: user.vehicleRegistrationType || "",
+    plateNumber: user.plateNumber || "",
     preferredStationType: normalizeStationType(user.preferredStationType) || "",
     organizationId: user.organizationId || null,
     cityIds: user.cityIds || [],
@@ -656,16 +673,28 @@ exports.register = async (req, res) => {
   try {
     const name = String(req.body.name || "").trim();
     const phone = normalizePhone(req.body.phone);
-    const email = normalizeEmail(req.body.email);
+    const requestedEmail = normalizeEmail(req.body.email);
+    const vehicleRegistrationType = String(req.body.vehicleRegistrationType || "").trim().toLowerCase();
+    const plateNumberKey = buildPlateNumberKey(req.body.plateNumberKey || req.body.plateNumber);
+    const email = requestedEmail || buildLocalPlateEmail(plateNumberKey);
     const password = String(req.body.password || "");
     const role = String(req.body.role || "customer").trim().toLowerCase();
 
-    const existing = await User.exists({ email });
-    if (existing) {
-      return res.status(409).json({ message: "Email already registered." });
-    }
     if (role !== "customer") {
       return res.status(403).json({ message: "Public registration only supports customer role." });
+    }
+    const existingPlate = await User.findOne({
+      role: "customer",
+      $or: [{ plateNumberKey }, { plateNumber: plateNumberKey }]
+    }).select("_id");
+    if (existingPlate) {
+      return res.status(409).json({ message: "Plate number already registered." });
+    }
+    if (requestedEmail) {
+      const existingEmail = await User.exists({ email: requestedEmail });
+      if (existingEmail) {
+        return res.status(409).json({ message: "Email already registered." });
+      }
     }
 
     const passwordHash = await bcrypt.hash(password, PASSWORD_SALT_ROUNDS);
@@ -673,7 +702,10 @@ exports.register = async (req, res) => {
       name,
       phone,
       email,
-      emailVerified: false,
+      emailVerified: !requestedEmail,
+      vehicleRegistrationType,
+      plateNumber: plateNumberKey,
+      plateNumberKey,
       passwordHash,
       role: "customer",
       phoneVerified: false
@@ -687,31 +719,17 @@ exports.register = async (req, res) => {
       throw sendErr;
     }
 
-    let emailVerification = null;
-    let emailVerificationMessage = "";
-    try {
-      emailVerification = await issueEmailVerification(user, { enforceCooldown: false });
-    } catch (emailError) {
-      console.error(
-        "[auth:email] Failed to send registration verification email:",
-        describeError(emailError)
-      );
-      emailVerificationMessage =
-        "Your account was created and your phone code was sent, but we could not send the email verification link yet. Verify your phone first, then resend the email from your profile.";
-    }
-
     return res.status(201).json({
       verificationRequired: true,
       verificationToken: verification.verificationToken,
       expiresAt: verification.expiresAt,
       resendCooldownSeconds: verification.resendCooldownSeconds,
-      emailVerificationRequired: true,
-      emailVerificationSent: Boolean(emailVerification && !emailVerification.reused),
-      emailVerificationResendCooldownSeconds: Number(emailVerification?.resendCooldownSeconds || 0),
-      emailVerificationMessage,
       user: buildUserResponse(user)
     });
   } catch (error) {
+    if (error?.code === 11000 && (error?.keyPattern?.plateNumberKey || error?.keyPattern?.plateNumber)) {
+      return res.status(409).json({ message: "Plate number already registered." });
+    }
     console.error("[auth:register] Registration failed:", describeError(error));
     return res.status(500).json({ message: "Registration failed." });
   }
@@ -770,9 +788,12 @@ exports.bootstrapSuperAdmin = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
+    const plateNumberKey = buildPlateNumberKey(req.body.plateNumberKey || req.body.identifier);
     const password = String(req.body.password || "");
 
-    const user = await User.findOne({ email }).select(AUTH_FLOW_USER_SELECT);
+    const user = email
+      ? await User.findOne({ email }).select(AUTH_FLOW_USER_SELECT)
+      : await User.findOne({ role: "customer", plateNumberKey }).select(AUTH_FLOW_USER_SELECT);
     if (!user) {
       return res.status(401).json({ message: "Invalid credentials." });
     }

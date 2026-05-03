@@ -10,6 +10,17 @@ function normalizePhone(value) {
   return normalize(value).replace(/[^\d+]/g, "");
 }
 
+function buildPlateNumberKey(value) {
+  return normalize(value).replace(/\D/g, "");
+}
+
+function normalizeVehicleRegistrationType(value) {
+  const type = normalize(value).toLowerCase().replace(/[\s-]+/g, "_");
+  if (type === "goverment") return "government";
+  if (type === "taxi_automobil" || type === "taxi_auto_mobile") return "taxi_automobile";
+  return type;
+}
+
 function normalizeStationType(value) {
   const stationType = normalize(value).toLowerCase();
   if (stationType === "fuel" || stationType === "electric") {
@@ -34,14 +45,18 @@ function sendValidationError(res, message) {
   return res.status(400).json({ message });
 }
 
+const CUSTOMER_VEHICLE_TYPES = new Set(["taxi", "taxi_automobile", "private", "government"]);
+
 exports.validateRegister = (req, res, next) => {
   const name = normalize(req.body.name);
   const phone = normalizePhone(req.body.phone);
   const email = normalizeEmail(req.body.email);
   const password = String(req.body.password || "");
+  const vehicleRegistrationType = normalizeVehicleRegistrationType(req.body.vehicleRegistrationType);
+  const plateNumberKey = buildPlateNumberKey(req.body.plateNumber);
 
-  if (!name || !email || !password || !phone) {
-    return sendValidationError(res, "name, email, phone, and password are required.");
+  if (!name || !password || !phone || !vehicleRegistrationType || !plateNumberKey) {
+    return sendValidationError(res, "name, phone, plate type, plate number, and password are required.");
   }
   if (name.length > 120) {
     return sendValidationError(res, "name is too long.");
@@ -52,7 +67,7 @@ exports.validateRegister = (req, res, next) => {
   if (!isValidPhone(phone)) {
     return sendValidationError(res, "Invalid phone number format.");
   }
-  if (!isValidEmail(email)) {
+  if (email && !isValidEmail(email)) {
     return sendValidationError(res, "Invalid email format.");
   }
   if (!isStrongPassword(password)) {
@@ -61,26 +76,46 @@ exports.validateRegister = (req, res, next) => {
       "Password must be 8+ chars and include upper, lower, number, and special character."
     );
   }
+  if (!CUSTOMER_VEHICLE_TYPES.has(vehicleRegistrationType)) {
+    return sendValidationError(
+      res,
+      "vehicleRegistrationType must be taxi, taxi_automobile, private, or government."
+    );
+  }
+  if (!/^\d{5}$/.test(plateNumberKey)) {
+    return sendValidationError(res, "plateNumber must be exactly 5 digits.");
+  }
 
   req.body.name = name;
   req.body.phone = phone;
   req.body.email = email;
   req.body.password = password;
+  req.body.role = "customer";
+  req.body.vehicleRegistrationType = vehicleRegistrationType;
+  req.body.plateNumber = plateNumberKey;
+  req.body.plateNumberKey = plateNumberKey;
   return next();
 };
 
 exports.validateLogin = (req, res, next) => {
-  const email = normalizeEmail(req.body.email);
+  const identifier = normalize(req.body.identifier || req.body.email);
+  const email = normalizeEmail(identifier);
+  const plateNumberKey = buildPlateNumberKey(identifier);
   const password = String(req.body.password || "");
 
-  if (!email || !password) {
-    return sendValidationError(res, "email and password are required.");
+  if (!identifier || !password) {
+    return sendValidationError(res, "email or plate number and password are required.");
   }
-  if (!isValidEmail(email)) {
+  if (identifier.includes("@") && !isValidEmail(email)) {
     return sendValidationError(res, "Invalid email format.");
   }
+  if (!identifier.includes("@") && !/^\d{5}$/.test(plateNumberKey)) {
+    return sendValidationError(res, "Plate number must be exactly 5 digits.");
+  }
 
-  req.body.email = email;
+  req.body.identifier = identifier.includes("@") ? email : plateNumberKey;
+  req.body.email = identifier.includes("@") ? email : "";
+  req.body.plateNumberKey = identifier.includes("@") ? "" : plateNumberKey;
   req.body.password = password;
   return next();
 };

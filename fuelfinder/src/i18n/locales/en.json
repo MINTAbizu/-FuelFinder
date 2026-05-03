@@ -211,7 +211,6 @@
       "title": "Create Account",
       "subtitle": "Register and start using FuelFinder",
       "fullName": "Full name",
-      "email": "Email",
       "phoneOptional": "Phone (required)",
       "vehicleRegistrationType": "Plate registration type",
       "vehicleTypes": {
@@ -223,7 +222,7 @@
       "plateNumber": "Plate number (5 digits)",
       "password": "Password",
       "passwordHint": "Password: 8+ chars with upper/lower/number/special.",
-      "requiredError": "Name, email, phone, plate type, exactly 5 plate digits, and password are required.",
+      "requiredError": "Name, phone, plate type, exactly 5 plate digits, and password are required.",
       "cannotConnect": "Cannot connect to backend",
       "button": "Create Account",
       "alreadyHave": "Already have an account?",

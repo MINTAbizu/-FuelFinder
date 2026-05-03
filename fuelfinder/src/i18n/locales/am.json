@@ -209,8 +209,7 @@
       "title": "መለያ ፍጠር",
       "subtitle": "FuelFinder መጠቀም ለመጀመር ይመዝገቡ",
       "fullName": "ሙሉ ስም",
-      "email": "ኢሜይል",
-      "phoneOptional": "ስልክ (አማራጭ)",
+      "phoneOptional": "ስልክ (ያስፈልጋል)",
       "vehicleRegistrationType": "የሰሌዳ ምዝገባ አይነት",
       "vehicleTypes": {
         "taxi": "ታክሲ",
@@ -221,7 +220,7 @@
       "plateNumber": "የሰሌዳ ቁጥር (5 አሃዝ)",
       "password": "የይለፍ ቃል",
       "passwordHint": "የይለፍ ቃል: 8+ ፊደል ከፊደል ልዩነት, ቁጥር እና ልዩ ምልክት ጋር።",
-      "requiredError": "ስም፣ ኢሜይል፣ ስልክ፣ የሰሌዳ አይነት፣ 5 አሃዝ የሰሌዳ ቁጥር እና የይለፍ ቃል ያስፈልጋል።",
+      "requiredError": "ስም፣ ስልክ፣ የሰሌዳ አይነት፣ 5 አሃዝ የሰሌዳ ቁጥር እና የይለፍ ቃል ያስፈልጋል።",
       "cannotConnect": "Backend ጋር መገናኘት አልተቻለም",
       "button": "መለያ ፍጠር",
       "alreadyHave": "ቀድም ሲል መለያ አለዎት?",
