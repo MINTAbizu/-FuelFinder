@@ -39,7 +39,7 @@ export default function StationDiscoveryChoiceScreen() {
   const [error, setError] = useState("");
 
   const handleSelect = async (preferredStationType) => {
-    if (!user?.email || !user?.name) {
+    if (!user?.id || !user?.name) {
       setError("Your account details are missing. Please sign in again.");
       return;
     }
@@ -50,7 +50,6 @@ export default function StationDiscoveryChoiceScreen() {
     try {
       const data = await updateMyProfile({
         name: String(user.name || "").trim(),
-        email: String(user.email || "").trim(),
         phone: String(user.phone || "").trim(),
         preferredStationType,
       });

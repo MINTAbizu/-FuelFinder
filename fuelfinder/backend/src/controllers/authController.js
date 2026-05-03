@@ -934,7 +934,7 @@ exports.me = async (req, res) => {
 exports.updateProfile = async (req, res) => {
   try {
     const name = String(req.body.name || "").trim();
-    const email = normalizeEmail(req.body.email);
+    const requestedEmail = normalizeEmail(req.body.email);
     const phone = normalizePhone(req.body.phone);
     const preferredStationTypeInput = req.body.preferredStationType;
     const preferredStationType = normalizeStationType(preferredStationTypeInput);
@@ -945,13 +945,16 @@ exports.updateProfile = async (req, res) => {
       return res.status(403).json({ message: "Account is blocked. Contact administrator." });
     }
 
-    const nextEmailChanged = email !== normalizeEmail(user.email);
+    const nextEmailChanged =
+      Boolean(requestedEmail) &&
+      requestedEmail !== normalizeEmail(user.email) &&
+      !isLocalPlateEmail(user.email);
     if (nextEmailChanged && String(user.authProvider || "local") === "google") {
       return res.status(400).json({ message: "Google accounts cannot change email from the app." });
     }
 
     if (nextEmailChanged) {
-      const existingUser = await findConflictingEmailUser(email, user._id);
+      const existingUser = await findConflictingEmailUser(requestedEmail, user._id);
       if (existingUser) {
         return res.status(409).json({ message: "Email already registered." });
       }
@@ -980,12 +983,12 @@ exports.updateProfile = async (req, res) => {
     let emailChange = null;
     if (nextEmailChanged) {
       const previousPendingEmail = normalizeEmail(user.pendingEmail);
-      if (previousPendingEmail !== email) {
+      if (previousPendingEmail !== requestedEmail) {
         user.pendingEmailVerificationHash = "";
         user.pendingEmailVerificationExpiresAt = null;
         user.pendingEmailVerificationLastSentAt = null;
       }
-      user.pendingEmail = email;
+      user.pendingEmail = requestedEmail;
       emailChange = await issuePendingEmailVerification(user, {
         enforceCooldown: false,
         persistUser: true,

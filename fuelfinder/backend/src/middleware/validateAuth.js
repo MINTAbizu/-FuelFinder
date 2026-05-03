@@ -262,8 +262,8 @@ exports.validateUpdateProfile = (req, res, next) => {
   const preferredStationTypeRaw = req.body.preferredStationType;
   const preferredStationType = normalizeStationType(preferredStationTypeRaw);
 
-  if (!name || !email) {
-    return sendValidationError(res, "name and email are required.");
+  if (!name) {
+    return sendValidationError(res, "name is required.");
   }
   if (name.length > 120) {
     return sendValidationError(res, "name is too long.");
@@ -274,7 +274,7 @@ exports.validateUpdateProfile = (req, res, next) => {
   if (phone && !isValidPhone(phone)) {
     return sendValidationError(res, "Invalid phone number format.");
   }
-  if (!isValidEmail(email)) {
+  if (email && !isValidEmail(email)) {
     return sendValidationError(res, "Invalid email format.");
   }
   if (preferredStationTypeRaw !== undefined && preferredStationTypeRaw !== null && !preferredStationType) {
