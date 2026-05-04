@@ -2,6 +2,8 @@ import React from "react";
 import { Link } from "react-router-dom";
 
 export default function FooterSection() {
+  const currentYear = new Date().getFullYear();
+
   return (
     <footer className="footer">
       <div>
@@ -15,8 +17,8 @@ export default function FooterSection() {
         <a href="mailto:support@fuelfinder.app">Support</a>
       </div>
       <div className="footer-meta">
-        <span>© 2026 FuelFinder</span>
-        <span>Built for station teams</span>
+        <span>Copyright (c) {currentYear} FuelFinder. All rights reserved.</span>
+        <span>Protected under Ethiopian intellectual property rights.</span>
       </div>
     </footer>
   );

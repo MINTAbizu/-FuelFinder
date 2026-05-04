@@ -93,6 +93,10 @@ const HomeStack = createNativeStackNavigator();
 const ProfileStack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 const BIOMETRIC_PREF_KEY = "ff_pref_biometric_unlock";
+const CURRENT_COPYRIGHT_YEAR = new Date().getFullYear();
+const COPYRIGHT_NOTICE = `Copyright (c) ${CURRENT_COPYRIGHT_YEAR} FuelFinder. All rights reserved.`;
+const PROPERTY_RIGHTS_NOTICE =
+  "Protected under Ethiopian intellectual property rights. Unauthorized copying, distribution, modification, or commercial use is prohibited.";
 const HOME_MODE_OPTIONS = [
   {
     value: "fuel",
@@ -2672,6 +2676,18 @@ function ProfileScreen({ navigation }) {
           subtitle={t("privacyPolicySubtitle")}
           onPress={() => openUrl("https://fuelfinder.app/privacy")}
         />
+        <SettingRow
+          icon="shield-checkmark-outline"
+          title={t("copyrightNoticeTitle", { defaultValue: "Copyright and property rights" })}
+          subtitle={t("copyrightNoticeSubtitle", {
+            defaultValue: "FuelFinder is protected by Ethiopian intellectual property rights.",
+          })}
+          disabled
+        />
+      </View>
+      <View style={styles.legalNoticeCard}>
+        <Text style={styles.legalNoticeText}>{COPYRIGHT_NOTICE}</Text>
+        <Text style={styles.legalNoticeSubtext}>{PROPERTY_RIGHTS_NOTICE}</Text>
       </View>
 
       <Text style={styles.sectionTitle}>{t("dangerZone")}</Text>
@@ -3963,6 +3979,29 @@ const styles = StyleSheet.create({
   },
   savedStationMeta: {
     color: "#64748B",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
+  },
+  legalNoticeCard: {
+    marginTop: 10,
+    marginBottom: 4,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  legalNoticeText: {
+    color: "#0F172A",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "900",
+  },
+  legalNoticeSubtext: {
+    color: "#475569",
     fontSize: 12,
     lineHeight: 18,
     fontWeight: "700",

@@ -1,6 +1,7 @@
 {
   "name": "fuelfinder",
   "version": "1.0.0",
+  "license": "UNLICENSED",
   "main": "index.js",
   "scripts": {
     "start": "expo start",
