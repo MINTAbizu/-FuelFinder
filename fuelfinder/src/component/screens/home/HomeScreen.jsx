@@ -2710,6 +2710,16 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
             </View>
           </TouchableOpacity>
         )}
+        ListFooterComponent={() => (
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>
+              Copyright (c) {new Date().getFullYear()} FuelFinder. All rights reserved.
+            </Text>
+            <Text style={styles.footerText}>
+              Protected under Ethiopian intellectual property rights. Unauthorized copying, distribution, modification, or commercial use is prohibited.
+            </Text>
+          </View>
+        )}
       />
     </SafeAreaView>
   );
@@ -2721,6 +2731,12 @@ const styles = StyleSheet.create({
   title: { fontSize: 26, fontWeight: "900", color: "#0F172A" },
   titleElectric: { color: "#0C4A6E" },
   subtitle: { marginTop: 4, marginBottom: 10, color: "#64748B", fontWeight: "600" },
+  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 },
+  headerLeft: { flex: 1 },
+  headerRight: { alignItems: "flex-end", paddingLeft: 16 },
+  positionLabel: { fontSize: 12, color: "#64748B", fontWeight: "600", textAlign: "right" },
+  positionValue: { fontSize: 24, fontWeight: "900", color: "#DC2626", textAlign: "right" },
+  positionStation: { fontSize: 10, color: "#64748B", fontWeight: "500", textAlign: "right", maxWidth: 120 },
   mapCard: { borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: "#E2E8F0" },
   map: { height: 220, width: "100%" },
   row: { flexDirection: "row", gap: 8, marginTop: 10 },
