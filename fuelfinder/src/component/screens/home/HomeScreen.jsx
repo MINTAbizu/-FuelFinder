@@ -30,6 +30,7 @@ import {
   fetchCurrentDirectoryCity,
   fetchDirectoryStations,
 } from "../../services/stationDirectoryService";
+import { getMyActiveTickets } from "../../services/queueService";
 import PromotionCarousel from "./PromotionCarousel";
 
 const DEFAULT_REGION = {
@@ -988,6 +989,8 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
   const [offlineStationsNotice, setOfflineStationsNotice] = useState("");
   const [centerNotice, setCenterNotice] = useState("");
   const [routingError, setRoutingError] = useState("");
+  const [activeTickets, setActiveTickets] = useState([]);
+  const [loadingActiveTickets, setLoadingActiveTickets] = useState(false);
   const [routeCoords, setRouteCoords] = useState([]);
   const [routeSummary, setRouteSummary] = useState(null);
   const [activeRouteStationId, setActiveRouteStationId] = useState("");
@@ -1631,6 +1634,12 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     }, [applyLocationSnapshot, nearbyRadiusMeters, refreshSavedStations])
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      loadActiveTickets();
+    }, [loadActiveTickets])
+  );
+
   const handleBrowseModeChange = useCallback(
     async (nextMode) => {
       setBrowseMode(nextMode);
@@ -1665,6 +1674,19 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     },
     [cityOptions, handleSelectCity, loadCityStations, loadCurrentCityStations, loadNationwideStations, loadNearbyStations, location, lockToCurrentCity, selectedCity]
   );
+
+  const loadActiveTickets = useCallback(async () => {
+    setLoadingActiveTickets(true);
+    try {
+      const tickets = await getMyActiveTickets();
+      setActiveTickets(tickets);
+    } catch (error) {
+      console.error("[Home:loadActiveTickets]", error?.message || error);
+      setActiveTickets([]);
+    } finally {
+      setLoadingActiveTickets(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (browseMode !== "nationwide" || loadedRef.current) return;
@@ -1954,6 +1976,21 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
     }
   }, [drawRouteToStation, hasLocationPermission, location, locationError, pendingRouteStation, t]);
 
+  const activeTicketInfo = useMemo(() => {
+    if (!activeTickets.length) return null;
+    // Find the ticket with the lowest position (closest to being served)
+    const activeTicket = activeTickets.reduce((best, ticket) => {
+      const pos = Number(ticket?.position || 0);
+      const bestPos = Number(best?.position || 0);
+      return pos > 0 && (bestPos === 0 || pos < bestPos) ? ticket : best;
+    }, null);
+    if (!activeTicket) return null;
+    return {
+      position: Number(activeTicket.position || 0),
+      stationName: String(activeTicket.station?.name || "Unknown Station"),
+    };
+  }, [activeTickets]);
+
   const filteredStations = useMemo(() => {
     const base = browseMode === "city" ? mapCenter : (location || mapCenter);
     const query = deferredSearchText.trim().toLowerCase();
@@ -2191,8 +2228,19 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
         onScrollToIndexFailed={() => listRef.current?.scrollToOffset?.({ offset: 0, animated: true })}
         ListHeaderComponent={
           <View>
-            <Text style={[styles.title, isElectricHome && styles.titleElectric]}>{screenCopy.title}</Text>
-            <Text style={styles.subtitle}>{screenCopy.subtitle}</Text>
+            <View style={styles.headerRow}>
+              <View style={styles.headerLeft}>
+                <Text style={[styles.title, isElectricHome && styles.titleElectric]}>{screenCopy.title}</Text>
+                <Text style={styles.subtitle}>{screenCopy.subtitle}</Text>
+              </View>
+              {activeTicketInfo ? (
+                <View style={styles.headerRight}>
+                  <Text style={styles.positionLabel}>Position</Text>
+                  <Text style={styles.positionValue}>{activeTicketInfo.position}</Text>
+                  <Text style={styles.positionStation}>{activeTicketInfo.stationName}</Text>
+                </View>
+              ) : null}
+            </View>
 
             {isElectricHome ? (
               <View style={styles.electricHeroCard}>
