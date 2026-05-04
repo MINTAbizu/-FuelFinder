@@ -11,7 +11,7 @@ import {
 import { getMyActiveTickets } from "../services/queueService";
 
 const POLL_INTERVAL_MS = 15000;
-const QUEUE_APPROACHING_PEOPLE_AHEAD_THRESHOLD = 3;
+const QUEUE_APPROACHING_PEOPLE_AHEAD_THRESHOLD = 5;
 const AVERAGE_MINUTES_PER_CAR = 3;
 
 function buildQueueTurnPayload(ticket) {
@@ -39,6 +39,16 @@ function buildQueueApproachingPayload(ticket) {
 
   const stationName = String(ticket?.stationName || "").trim() || "Fuel Station";
   const reservationCode = String(ticket?.reservationCode || "").trim();
+  const eta = Math.max(1, peopleAhead * AVERAGE_MINUTES_PER_CAR);
+  let title = "Please arrive soon";
+  if (peopleAhead === 1) {
+    title = "Only one car ahead";
+  } else if (peopleAhead <= 3) {
+    title = `${peopleAhead} cars ahead`; 
+  } else {
+    title = `Queue closing in ${eta} minutes`;
+  }
+
   return {
     alertId: `queue_approaching_${ticketId}`,
     ticketId,
@@ -46,9 +56,9 @@ function buildQueueApproachingPayload(ticket) {
     stationId: String(ticket?.stationId || "").trim(),
     stationName,
     address: String(ticket?.address || "").trim(),
-    title: "Please arrive soon",
+    title,
     peopleAhead,
-    etaMinutes: Math.max(1, peopleAhead * AVERAGE_MINUTES_PER_CAR),
+    etaMinutes: eta,
   };
 }
 
