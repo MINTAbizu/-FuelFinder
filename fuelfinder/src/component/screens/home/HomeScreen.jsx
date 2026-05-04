@@ -3028,4 +3028,6 @@ const styles = StyleSheet.create({
   empty: { alignItems: "center", paddingTop: 30 },
   emptyTitle: { color: "#0F172A", fontWeight: "800", marginBottom: 4 },
   emptySub: { color: "#64748B", textAlign: "center" },
+  footer: { marginTop: 20, alignItems: "center", paddingBottom: 20 },
+  footerText: { fontSize: 10, color: "#64748B", textAlign: "center", marginBottom: 4 },
 });

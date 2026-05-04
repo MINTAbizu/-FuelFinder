@@ -2679,13 +2679,13 @@ function ProfileScreen({ navigation }) {
           icon="document-text-outline"
           title={t("termsOfService")}
           subtitle={t("termsOfServiceSubtitle")}
-          onPress={() => openUrl("https://fuelfinder.app/terms")}
+          disabled
         />
         <SettingRow
           icon="lock-closed-outline"
           title={t("privacyPolicy")}
           subtitle={t("privacyPolicySubtitle")}
-          onPress={() => openUrl("https://fuelfinder.app/privacy")}
+          disabled
         />
         <SettingRow
           icon="shield-checkmark-outline"
