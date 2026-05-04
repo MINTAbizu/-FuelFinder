@@ -336,6 +336,16 @@ function buildProfileFormState(user) {
   };
 }
 
+function buildProfileName(user) {
+  const name = String(user?.name || "").trim();
+  if (name) return name;
+
+  const plate = String(user?.plateNumber || user?.plateNumberKey || "").trim();
+  if (plate) return `Customer ${plate}`;
+
+  return "Customer";
+}
+
 function getStationHomeModeCopy(t, preferredStationType) {
   const normalized = normalizePreferredStationType(preferredStationType);
   if (normalized === "electric") {
@@ -1022,13 +1032,14 @@ function ProfileScreen({ navigation }) {
 
   const saveProfileChanges = React.useCallback(async () => {
     const payload = {
-      name: String(profileForm.name || "").trim(),
-      email: String(profileForm.email || "").trim().toLowerCase(),
+      name: String(profileForm.name || user?.name || buildProfileName(user)).trim(),
+      email: String(profileForm.email || user?.email || "").trim().toLowerCase(),
       phone: String(profileForm.phone || "").trim(),
       preferredStationType: normalizePreferredStationType(profileForm.preferredStationType),
     };
 
-    if (!payload.name || !payload.email) {
+    const requiresEmail = accountModal !== "homeMode" || Boolean(user?.email);
+    if (!payload.name || (requiresEmail && !payload.email)) {
       Alert.alert(
         t("profileAccountValidationTitle", { defaultValue: "Missing details" }),
         t("profileAccountValidationBody", { defaultValue: "Name and email are required." })
