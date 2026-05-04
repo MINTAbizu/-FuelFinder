@@ -503,7 +503,7 @@ function buildQueueTurnAlertBody(payload) {
   const windowText =
     Number.isFinite(callWindowMinutes) && callWindowMinutes > 0
       ? ` Please arrive within ${callWindowMinutes} minutes.`
-      : " Please arrive as soon as possible.";
+      : " Please go to the station now.";
 
   return `FuelFinder: It's your turn at ${stationName}.${codeText}${windowText}`;
 }
@@ -519,14 +519,19 @@ function buildQueueApproachingAlertBody(payload) {
   const codeText = reservationCode ? ` Ticket ${reservationCode}.` : "";
   const peopleText =
     peopleAhead > 0
-      ? ` Only ${peopleAhead} ${peopleAhead === 1 ? "customer is" : "customers are"} ahead of you`
-      : " Your turn is getting close";
+      ? `${peopleAhead} ${peopleAhead === 1 ? "person is" : "people are"} ahead of you`
+      : "Your turn is getting close";
   const etaText =
     etaMinutes > 0
-      ? ` About ${etaMinutes} ${etaMinutes === 1 ? "minute" : "minutes"} left, please start heading to the station.`
-      : " Please start heading to the station.";
+      ? ` Estimated wait ${etaMinutes} ${etaMinutes === 1 ? "minute" : "minutes"}.`
+      : "";
 
-  return `FuelFinder: ${peopleText} at ${stationName}.${codeText}${etaText}`;
+  const adviceText =
+    peopleAhead > 0
+      ? "Start heading to the station now so you arrive just in time and avoid extra waiting."
+      : "Head to the station now to be ready for your turn.";
+
+  return `FuelFinder: ${peopleText} at ${stationName}.${codeText}${etaText} ${adviceText}`;
 }
 
 export async function storeQueueTurnAlert(payload, options = {}) {
