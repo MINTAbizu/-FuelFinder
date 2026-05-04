@@ -21,10 +21,8 @@ import * as Location from "expo-location";
 import * as WebBrowser from "expo-web-browser";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLanguage } from "../../context/LanguageContext";
-import { useAuth } from "../../context/AuthContext";
 import api from "../../services/api";
 import { loadSavedStations, toggleSavedStation } from "../../services/accountStorage";
-import { getMyActiveTickets } from "../../services/queueService";
 import { isNetworkError } from "../../services/offlineService";
 import {
   fetchBrowseCities,
@@ -1000,8 +998,6 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
   const [promotionsLoading, setPromotionsLoading] = useState(false);
   const [promotionIndex, setPromotionIndex] = useState(0);
   const [liveStationSnapshots, setLiveStationSnapshots] = useState({});
-  const { accessToken } = useAuth();
-  const [activeQueueTicket, setActiveQueueTicket] = useState(null);
   const deferredCityQuery = useDeferredValue(cityQuery);
   const deferredSearchText = useDeferredValue(searchText);
 
@@ -1013,34 +1009,6 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
       // Ignore local saved-station refresh failures and keep the screen usable.
     }
   }, []);
-
-  const loadActiveQueueTicket = useCallback(async () => {
-    if (!accessToken) {
-      setActiveQueueTicket(null);
-      return;
-    }
-
-    try {
-      const tickets = await getMyActiveTickets();
-      setActiveQueueTicket(Array.isArray(tickets) && tickets.length ? tickets[0] : null);
-    } catch (_error) {
-      // Ignore queue fetch failures; home page should still render normally.
-      setActiveQueueTicket(null);
-    }
-  }, [accessToken]);
-
-  useEffect(() => {
-    void loadActiveQueueTicket();
-    if (!accessToken) {
-      return undefined;
-    }
-
-    const intervalId = setInterval(() => {
-      void loadActiveQueueTicket();
-    }, 15000);
-
-    return () => clearInterval(intervalId);
-  }, [accessToken, loadActiveQueueTicket]);
 
   const loadBrowseCities = useCallback(
     async (query = "") => {
@@ -1801,9 +1769,8 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
       }
     } finally {
       setRefreshing(false);
-      void loadActiveQueueTicket();
     }
-  }, [browseMode, loadCityStations, loadCurrentCityStations, loadNationwideStations, loadNearbyStations, location, lockToCurrentCity, selectedCity, loadActiveQueueTicket]);
+  }, [browseMode, loadCityStations, loadCurrentCityStations, loadNationwideStations, loadNearbyStations, location, lockToCurrentCity, selectedCity]);
 
   useEffect(() => {
     let active = true;
@@ -2226,34 +2193,6 @@ export default function HomeScreen({ navigation, route, homeConfig = null }) {
           <View>
             <Text style={[styles.title, isElectricHome && styles.titleElectric]}>{screenCopy.title}</Text>
             <Text style={styles.subtitle}>{screenCopy.subtitle}</Text>
-
-            {activeQueueTicket ? (
-              <View
-                style={[
-                  styles.queueHeaderCard,
-                  isElectricHome && styles.queueHeaderCardElectric,
-                ]}
-              >
-                <Text style={styles.queueHeaderTitle}>
-                  {String(activeQueueTicket?.status || "").trim().toLowerCase() === "called"
-                    ? t("homeScreen.queueTurnNow", { defaultValue: "Your turn now" })
-                    : `#${Number(activeQueueTicket?.position || 0)}`}
-                </Text>
-                <Text style={styles.queueHeaderSubtitle}>
-                  {String(activeQueueTicket?.status || "").trim().toLowerCase() === "called"
-                    ? t("homeScreen.queueTurnNowBody", {
-                        defaultValue: `Please go to ${String(activeQueueTicket?.stationName || "the station").trim()} now.`,
-                      })
-                    : Number(activeQueueTicket?.position || 0) <= 1
-                      ? t("homeScreen.queueNext", { defaultValue: "You are next" })
-                      : t("homeScreen.queuePeopleAhead", {
-                          defaultValue: `${Math.max(0, Number(activeQueueTicket?.position || 1) - 1)} ${
-                            Math.max(0, Number(activeQueueTicket?.position || 1) - 1) === 1 ? "person" : "people"
-                          } ahead`,
-                        })}
-                </Text>
-              </View>
-            ) : null}
 
             {isElectricHome ? (
               <View style={styles.electricHeroCard}>
@@ -2734,32 +2673,6 @@ const styles = StyleSheet.create({
   title: { fontSize: 26, fontWeight: "900", color: "#0F172A" },
   titleElectric: { color: "#0C4A6E" },
   subtitle: { marginTop: 4, marginBottom: 10, color: "#64748B", fontWeight: "600" },
-  queueHeaderCard: {
-    marginTop: 10,
-    marginBottom: 14,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#BFDBFE",
-    backgroundColor: "#EFF6FF",
-    padding: 18,
-  },
-  queueHeaderCardElectric: {
-    borderColor: "#7DD3FC",
-    backgroundColor: "#E0F2FE",
-  },
-  queueHeaderTitle: {
-    fontSize: 38,
-    fontWeight: "900",
-    color: "#0F172A",
-    lineHeight: 44,
-  },
-  queueHeaderSubtitle: {
-    marginTop: 8,
-    color: "#334155",
-    fontWeight: "700",
-    fontSize: 14,
-    lineHeight: 20,
-  },
   mapCard: { borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: "#E2E8F0" },
   map: { height: 220, width: "100%" },
   row: { flexDirection: "row", gap: 8, marginTop: 10 },
