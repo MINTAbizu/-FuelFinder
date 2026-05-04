@@ -33,13 +33,23 @@ const OPTIONS = [
   },
 ];
 
+function buildProfileName(user) {
+  const name = String(user?.name || "").trim();
+  if (name) return name;
+
+  const plate = String(user?.plateNumber || user?.plateNumberKey || "").trim();
+  if (plate) return `Customer ${plate}`;
+
+  return "Customer";
+}
+
 export default function StationDiscoveryChoiceScreen() {
   const { user, replaceUser, signOut } = useAuth();
   const [savingChoice, setSavingChoice] = useState("");
   const [error, setError] = useState("");
 
   const handleSelect = async (preferredStationType) => {
-    if (!user?.id || !user?.name) {
+    if (!user?.id) {
       setError("Your account details are missing. Please sign in again.");
       return;
     }
@@ -49,7 +59,7 @@ export default function StationDiscoveryChoiceScreen() {
 
     try {
       const data = await updateMyProfile({
-        name: String(user.name || "").trim(),
+        name: buildProfileName(user),
         phone: String(user.phone || "").trim(),
         preferredStationType,
       });
