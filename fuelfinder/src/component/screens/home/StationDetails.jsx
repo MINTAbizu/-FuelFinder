@@ -58,13 +58,13 @@ function buildChapaCustomerEmail(user) {
   const plateKey = String(user?.plateNumber || user?.plateNumberKey || "")
     .trim()
     .replace(/\D/g, "");
-  if (plateKey) return `plate-${plateKey}@customer.fuelfinder.local`;
+  if (plateKey) return `plate-${plateKey}@customer.fuelfinder.app`;
 
   const userKey = String(user?.id || user?._id || "guest")
     .trim()
     .replace(/[^a-zA-Z0-9]/g, "")
     .slice(0, 48) || "guest";
-  return `customer-${userKey}@customer.fuelfinder.local`;
+  return `customer-${userKey}@customer.fuelfinder.app`;
 }
 
 function formatSupportedFuels(supportedFuels, labels) {

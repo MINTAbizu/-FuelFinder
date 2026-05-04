@@ -41,7 +41,7 @@ function buildFallbackCustomerEmail(userId) {
     .trim()
     .replace(/[^a-zA-Z0-9]/g, "")
     .slice(0, 48) || "guest";
-  return `customer-${safeUserId}@customer.fuelfinder.local`;
+  return `customer-${safeUserId}@customer.fuelfinder.app`;
 }
 
 const DEFAULT_PLATFORM_FEE_PER_LITER_BIRR = 0.25;
