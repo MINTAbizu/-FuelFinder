@@ -8,7 +8,7 @@ export default function FooterSection() {
     <footer className="footer">
       <div>
         <h3>FuelFinder Owner</h3>
-        <p>Operations intelligence for fuel networks.</p>
+        <p className="footerw" >Operations intelligence for fuel networks.</p>
       </div>
       <div className="footer-links">
         <Link to="/features">Platform</Link>

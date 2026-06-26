@@ -24,16 +24,16 @@ export default function ContactPage() {
               </p>
               <div className="contact-list">
                 <div>
-                  <span>Sales</span>
-                  <strong>owners@fuelfinder.app</strong>
+                  {/* <span>Sales</span>
+                  <strong>mintesenotbizuayehw@gmail.com</strong> */}
                 </div>
                 <div>
-                  <span>Support</span>
-                  <strong>support@fuelfinder.app</strong>
+                  <span>Founder(CEO) <br /></span>
+                  <strong>mintesenotbizuayehw@gmail.com</strong>
                 </div>
                 <div>
-                  <span>Hotline</span>
-                  <strong>+251 11 555 5555</strong>
+                  <span>Hotline  </span>
+                  <strong>+251982314943</strong>
                 </div>
               </div>
             </div>

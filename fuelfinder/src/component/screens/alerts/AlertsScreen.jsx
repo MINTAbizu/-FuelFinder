@@ -297,6 +297,8 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 12,
+    paddingVertical: 12,
+    marginBottom: 8,
   },
   headerTextWrap: {
     flex: 1,

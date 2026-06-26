@@ -2,7 +2,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 import SiteNav from "../components/SiteNav.jsx";
 import FooterSection from "../sections/FooterSection.jsx";
-
+import qr from '.././../Assets/SharedScreenshot.jpg'
 const dailyQuestions = [
   {
     label: "Queue",
@@ -164,7 +164,7 @@ export default function LandingPage() {
           <div className="home-hero-shell">
             <div className="home-hero-copy">
               <p className="home-kicker">FuelFinder Owner</p>
-              <h1>Know what is happening at every station before someone has to call you.</h1>
+              <h1 className="home-kicker">Know what is happening at every station before someone has to call you.</h1>
               <p className="home-lead">
                 FuelFinder Owner turns the noisy parts of station operations into one calm screen:
                 queue flow, fuel stock, payments, team access, and station details.
@@ -191,19 +191,19 @@ export default function LandingPage() {
               <article className="home-board">
                 <div className="home-board-head">
                   <div>
-                    <span className="home-board-tag">Example station view</span>
-                    <h2>Bole Road Station</h2>
+                    <span className="home-board-tag"><h3 className="home-board-tag">Example station view</h3></span>
+                    <h2 >Bole Road Station</h2>
                   </div>
-                  <p>Tuesday, 11:40 AM</p>
+                  {/* <p className="home-board-tag">Tuesday, 11:40 AM</p> */}
                 </div>
 
                 <div className="home-board-grid">
                   <article className="home-board-card">
-                    <span>Queue</span>
-                    <strong>18 waiting</strong>
+                    <h1>Queue</h1>
+                    <small>18 waiting</small>
                     <div className="home-board-list">
-                      <p>Average wait: 11 minutes</p>
-                      <p>Next ticket ready to call</p>
+                      <small>Average wait: 11 minutes</small>
+                      <small>Next ticket ready to call</small>
                     </div>
                   </article>
 
@@ -211,8 +211,8 @@ export default function LandingPage() {
                     <span>Fuel</span>
                     <strong>14,520 L</strong>
                     <div className="home-board-list">
-                      <p>Gasoline: 8,400 L</p>
-                      <p>Diesel: 6,120 L</p>
+                      <psmall>Gasoline: 8,400 L</psmall>
+                      <small>Diesel: 6,120 L</small>
                     </div>
                   </article>
 
@@ -220,8 +220,8 @@ export default function LandingPage() {
                     <span>Payments</span>
                     <strong>ETB 60,800</strong>
                     <div className="home-board-list">
-                      <p>Telebirr and cash both visible</p>
-                      <p>Payout estimate ready to review</p>
+                      <small>Telebirr and any Ethiopian bank </small>
+                      <small>Payout estimate ready to review</small>
                     </div>
                   </article>
 
@@ -229,8 +229,8 @@ export default function LandingPage() {
                     <span>Team</span>
                     <strong>6 on shift</strong>
                     <div className="home-board-list">
-                      <p>Roles match today&apos;s operations</p>
-                      <p>Account cleanup stays in reach</p>
+                      <small>Roles match today&apos;s operations</small>
+                      <small>Account cleanup stays in reach</small>
                     </div>
                   </article>
                 </div>
@@ -270,7 +270,7 @@ export default function LandingPage() {
           <div className="home-section-header">
             <span className="eyebrow">Built Around Real Questions</span>
             <h2>The screen follows the questions owners ask in real life.</h2>
-            <p>
+            <p className="vague" >
               Not vague dashboard language. Just the checks people make when the station gets busy,
               stock feels tight, or the numbers start looking strange.
             </p>
@@ -296,8 +296,8 @@ export default function LandingPage() {
           <div className="home-section-header">
             <span className="eyebrow">A Better Rhythm</span>
             <h2>From opening shift to close-out, the page keeps the day readable.</h2>
-            <p>
-              The goal is not more widgets. It is giving owners and managers one place to see what
+            <p className="goal">
+              The goal is not more widgets. It is giving owners and managers and city manager  one place to see what
               needs attention before a small issue becomes a noisy one.
             </p>
           </div>
@@ -341,10 +341,10 @@ export default function LandingPage() {
           <div className="home-section-header">
             <span className="eyebrow">One Workspace</span>
             <h2>Everything important lives in one owner workflow, not ten separate tabs.</h2>
-            <p>
+            <small className="console">
               The console already has real operational depth. This new landing page shows that more
               honestly, with clearer structure and less startup-template polish.
-            </p>
+            </small>
           </div>
 
           <div className="home-workspace-grid">
@@ -371,12 +371,13 @@ export default function LandingPage() {
         <section className="home-section">
           <div className="home-section-header">
             <span className="eyebrow">Shared Ownership</span>
-            <h2>Made for the people who actually get the calls.</h2>
-            <p>
+            <h2 >Made for the people who actually get the calls.</h2>
+            <small
+            >
               Owners, station managers, and admin teams all need the same source of truth, but not
               the same level of access. The product already supports that, and the page should say
               it plainly.
-            </p>
+            </small>
           </div>
 
           <div className="home-role-grid">
@@ -399,10 +400,10 @@ export default function LandingPage() {
           <div className="home-section-header">
             <span className="eyebrow">FAQ</span>
             <h2>Short answers to the practical questions.</h2>
-            <p>
+            <small>
               The page should help someone understand the product quickly, without making them read
               through inflated claims.
-            </p>
+            </small>
           </div>
 
           <div className="home-faq-grid">
@@ -420,19 +421,44 @@ export default function LandingPage() {
             <div>
               <span className="eyebrow">Start Simply</span>
               <h2>Start with one station, then grow when the team is ready.</h2>
-              <p>
+              <small>
                 You do not need a giant rollout to get value from a calmer owner view. Open the
                 console now, or talk with the team about how your stations are set up today.
-              </p>
+              </small>
             </div>
 
             <div className="home-cta-actions">
               <Link className="primary-btn" to="/app">
                 Open Owner Console
               </Link>
-              <a className="secondary-btn" href="mailto:owners@fuelfinder.app">
+              <a className="secondary-btn" href="mailto:mintesenotbizuayehw@gmail.com">
                 Email the team
               </a>
+            </div>
+          </div>
+        </section>
+
+        <section className="home-sections home-cta" id="contact">
+          <div className="home-cta-card">
+            <div>
+              <span className="eyebrow"> download customer App here</span>
+              <h1>  create Account  and find ur faviourte Stations Fuel either EV station.</h1>
+              <small className="customerapp">
+                <ul className="customerapps">
+                  <li>create account</li>
+                  <li>Gps Access</li>
+                  <li>find Ev or Fuel Stations</li>
+                  <li> Reserve Queue  remotely  </li>
+                  <li> Pay for stations digitally </li>
+                  <li> track queue</li>
+                  <li> Notofications Avilabe , turn now </li>
+                </ul>
+              </small>
+            </div>
+
+            <div className="home-cta-actions">
+             <img src={qr} alt="" />
+             {/* <p>dowloand</p> */}
             </div>
           </div>
         </section>

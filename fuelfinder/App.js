@@ -3236,7 +3236,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "900",
     color: "#0F172A",
-    marginBottom: 10,
+    marginBottom: 14,
   },
   profileHeaderCard: {
     flexDirection: "row",
@@ -3246,8 +3246,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E2E8F0",
     borderRadius: 16,
-    padding: 14,
-    marginBottom: 14,
+    padding: 18,
+    marginTop: 10,
+    marginBottom: 16,
   },
   avatarCircle: {
     width: 48,

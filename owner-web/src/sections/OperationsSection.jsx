@@ -22,7 +22,7 @@ const steps = [
 
 export default function OperationsSection() {
   return (
-    <section className="section ops" id="operations">
+    <section className=" ops" id="operations">
       <SectionHeader
         eyebrow="Operations suite"
         title="A playbook for every shift, built into the console"
