@@ -164,7 +164,7 @@ export default function LandingPage() {
           <div className="home-hero-shell">
             <div className="home-hero-copy">
               <p className="home-kicker">FuelFinder Owner</p>
-              <h1 className="home-kicker">Know what is happening at every station before someone has to call you.</h1>
+              <h1>Know what is happening at every station before someone has to call you.</h1>
               <p className="home-lead">
                 FuelFinder Owner turns the noisy parts of station operations into one calm screen:
                 queue flow, fuel stock, payments, team access, and station details.
@@ -191,7 +191,7 @@ export default function LandingPage() {
               <article className="home-board">
                 <div className="home-board-head">
                   <div>
-                    <span className="home-board-tag"><h3 className="home-board-tag">Example station view</h3></span>
+                    <span className="home-board-tag">Example station view</span>
                     <h2 >Bole Road Station</h2>
                   </div>
                   {/* <p className="home-board-tag">Tuesday, 11:40 AM</p> */}
@@ -211,7 +211,7 @@ export default function LandingPage() {
                     <span>Fuel</span>
                     <strong>14,520 L</strong>
                     <div className="home-board-list">
-                      <psmall>Gasoline: 8,400 L</psmall>
+                      <small>Gasoline: 8,400 L</small>
                       <small>Diesel: 6,120 L</small>
                     </div>
                   </article>
@@ -438,7 +438,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="home-sections home-cta" id="contact">
+        <section className="home-section home-cta" id="customer-app">
           <div className="home-cta-card">
             <div>
               <span className="eyebrow"> download customer App here</span>
@@ -457,7 +457,7 @@ export default function LandingPage() {
             </div>
 
             <div className="home-cta-actions">
-             <img src={qr} alt="" />
+             <img src={qr} alt="FuelFinder customer app download QR code" />
              {/* <p>dowloand</p> */}
             </div>
           </div>
@@ -467,3 +467,4 @@ export default function LandingPage() {
     </div>
   );
 }
+
